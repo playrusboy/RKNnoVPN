@@ -35,7 +35,7 @@ func TestMethodNotFoundForLegacyConfigImportReturnsCanonicalHint(t *testing.T) {
 		t.Fatalf("unexpected requested method detail: %#v", details)
 	}
 	replacement, _ := details["replacement"].(string)
-	if !strings.Contains(replacement, "config-import") || !strings.Contains(replacement, "profile.apply") {
+	if !strings.Contains(replacement, "config-import") || !strings.Contains(replacement, "profile.importNodes") {
 		t.Fatalf("expected canonical replacement hint, got %#v", replacement)
 	}
 	methods, ok := details["supportedMethods"].([]string)

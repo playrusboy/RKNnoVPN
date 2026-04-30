@@ -256,6 +256,63 @@ com.proxy.owner 10123 0 /data/user/0/com.proxy.owner default 3003
 	}
 }
 
+func TestBuildChainedProxyProtectionEnvIncludesIPv6AndWildcardLocalUpstreams(t *testing.T) {
+	withProcNetTCPTestEnv(t, "", "")
+	cfg := config.DefaultConfig()
+	cfg.Profile.Nodes = jsonRawMessage(t, `{
+		"id":"ipv6-local",
+		"protocol":"SOCKS",
+		"server":"::1",
+		"port":10810,
+		"outbound":{"protocol":"socks","settings":{"address":"::1","port":10810}}
+	}`, `{
+		"id":"wildcard-local",
+		"protocol":"SOCKS",
+		"server":"0.0.0.0",
+		"port":10811,
+		"outbound":{"protocol":"socks","settings":{"address":"0.0.0.0","port":10811}}
+	}`)
+
+	ports, uids, rules := BuildChainedProxyProtectionEnv(cfg)
+	if ports != "10810 10811" {
+		t.Fatalf("IPv6/wildcard local upstream ports must be protected, got %q", ports)
+	}
+	if uids != "" || rules != "" {
+		t.Fatalf("unowned local upstreams should get DROP-only protection, got uids=%q rules=%q", uids, rules)
+	}
+}
+
+func TestBuildChainedProxyProtectionEnvSkipsReservedHelperPorts(t *testing.T) {
+	withProcNetTCPTestEnv(t, "", "")
+	cfg := config.DefaultConfig()
+	cfg.Proxy.APIPort = 19090
+	cfg.Profile.Inbounds = json.RawMessage(`{"socksPort":10808,"httpPort":10809}`)
+	cfg.Profile.Nodes = jsonRawMessage(t, `{
+		"id":"helper-socks",
+		"protocol":"SOCKS",
+		"server":"127.0.0.1",
+		"port":10808,
+		"outbound":{"protocol":"socks","settings":{"address":"127.0.0.1","port":10808}}
+	}`, `{
+		"id":"api-port",
+		"protocol":"SOCKS",
+		"server":"127.0.0.1",
+		"port":19090,
+		"outbound":{"protocol":"socks","settings":{"address":"127.0.0.1","port":19090}}
+	}`, `{
+		"id":"real-upstream",
+		"protocol":"SOCKS",
+		"server":"127.0.0.1",
+		"port":10810,
+		"outbound":{"protocol":"socks","settings":{"address":"127.0.0.1","port":10810}}
+	}`)
+
+	ports, _, _ := BuildChainedProxyProtectionEnv(cfg)
+	if ports != "10810" {
+		t.Fatalf("reserved helper/API ports must be skipped, got %q", ports)
+	}
+}
+
 func TestVerifyChainedProxyOwnerPackagesRejectsMismatchedListener(t *testing.T) {
 	withProcNetTCPTestEnv(t, `
   sl  local_address rem_address   st tx_queue tx_queue tr tm->when retrnsmt   uid  timeout inode
@@ -279,6 +336,32 @@ com.proxy.owner 10123 0 /data/user/0/com.proxy.owner default 3003
 	err := VerifyChainedProxyOwnerPackages(cfg)
 	if err == nil || !strings.Contains(err.Error(), "expected package com.proxy.owner") {
 		t.Fatalf("expected owner mismatch error, got %v", err)
+	}
+}
+
+func TestVerifyChainedProxyOwnerPackagesChecksIPv6LoopbackListener(t *testing.T) {
+	withProcNetTCPTestEnv(t, "", `
+  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000000000000000000001000000:2A38 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000 10999 0 111 1 00000000
+`)
+	withPackageResolverTestEnv(t, `
+com.proxy.owner 10123 0 /data/user/0/com.proxy.owner default 3003
+`, func(bool) (string, error) {
+		return "", fmt.Errorf("unexpected package command")
+	})
+	cfg := config.DefaultConfig()
+	cfg.Profile.Nodes = jsonRawMessage(t, `{
+		"id":"ipv6-local",
+		"protocol":"SOCKS",
+		"server":"::1",
+		"port":10808,
+		"ownerPackage":"com.proxy.owner",
+		"outbound":{"protocol":"socks","settings":{"address":"::1","port":10808}}
+	}`)
+
+	err := VerifyChainedProxyOwnerPackages(cfg)
+	if err == nil || !strings.Contains(err.Error(), "expected package com.proxy.owner") {
+		t.Fatalf("expected IPv6 owner mismatch error, got %v", err)
 	}
 }
 

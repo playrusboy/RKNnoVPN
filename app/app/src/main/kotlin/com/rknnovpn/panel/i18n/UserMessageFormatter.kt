@@ -266,9 +266,9 @@ class UserMessageFormatter @Inject constructor(
             "CORE_PROCESS_DEAD" -> get(R.string.health_issue_core_crashed)
             "TPROXY_PORT_DOWN" -> get(R.string.health_issue_tproxy_port_down)
             "CORE_LOG_OPEN_FAILED",
-            "CORE_SPAWN_FAILED",
             "CONFIG_RENDER_FAILED",
             "CONFIG_CHECK_FAILED" -> get(R.string.health_issue_readiness_failed)
+            "CORE_SPAWN_FAILED" -> formatCoreSpawnFailed(detail)
             "API_PORT_DOWN" -> get(R.string.health_issue_api_port_down)
             "RULES_NOT_APPLIED" -> get(R.string.health_issue_rules_not_applied)
             "NETSTACK_VERIFY_FAILED" -> get(R.string.health_issue_netstack_verify_failed)
@@ -293,6 +293,15 @@ class UserMessageFormatter @Inject constructor(
         }
         val stage = formatRuntimeStage(stageReport)
         return if (stage.isBlank()) base else "$base ($stage)"
+    }
+
+    private fun formatCoreSpawnFailed(detail: String?): String {
+        val reason = detail?.trim().orEmpty()
+        return if (reason.isNotBlank()) {
+            get(R.string.health_issue_core_spawn_failed_with_reason, reason)
+        } else {
+            get(R.string.health_issue_core_spawn_failed)
+        }
     }
 
     private fun formatRuntimeStage(report: RuntimeStageReport?): String {

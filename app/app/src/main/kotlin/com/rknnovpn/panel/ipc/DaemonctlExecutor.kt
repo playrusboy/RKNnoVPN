@@ -331,7 +331,7 @@ class DaemonctlExecutor @Inject constructor() {
     }
 
     private fun canonicalReplacement(method: String): String? = when (method) {
-        "config.import" -> "Use config-import for full daemon config import, or profile.apply for user profile changes."
+        "config.import" -> "Use config-import for full daemon config import, or profile.importNodes for Paste URI/node imports."
         "network.reset" -> "Use backend.reset."
         "node.test" -> "Use diagnostics.testNodes."
         "self.check" -> "Use self-check."

@@ -204,7 +204,7 @@ func (s *Server) processRequest(data []byte) *Response {
 func replacedMethodHint(method string) string {
 	switch method {
 	case "config.import":
-		return "Use config-import for full daemon config import, or profile.apply for user profile changes."
+		return "Use config-import for full daemon config import, or profile.importNodes for Paste URI/node imports."
 	case "network.reset":
 		return "Use backend.reset."
 	case "node.test":

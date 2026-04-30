@@ -49,6 +49,8 @@
     <string name="health_issue_proxy_dns_unavailable">Proxy DNS недоступен.</string>
     <string name="health_issue_outbound_url_failed">URL-проверка не прошла через выбранный proxy-маршрут.</string>
     <string name="health_issue_readiness_failed">Проверки готовности runtime не пройдены.</string>
+    <string name="health_issue_core_spawn_failed">Процесс sing-box не удалось запустить.</string>
+    <string name="health_issue_core_spawn_failed_with_reason">Процесс sing-box не удалось запустить: %1$s</string>
     <string name="health_issue_operational_degraded">Runtime запущен, но data-plane проверки degraded.</string>
     <string name="error_runtime_busy">Операция уже выполняется. Дождитесь завершения текущего действия.</string>
     <string name="error_reset_in_progress">Сброс ещё выполняется. Дождитесь завершения.</string>
@@ -253,7 +255,7 @@
     <string name="error_daemon_with_code">Ошибка демона %1$d: %2$s</string>
     <string name="error_method_not_found">Команда демона не поддерживается: %1$s</string>
     <string name="error_method_not_found_with_replacement">Команда демона не поддерживается: %1$s. %2$s</string>
-    <string name="error_method_not_found_hint_config_import">Используйте config-import для полного импорта конфигурации демона или profile.apply для изменения пользовательского профиля.</string>
+    <string name="error_method_not_found_hint_config_import">Используйте config-import для полного импорта конфигурации демона или profile.importNodes для импорта URI/узлов.</string>
     <string name="error_method_not_found_hint_network_reset">Используйте backend.reset.</string>
     <string name="error_method_not_found_hint_node_test">Используйте diagnostics.testNodes.</string>
     <string name="error_method_not_found_hint_self_check">Используйте self-check.</string>

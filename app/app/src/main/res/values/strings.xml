@@ -49,6 +49,8 @@
     <string name="health_issue_proxy_dns_unavailable">Proxy DNS is unavailable.</string>
     <string name="health_issue_outbound_url_failed">Outbound URL probe did not pass through the selected proxy route.</string>
     <string name="health_issue_readiness_failed">Runtime readiness gates failed.</string>
+    <string name="health_issue_core_spawn_failed">sing-box process could not be started.</string>
+    <string name="health_issue_core_spawn_failed_with_reason">sing-box process could not be started: %1$s</string>
     <string name="health_issue_operational_degraded">Runtime started, but data-plane checks are degraded.</string>
     <string name="error_runtime_busy">An operation is already running. Wait for the current action to finish.</string>
     <string name="error_reset_in_progress">Reset is still running. Wait for it to finish.</string>
@@ -252,7 +254,7 @@
     <string name="error_daemon_with_code">Daemon error %1$d: %2$s</string>
     <string name="error_method_not_found">Unsupported daemon command: %1$s</string>
     <string name="error_method_not_found_with_replacement">Unsupported daemon command: %1$s. %2$s</string>
-    <string name="error_method_not_found_hint_config_import">Use config-import for full daemon config import, or profile.apply for user profile changes.</string>
+    <string name="error_method_not_found_hint_config_import">Use config-import for full daemon config import, or profile.importNodes for Paste URI/node imports.</string>
     <string name="error_method_not_found_hint_network_reset">Use backend.reset.</string>
     <string name="error_method_not_found_hint_node_test">Use diagnostics.testNodes.</string>
     <string name="error_method_not_found_hint_self_check">Use self-check.</string>
