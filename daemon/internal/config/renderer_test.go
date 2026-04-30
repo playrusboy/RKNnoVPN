@@ -106,6 +106,93 @@ func TestRenderSingboxConfigAvoidsRemovedSingBox113Fields(t *testing.T) {
 	}
 }
 
+func TestRenderRouteUsesRuleActionsAndRemoteRuleSets(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = "example.com"
+	cfg.Node.Port = 443
+	cfg.Node.Protocol = "vless"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	cfg.Routing.BypassRussia = true
+	cfg.Routing.BypassChina = true
+	cfg.Routing.BlockAds = true
+	cfg.Routing.CustomDirect = []string{"direct.example", "203.0.113.0/24"}
+	cfg.Routing.CustomProxy = []string{"proxy.example", "198.51.100.0/24"}
+	cfg.Routing.AlwaysDirectApps = []string{"com.bank.app"}
+	cfg.Apps.AppGroups = map[string]string{
+		"com.chat.app": "Europe",
+	}
+	cfg.Profile.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"first-node",
+			"name":"First",
+			"group":"Europe",
+			"protocol":"SOCKS",
+			"server":"127.0.0.1",
+			"port":1081,
+			"source":{"type":"MANUAL"},
+			"outbound":{"protocol":"socks","settings":{"address":"127.0.0.1","port":1081,"version":"5"}}
+		}`),
+	}
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	route := rendered["route"].(map[string]any)
+	assertRouteRulesUseActions(t, route["rules"].([]any))
+
+	experimental := rendered["experimental"].(map[string]any)
+	cacheFile := experimental["cache_file"].(map[string]any)
+	if cacheFile["enabled"] != true {
+		t.Fatalf("remote rule sets require cache_file.enabled=true, got %#v", experimental)
+	}
+
+	sets := route["rule_set"].([]any)
+	byTag := map[string]map[string]any{}
+	for _, rawSet := range sets {
+		set := rawSet.(map[string]any)
+		byTag[set["tag"].(string)] = set
+	}
+	for _, tag := range []string{"geoip-ru", "geoip-cn", "geosite-cn", "geosite-category-ads-all"} {
+		set := byTag[tag]
+		if set == nil {
+			t.Fatalf("missing remote rule-set %s in %#v", tag, sets)
+		}
+		if set["type"] != "remote" || set["format"] != "binary" {
+			t.Fatalf("rule-set %s must be remote binary: %#v", tag, set)
+		}
+		if !strings.HasSuffix(set["url"].(string), "/"+tag+".srs") {
+			t.Fatalf("rule-set %s must point at its .srs artifact: %#v", tag, set)
+		}
+		if set["download_detour"] != "proxy" {
+			t.Fatalf("rule-set %s should download through proxy: %#v", tag, set)
+		}
+	}
+	if byTag["geosite-ru"] != nil {
+		t.Fatalf("geosite-ru is not a canonical SagerNet rule-set and must not be rendered: %#v", sets)
+	}
+}
+
+func assertRouteRulesUseActions(t *testing.T, rules []any) {
+	t.Helper()
+	for _, rawRule := range rules {
+		rule := rawRule.(map[string]any)
+		if _, hasOutbound := rule["outbound"]; hasOutbound {
+			if rule["action"] != "route" {
+				t.Fatalf("route rule with outbound must use action=route: %#v", rule)
+			}
+		}
+		if nested, ok := rule["rules"].([]any); ok {
+			assertRouteRulesUseActions(t, nested)
+		}
+	}
+}
+
 func TestRenderOmitsClashAPIByDefault(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = "example.com"

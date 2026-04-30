@@ -33,9 +33,7 @@
     "custom_direct": [],
     "custom_proxy": [],
     "custom_block": [],
-    "always_direct_apps": [],
-    "geoip_path": "/data/adb/modules/rknnovpn/data/geoip.db",
-    "geosite_path": "/data/adb/modules/rknnovpn/data/geosite.db"
+    "always_direct_apps": []
   },
   "apps": {
     "mode": "whitelist",

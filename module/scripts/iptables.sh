@@ -26,6 +26,7 @@ fi
 
 CHAIN_PREFIX="RKNNOVPN"
 CHAIN_OUT="${CHAIN_PREFIX}_OUT"
+CHAIN_IN="${CHAIN_PREFIX}_IN"
 CHAIN_PRE="${CHAIN_PREFIX}_PRE"
 CHAIN_APP="${CHAIN_PREFIX}_APP"
 CHAIN_BYPASS="${CHAIN_PREFIX}_BYPASS"
@@ -391,11 +392,14 @@ flush_chains() {
 
     while ${ipt} ${IPT_WAIT} -t mangle -D OUTPUT -j ${CHAIN_OUT} 2>/dev/null; do :; done
     while ${ipt} ${IPT_WAIT} -t mangle -D PREROUTING -j ${CHAIN_PRE} 2>/dev/null; do :; done
+    while ${ipt} ${IPT_WAIT} -t filter -D INPUT -j ${CHAIN_IN} 2>/dev/null; do :; done
 
     for chain in ${CHAIN_OUT} ${CHAIN_PRE} ${CHAIN_APP} ${CHAIN_BYPASS} ${CHAIN_DIVERT}; do
         ${ipt} ${IPT_WAIT} -t mangle -F ${chain} 2>/dev/null || true
         ${ipt} ${IPT_WAIT} -t mangle -X ${chain} 2>/dev/null || true
     done
+    ${ipt} ${IPT_WAIT} -t filter -F ${CHAIN_IN} 2>/dev/null || true
+    ${ipt} ${IPT_WAIT} -t filter -X ${CHAIN_IN} 2>/dev/null || true
 
     while ${ipt} ${IPT_WAIT} -t nat -D OUTPUT -j ${CHAIN_DNS} 2>/dev/null; do :; done
     ${ipt} ${IPT_WAIT} -t nat -F ${CHAIN_DNS} 2>/dev/null || true
@@ -536,6 +540,10 @@ do_status() {
         log_error "missing IPv4 PREROUTING hook for ${CHAIN_PRE}"
         missing=1
     fi
+    if ! iptables ${IPT_WAIT} -t filter -C INPUT -j "${CHAIN_IN}" >/dev/null 2>&1; then
+        log_error "missing IPv4 INPUT hook for ${CHAIN_IN}"
+        missing=1
+    fi
     if ! check_local_listener_protection iptables; then
         missing=1
     fi
@@ -558,6 +566,10 @@ do_status() {
         fi
         if ! ip6tables ${IPT_WAIT} -t mangle -C PREROUTING -j "${CHAIN_PRE}" >/dev/null 2>&1; then
             log_error "missing IPv6 PREROUTING hook for ${CHAIN_PRE}"
+            missing=1
+        fi
+        if ! ip6tables ${IPT_WAIT} -t filter -C INPUT -j "${CHAIN_IN}" >/dev/null 2>&1; then
+            log_error "missing IPv6 INPUT hook for ${CHAIN_IN}"
             missing=1
         fi
         if ! check_local_listener_protection ip6tables; then

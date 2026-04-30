@@ -17,24 +17,40 @@ api_port_enabled() {
 emit_api_port_protection() {
     ps_emit_chain="$1"
     if api_port_enabled; then
-        echo "-A ${ps_emit_chain} -p tcp --dport ${API_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
-        echo "-A ${ps_emit_chain} -p tcp --dport ${API_PORT} -j RETURN"
+        echo "-A ${ps_emit_chain} -o lo -p tcp --dport ${API_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
+        echo "-A ${ps_emit_chain} -o lo -p tcp --dport ${API_PORT} -j RETURN"
     fi
 }
 
 emit_http_port_protection() {
     ps_emit_chain="$1"
     if http_port_enabled; then
-        echo "-A ${ps_emit_chain} -p tcp --dport ${HTTP_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
-        echo "-A ${ps_emit_chain} -p tcp --dport ${HTTP_PORT} -j RETURN"
+        echo "-A ${ps_emit_chain} -o lo -p tcp --dport ${HTTP_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
+        echo "-A ${ps_emit_chain} -o lo -p tcp --dport ${HTTP_PORT} -j RETURN"
     fi
 }
 
 emit_socks_port_protection() {
     ps_emit_chain="$1"
     if socks_port_enabled; then
-        echo "-A ${ps_emit_chain} -p tcp --dport ${SOCKS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
-        echo "-A ${ps_emit_chain} -p tcp --dport ${SOCKS_PORT} -j RETURN"
+        echo "-A ${ps_emit_chain} -o lo -p tcp --dport ${SOCKS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
+        echo "-A ${ps_emit_chain} -o lo -p tcp --dport ${SOCKS_PORT} -j RETURN"
+    fi
+}
+
+emit_input_tcp_drop_if_enabled() {
+    ps_emit_chain="$1"
+    ps_emit_port="$2"
+    if [ -n "${ps_emit_port}" ] && [ "${ps_emit_port}" -gt 0 ] 2>/dev/null; then
+        echo "-A ${ps_emit_chain} ! -i lo -p tcp --dport ${ps_emit_port} -j DROP"
+    fi
+}
+
+emit_input_udp_drop_if_enabled() {
+    ps_emit_chain="$1"
+    ps_emit_port="$2"
+    if [ -n "${ps_emit_port}" ] && [ "${ps_emit_port}" -gt 0 ] 2>/dev/null; then
+        echo "-A ${ps_emit_chain} ! -i lo -p udp --dport ${ps_emit_port} -j DROP"
     fi
 }
 
@@ -77,7 +93,7 @@ emit_chain_proxy_port_protection() {
                     ''|*[!0-9]*) continue ;;
                 esac
                 if [ "${ps_rule_port}" = "${ps_proxy_port}" ]; then
-                    echo "-A ${ps_emit_chain} -p tcp --dport ${ps_proxy_port} -m owner --uid-owner ${ps_rule_uid} -j RETURN"
+                    echo "-A ${ps_emit_chain} -o lo -p tcp --dport ${ps_proxy_port} -m owner --uid-owner ${ps_rule_uid} -j RETURN"
                 fi
             done
         else
@@ -85,11 +101,11 @@ emit_chain_proxy_port_protection() {
                 case "${ps_proxy_uid}" in
                     ''|*[!0-9]*) continue ;;
                 esac
-                echo "-A ${ps_emit_chain} -p tcp --dport ${ps_proxy_port} -m owner --uid-owner ${ps_proxy_uid} -j RETURN"
+                echo "-A ${ps_emit_chain} -o lo -p tcp --dport ${ps_proxy_port} -m owner --uid-owner ${ps_proxy_uid} -j RETURN"
             done
         fi
-        echo "-A ${ps_emit_chain} -p tcp --dport ${ps_proxy_port} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
-        echo "-A ${ps_emit_chain} -p tcp --dport ${ps_proxy_port} -j RETURN"
+        echo "-A ${ps_emit_chain} -o lo -p tcp --dport ${ps_proxy_port} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
+        echo "-A ${ps_emit_chain} -o lo -p tcp --dport ${ps_proxy_port} -j RETURN"
     done
 }
 
@@ -99,8 +115,21 @@ check_listener_protection() {
     ps_check_port="$3"
     ps_check_label="$4"
 
-    if ! ${ps_check_ipt} ${IPT_WAIT} -t mangle -C "${CHAIN_OUT}" -p "${ps_check_proto}" --dport "${ps_check_port}" -m owner ! --uid-owner 0 ! --gid-owner "${CORE_GID}" -j DROP >/dev/null 2>&1; then
+    if ! ${ps_check_ipt} ${IPT_WAIT} -t mangle -C "${CHAIN_OUT}" -o lo -p "${ps_check_proto}" --dport "${ps_check_port}" -m owner ! --uid-owner 0 ! --gid-owner "${CORE_GID}" -j DROP >/dev/null 2>&1; then
         log_error "missing ${ps_check_ipt} ${ps_check_label} ${ps_check_proto}/${ps_check_port} local listener protection"
+        return 1
+    fi
+    return 0
+}
+
+check_input_protection() {
+    ps_check_ipt="$1"
+    ps_check_proto="$2"
+    ps_check_port="$3"
+    ps_check_label="$4"
+
+    if ! ${ps_check_ipt} ${IPT_WAIT} -t filter -C "${CHAIN_IN}" ! -i lo -p "${ps_check_proto}" --dport "${ps_check_port}" -j DROP >/dev/null 2>&1; then
+        log_error "missing ${ps_check_ipt} ${ps_check_label} ${ps_check_proto}/${ps_check_port} non-loopback INPUT protection"
         return 1
     fi
     return 0
@@ -114,14 +143,21 @@ check_local_listener_protection() {
     check_listener_protection "${ps_check_ipt}" udp "${TPROXY_PORT}" "TPROXY" || ps_listener_missing=1
     check_listener_protection "${ps_check_ipt}" tcp "${DNS_PORT}" "DNS" || ps_listener_missing=1
     check_listener_protection "${ps_check_ipt}" udp "${DNS_PORT}" "DNS" || ps_listener_missing=1
+    check_input_protection "${ps_check_ipt}" tcp "${TPROXY_PORT}" "TPROXY" || ps_listener_missing=1
+    check_input_protection "${ps_check_ipt}" udp "${TPROXY_PORT}" "TPROXY" || ps_listener_missing=1
+    check_input_protection "${ps_check_ipt}" tcp "${DNS_PORT}" "DNS" || ps_listener_missing=1
+    check_input_protection "${ps_check_ipt}" udp "${DNS_PORT}" "DNS" || ps_listener_missing=1
     if api_port_enabled; then
         check_listener_protection "${ps_check_ipt}" tcp "${API_PORT}" "API" || ps_listener_missing=1
+        check_input_protection "${ps_check_ipt}" tcp "${API_PORT}" "API" || ps_listener_missing=1
     fi
     if socks_port_enabled; then
         check_listener_protection "${ps_check_ipt}" tcp "${SOCKS_PORT}" "SOCKS" || ps_listener_missing=1
+        check_input_protection "${ps_check_ipt}" tcp "${SOCKS_PORT}" "SOCKS" || ps_listener_missing=1
     fi
     if http_port_enabled; then
         check_listener_protection "${ps_check_ipt}" tcp "${HTTP_PORT}" "HTTP" || ps_listener_missing=1
+        check_input_protection "${ps_check_ipt}" tcp "${HTTP_PORT}" "HTTP" || ps_listener_missing=1
     fi
     if [ -n "${CHAIN_PROXY_PORTS}" ]; then
         for ps_proxy_port in ${CHAIN_PROXY_PORTS}; do
@@ -132,6 +168,7 @@ check_local_listener_protection() {
                 continue
             fi
             check_listener_protection "${ps_check_ipt}" tcp "${ps_proxy_port}" "CHAIN_PROXY" || ps_listener_missing=1
+            check_input_protection "${ps_check_ipt}" tcp "${ps_proxy_port}" "CHAIN_PROXY" || ps_listener_missing=1
         done
     fi
     return "${ps_listener_missing}"
@@ -171,14 +208,14 @@ fi)
 -A ${CHAIN_OUT} -m owner --gid-owner ${CORE_GID} -j RETURN
 -A ${CHAIN_OUT} -m mark --mark 0xff -j RETURN
 -A ${CHAIN_OUT} -p icmp -j RETURN
--A ${CHAIN_OUT} -p tcp --dport ${TPROXY_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
--A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
--A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
--A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
--A ${CHAIN_OUT} -p tcp --dport ${TPROXY_PORT} -j RETURN
--A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -j RETURN
--A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -j RETURN
--A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -j RETURN
+-A ${CHAIN_OUT} -o lo -p tcp --dport ${TPROXY_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -o lo -p udp --dport ${TPROXY_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -o lo -p tcp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -o lo -p udp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -o lo -p tcp --dport ${TPROXY_PORT} -j RETURN
+-A ${CHAIN_OUT} -o lo -p udp --dport ${TPROXY_PORT} -j RETURN
+-A ${CHAIN_OUT} -o lo -p tcp --dport ${DNS_PORT} -j RETURN
+-A ${CHAIN_OUT} -o lo -p udp --dport ${DNS_PORT} -j RETURN
 $(emit_api_port_protection "${CHAIN_OUT}")
 $(emit_socks_port_protection "${CHAIN_OUT}")
 $(emit_http_port_protection "${CHAIN_OUT}")
@@ -199,6 +236,33 @@ done)
 
 -A OUTPUT -j ${CHAIN_OUT}
 -A PREROUTING -j ${CHAIN_PRE}
+
+COMMIT
+
+*filter
+
+:${CHAIN_IN} - [0:0]
+
+$(emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${TPROXY_PORT}")
+$(emit_input_udp_drop_if_enabled "${CHAIN_IN}" "${TPROXY_PORT}")
+$(emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${DNS_PORT}")
+$(emit_input_udp_drop_if_enabled "${CHAIN_IN}" "${DNS_PORT}")
+$(emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${API_PORT}")
+$(emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${SOCKS_PORT}")
+$(emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${HTTP_PORT}")
+$(if [ -n "${CHAIN_PROXY_PORTS}" ]; then
+    for ps_proxy_port in ${CHAIN_PROXY_PORTS}; do
+        case "${ps_proxy_port}" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        if [ "${ps_proxy_port}" -le 0 ] 2>/dev/null || chain_proxy_port_reserved "${ps_proxy_port}"; then
+            continue
+        fi
+        emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${ps_proxy_port}"
+    done
+fi)
+
+-A INPUT -j ${CHAIN_IN}
 
 COMMIT
 MANGLE_V4_EOF
@@ -238,14 +302,14 @@ fi)
 -A ${CHAIN_OUT} -m owner --gid-owner ${CORE_GID} -j RETURN
 -A ${CHAIN_OUT} -m mark --mark 0xff -j RETURN
 -A ${CHAIN_OUT} -p icmpv6 -j RETURN
--A ${CHAIN_OUT} -p tcp --dport ${TPROXY_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
--A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
--A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
--A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
--A ${CHAIN_OUT} -p tcp --dport ${TPROXY_PORT} -j RETURN
--A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -j RETURN
--A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -j RETURN
--A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -j RETURN
+-A ${CHAIN_OUT} -o lo -p tcp --dport ${TPROXY_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -o lo -p udp --dport ${TPROXY_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -o lo -p tcp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -o lo -p udp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -o lo -p tcp --dport ${TPROXY_PORT} -j RETURN
+-A ${CHAIN_OUT} -o lo -p udp --dport ${TPROXY_PORT} -j RETURN
+-A ${CHAIN_OUT} -o lo -p tcp --dport ${DNS_PORT} -j RETURN
+-A ${CHAIN_OUT} -o lo -p udp --dport ${DNS_PORT} -j RETURN
 $(emit_api_port_protection "${CHAIN_OUT}")
 $(emit_socks_port_protection "${CHAIN_OUT}")
 $(emit_http_port_protection "${CHAIN_OUT}")
@@ -266,6 +330,33 @@ done)
 
 -A OUTPUT -j ${CHAIN_OUT}
 -A PREROUTING -j ${CHAIN_PRE}
+
+COMMIT
+
+*filter
+
+:${CHAIN_IN} - [0:0]
+
+$(emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${TPROXY_PORT}")
+$(emit_input_udp_drop_if_enabled "${CHAIN_IN}" "${TPROXY_PORT}")
+$(emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${DNS_PORT}")
+$(emit_input_udp_drop_if_enabled "${CHAIN_IN}" "${DNS_PORT}")
+$(emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${API_PORT}")
+$(emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${SOCKS_PORT}")
+$(emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${HTTP_PORT}")
+$(if [ -n "${CHAIN_PROXY_PORTS}" ]; then
+    for ps_proxy_port in ${CHAIN_PROXY_PORTS}; do
+        case "${ps_proxy_port}" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        if [ "${ps_proxy_port}" -le 0 ] 2>/dev/null || chain_proxy_port_reserved "${ps_proxy_port}"; then
+            continue
+        fi
+        emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${ps_proxy_port}"
+    done
+fi)
+
+-A INPUT -j ${CHAIN_IN}
 
 COMMIT
 MANGLE_V6_EOF

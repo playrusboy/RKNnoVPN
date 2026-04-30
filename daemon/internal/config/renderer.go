@@ -28,6 +28,7 @@ type storedProfileNode struct {
 // RenderSingboxConfig generates a complete sing-box configuration JSON
 // from the canonical Config and a resolved NodeProfile.
 func RenderSingboxConfig(cfg *Config, profile *NodeProfile) ([]byte, error) {
+	route := buildRoute(cfg)
 	sbCfg := map[string]interface{}{
 		"log": map[string]interface{}{
 			"level":     "info",
@@ -35,14 +36,18 @@ func RenderSingboxConfig(cfg *Config, profile *NodeProfile) ([]byte, error) {
 		},
 		"dns":      buildDNS(cfg),
 		"inbounds": buildInbounds(cfg),
-		"route":    buildRoute(cfg),
+		"route":    route,
+	}
+	if _, ok := route["rule_set"]; ok {
+		ensureExperimental(sbCfg)["cache_file"] = map[string]interface{}{
+			"enabled": true,
+		}
 	}
 	if cfg.Proxy.APIPort > 0 {
-		sbCfg["experimental"] = map[string]interface{}{
-			"clash_api": map[string]interface{}{
-				"external_controller": fmt.Sprintf("127.0.0.1:%d", cfg.Proxy.APIPort),
-				"secret":              "",
-			},
+		experimental := ensureExperimental(sbCfg)
+		experimental["clash_api"] = map[string]interface{}{
+			"external_controller": fmt.Sprintf("127.0.0.1:%d", cfg.Proxy.APIPort),
+			"secret":              "",
 		}
 	}
 	outbounds, err := buildOutbounds(cfg, profile)
@@ -73,7 +78,7 @@ func buildDNS(cfg *Config) map[string]interface{} {
 
 	if cfg.Routing.BlockAds {
 		rules = append(rules, map[string]interface{}{
-			"rule_set": []string{"geosite-ads"},
+			"rule_set": []string{"geosite-category-ads-all"},
 			"action":   "predefined",
 			"rcode":    "NOERROR",
 		})
@@ -81,14 +86,16 @@ func buildDNS(cfg *Config) map[string]interface{} {
 
 	if cfg.Routing.BypassRussia {
 		rules = append(rules, map[string]interface{}{
-			"rule_set": []string{"geosite-ru"},
-			"server":   "direct-dns",
+			"domain_suffix": russianDomainSuffixes(),
+			"action":        "route",
+			"server":        "direct-dns",
 		})
 	}
 
 	if cfg.Routing.BypassChina {
 		rules = append(rules, map[string]interface{}{
 			"rule_set": []string{"geosite-cn"},
+			"action":   "route",
 			"server":   "direct-dns",
 		})
 	}
@@ -100,6 +107,7 @@ func buildDNS(cfg *Config) map[string]interface{} {
 	if len(customDirectDomains) > 0 {
 		rules = append(rules, map[string]interface{}{
 			"domain": customDirectDomains,
+			"action": "route",
 			"server": "direct-dns",
 		})
 	}
@@ -1371,6 +1379,7 @@ func buildRoute(cfg *Config) map[string]interface{} {
 	if cfg.Routing.BypassLAN {
 		rules = append(rules, map[string]interface{}{
 			"ip_is_private": true,
+			"action":        "route",
 			"outbound":      "direct",
 		})
 	}
@@ -1378,22 +1387,30 @@ func buildRoute(cfg *Config) map[string]interface{} {
 	// Block ads via geosite rule set.
 	if cfg.Routing.BlockAds {
 		rules = append(rules, map[string]interface{}{
-			"rule_set": []string{"geosite-ads"},
+			"rule_set": []string{"geosite-category-ads-all"},
 			"action":   "reject",
 		})
 	}
 
-	// Bypass Russia via geoip/geosite rule sets.
+	// Bypass Russia via GeoIP plus country-code domains. SagerNet does not
+	// publish a canonical geosite-ru rule-set, so keep domains explicit.
 	if cfg.Routing.BypassRussia {
 		rules = append(rules, map[string]interface{}{
-			"rule_set": []string{"geoip-ru", "geosite-ru"},
+			"type":     "logical",
+			"mode":     "or",
+			"action":   "route",
 			"outbound": "direct",
+			"rules": []map[string]interface{}{
+				{"rule_set": []string{"geoip-ru"}},
+				{"domain_suffix": russianDomainSuffixes()},
+			},
 		})
 	}
 
 	if cfg.Routing.BypassChina {
 		rules = append(rules, map[string]interface{}{
 			"rule_set": []string{"geoip-cn", "geosite-cn"},
+			"action":   "route",
 			"outbound": "direct",
 		})
 	}
@@ -1406,12 +1423,14 @@ func buildRoute(cfg *Config) map[string]interface{} {
 	if len(customDirectDomains) > 0 {
 		rules = append(rules, map[string]interface{}{
 			"domain":   customDirectDomains,
+			"action":   "route",
 			"outbound": "direct",
 		})
 	}
 	if len(customDirectCIDRs) > 0 {
 		rules = append(rules, map[string]interface{}{
 			"ip_cidr":  customDirectCIDRs,
+			"action":   "route",
 			"outbound": "direct",
 		})
 	}
@@ -1420,12 +1439,14 @@ func buildRoute(cfg *Config) map[string]interface{} {
 	if len(customProxyDomains) > 0 {
 		rules = append(rules, map[string]interface{}{
 			"domain":   customProxyDomains,
+			"action":   "route",
 			"outbound": "proxy",
 		})
 	}
 	if len(customProxyCIDRs) > 0 {
 		rules = append(rules, map[string]interface{}{
 			"ip_cidr":  customProxyCIDRs,
+			"action":   "route",
 			"outbound": "proxy",
 		})
 	}
@@ -1447,6 +1468,7 @@ func buildRoute(cfg *Config) map[string]interface{} {
 	if len(cfg.Routing.AlwaysDirectApps) > 0 {
 		rules = append(rules, map[string]interface{}{
 			"package_name": cfg.Routing.AlwaysDirectApps,
+			"action":       "route",
 			"outbound":     "direct",
 		})
 	}
@@ -1520,6 +1542,7 @@ func buildAppGroupRouteRules(cfg *Config) []map[string]interface{} {
 		sort.Strings(packages)
 		rules = append(rules, map[string]interface{}{
 			"package_name": packages,
+			"action":       "route",
 			"outbound":     outbound,
 		})
 	}
@@ -1557,53 +1580,45 @@ func buildRuleSets(cfg *Config) []map[string]interface{} {
 	var sets []map[string]interface{}
 
 	if cfg.Routing.BypassRussia {
-		if cfg.Routing.GeoIPPath != "" {
-			sets = append(sets, map[string]interface{}{
-				"type":   "local",
-				"tag":    "geoip-ru",
-				"format": "binary",
-				"path":   cfg.Routing.GeoIPPath,
-			})
-		}
-		if cfg.Routing.GeoSitePath != "" {
-			sets = append(sets, map[string]interface{}{
-				"type":   "local",
-				"tag":    "geosite-ru",
-				"format": "binary",
-				"path":   cfg.Routing.GeoSitePath,
-			})
-		}
+		sets = append(sets, remoteRuleSet("geoip-ru", "SagerNet/sing-geoip", "proxy"))
 	}
 
 	if cfg.Routing.BypassChina {
-		if cfg.Routing.GeoIPPath != "" {
-			sets = append(sets, map[string]interface{}{
-				"type":   "local",
-				"tag":    "geoip-cn",
-				"format": "binary",
-				"path":   cfg.Routing.GeoIPPath,
-			})
-		}
-		if cfg.Routing.GeoSitePath != "" {
-			sets = append(sets, map[string]interface{}{
-				"type":   "local",
-				"tag":    "geosite-cn",
-				"format": "binary",
-				"path":   cfg.Routing.GeoSitePath,
-			})
-		}
+		sets = append(sets,
+			remoteRuleSet("geoip-cn", "SagerNet/sing-geoip", "proxy"),
+			remoteRuleSet("geosite-cn", "SagerNet/sing-geosite", "proxy"),
+		)
 	}
 
-	if cfg.Routing.BlockAds && cfg.Routing.GeoSitePath != "" {
-		sets = append(sets, map[string]interface{}{
-			"type":   "local",
-			"tag":    "geosite-ads",
-			"format": "binary",
-			"path":   cfg.Routing.GeoSitePath,
-		})
+	if cfg.Routing.BlockAds {
+		sets = append(sets, remoteRuleSet("geosite-category-ads-all", "SagerNet/sing-geosite", "proxy"))
 	}
 
 	return sets
+}
+
+func remoteRuleSet(tag string, repository string, downloadDetour string) map[string]interface{} {
+	return map[string]interface{}{
+		"type":            "remote",
+		"tag":             tag,
+		"format":          "binary",
+		"url":             fmt.Sprintf("https://raw.githubusercontent.com/%s/rule-set/%s.srs", repository, tag),
+		"download_detour": downloadDetour,
+		"update_interval": "24h",
+	}
+}
+
+func russianDomainSuffixes() []string {
+	return []string{".ru", ".su", ".xn--p1ai"}
+}
+
+func ensureExperimental(sbCfg map[string]interface{}) map[string]interface{} {
+	if existing, ok := sbCfg["experimental"].(map[string]interface{}); ok {
+		return existing
+	}
+	experimental := map[string]interface{}{}
+	sbCfg["experimental"] = experimental
+	return experimental
 }
 
 func splitRuleInputs(values []string) (domains []string, cidrs []string) {

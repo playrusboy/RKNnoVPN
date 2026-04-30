@@ -163,8 +163,6 @@ type RoutingConfig struct {
 	CustomProxy      []string `json:"custom_proxy"`  // domains/IPs to force through proxy
 	CustomBlock      []string `json:"custom_block"`  // domains/IPs to block
 	AlwaysDirectApps []string `json:"always_direct_apps,omitempty"`
-	GeoIPPath        string   `json:"geoip_path"`
-	GeoSitePath      string   `json:"geosite_path"`
 }
 
 // AppsConfig controls per-app routing (Android split tunnel).
@@ -286,10 +284,8 @@ func DefaultConfig() *Config {
 			FallbackPolicy: "OFFER_RESET",
 		},
 		Routing: RoutingConfig{
-			Mode:        "whitelist",
-			BypassLAN:   true,
-			GeoIPPath:   "/data/adb/modules/rknnovpn/data/geoip.db",
-			GeoSitePath: "/data/adb/modules/rknnovpn/data/geosite.db",
+			Mode:      "whitelist",
+			BypassLAN: true,
 		},
 		Apps: AppsConfig{
 			Mode: "whitelist",
@@ -672,13 +668,6 @@ func (c *Config) Validate() error {
 	if c.Rescue.MaxAttempts < 1 {
 		return fmt.Errorf("rescue.max_attempts must be >= 1, got %d", c.Rescue.MaxAttempts)
 	}
-	if (c.Routing.BypassChina || c.Routing.BypassRussia) && (c.Routing.GeoIPPath == "" || c.Routing.GeoSitePath == "") {
-		return fmt.Errorf("routing geo bypass requires both geoip_path and geosite_path to be set")
-	}
-	if c.Routing.BlockAds && c.Routing.GeoSitePath == "" {
-		return fmt.Errorf("routing block_ads requires geosite_path to be set")
-	}
-
 	return nil
 }
 
