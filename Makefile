@@ -5,7 +5,7 @@ SINGBOX_VERSION ?= stable
 SINGBOX_RESOLVED_VERSION := $(shell if [ "$(SINGBOX_VERSION)" = "stable" ]; then gh release view --repo SagerNet/sing-box --json tagName --jq .tagName 2>/dev/null | sed 's/^v//'; elif [ "$(SINGBOX_VERSION)" = "latest" ] || [ "$(SINGBOX_VERSION)" = "alpha" ] || [ "$(SINGBOX_VERSION)" = "prerelease" ]; then gh release list --repo SagerNet/sing-box --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null | sed 's/^v//'; else echo "$(SINGBOX_VERSION)" | sed 's/^v//'; fi)
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo "dev")
 VERSION_SEMVER := $(shell printf '%s\n' "$(VERSION)" | sed -nE 's/^v([0-9]+)\.([0-9]+)\.([0-9]+)(-([0-9]+)-g[0-9a-fA-F]+)?$$/\1 \2 \3 \5/p')
-VERSION_CODE := $(shell set -- $(VERSION_SEMVER); if [ "$$#" -ge 3 ]; then commits=$${4:-0}; echo $$(( $$1 * 1000000 + $$2 * 10000 + $$3 * 100 + $$commits )); else echo 0; fi)
+VERSION_CODE := $(shell set -- $(VERSION_SEMVER); if [ "$$#" -ge 3 ]; then commits=$${4:-0}; echo $$(( $$1 * 1000 + $$2 * 100 + $$3 + $$commits )); else echo 0; fi)
 OUT_DIR := out
 MODULE_DIR := module
 LAB_APK ?= $(OUT_DIR)/rknnovpn-$(VERSION)-panel.apk
