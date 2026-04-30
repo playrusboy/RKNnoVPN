@@ -100,3 +100,21 @@ func waitForDaemonRuntimeOperationDone(t *testing.T, orchestrator *runtimev2.Orc
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func waitForDaemonRuntimeOperationPublished(t *testing.T, dataDir string, kind runtimev2.OperationKind) runtimev2.RuntimeStateFile {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		state, err := runtimev2.ReadRuntimeState(dataDir)
+		if err == nil && state.ActiveOperation == nil && state.LastOperation != nil && state.LastOperation.Kind == kind {
+			return *state
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				t.Fatalf("timed out waiting for %s runtime_state publish: %v", kind, err)
+			}
+			t.Fatalf("timed out waiting for %s runtime_state publish, state=%#v", kind, state)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

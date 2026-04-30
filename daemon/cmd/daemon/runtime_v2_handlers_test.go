@@ -141,6 +141,7 @@ func TestBackendStartRecordsMissingNodeFailure(t *testing.T) {
 	if !strings.Contains(status.LastOperation.ErrorMessage, "no node configured") {
 		t.Fatalf("expected missing node error in operation result, got %#v", status.LastOperation)
 	}
+	waitForDaemonRuntimeOperationPublished(t, d.dataDir, runtimev2.OperationStart)
 }
 
 func TestBackendApplyDesiredStateCompletesDefaultsAndReturnsStatus(t *testing.T) {
@@ -176,7 +177,11 @@ func TestBackendApplyDesiredStateBusyReturnsRuntimeBusy(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	defer close(release)
+	defer func() {
+		close(release)
+		waitForDaemonRuntimeOperationDone(t, d.runtimeV2, runtimev2.OperationReset)
+		waitForDaemonRuntimeOperationPublished(t, d.dataDir, runtimev2.OperationReset)
+	}()
 
 	params := json.RawMessage(`{}`)
 	_, rpcErr := d.runtimeControlHandlers().BackendApplyDesiredState(&params)
@@ -210,6 +215,7 @@ func TestBackendRestartReturnsRuntimeStatus(t *testing.T) {
 		t.Fatalf("backend restart response should expose restart operation, got %#v", status)
 	}
 	waitForDaemonRuntimeOperationDone(t, d.runtimeV2, runtimev2.OperationRestart)
+	waitForDaemonRuntimeOperationPublished(t, d.dataDir, runtimev2.OperationRestart)
 }
 
 func TestConfigImportReturnsRuntimeStatus(t *testing.T) {

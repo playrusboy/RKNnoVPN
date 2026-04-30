@@ -9,14 +9,14 @@ fail() {
   exit 1
 }
 
-if rg -n 'rm -f .*reset\.lock|reset\.lock.*rm -f|RESET_LOCK.*rm -f' module/post-fs-data.sh module/service.sh >/tmp/reset-lock-forbidden.$$ 2>/dev/null; then
+if grep -En 'rm -f .*reset\.lock|reset\.lock.*rm -f|RESET_LOCK.*rm -f' module/post-fs-data.sh module/service.sh >/tmp/reset-lock-forbidden.$$ 2>/dev/null; then
   cat /tmp/reset-lock-forbidden.$$ >&2
   rm -f /tmp/reset-lock-forbidden.$$
   fail "post-fs-data.sh/service.sh must not remove reset.lock directly; use rescue_reset.sh boot-clean/hard-reset"
 fi
 rm -f /tmp/reset-lock-forbidden.$$
 
-if rg -n 'rm -f .*run/(active|daemon\.pid|singbox\.pid|daemon\.sock)|run/(active|daemon\.pid|singbox\.pid|daemon\.sock).*rm -f' module/post-fs-data.sh >/tmp/runtime-marker-forbidden.$$ 2>/dev/null; then
+if grep -En 'rm -f .*run/(active|daemon\.pid|singbox\.pid|daemon\.sock)|run/(active|daemon\.pid|singbox\.pid|daemon\.sock).*rm -f' module/post-fs-data.sh >/tmp/runtime-marker-forbidden.$$ 2>/dev/null; then
   cat /tmp/runtime-marker-forbidden.$$ >&2
   rm -f /tmp/runtime-marker-forbidden.$$
   fail "post-fs-data.sh must leave runtime markers for service.sh boot cleanup"

@@ -65,10 +65,12 @@ done
 
 expected_zip="https://github.com/youtubediscord/RKNnoVPN/releases/download/${daemon_version}/rknnovpn-${daemon_version}-module.zip"
 expected_changelog="https://github.com/youtubediscord/RKNnoVPN/releases/tag/${daemon_version}"
-rg -q "\"zipUrl\"[[:space:]]*:[[:space:]]*\"${expected_zip}\"" update.json || fail "update.json zipUrl is not $expected_zip"
-rg -q "\"changelog\"[[:space:]]*:[[:space:]]*\"${expected_changelog}\"" update.json || fail "update.json changelog is not $expected_changelog"
+update_zip="$(sed -n 's/[[:space:]]*"zipUrl"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' update.json | head -n 1)"
+update_changelog="$(sed -n 's/[[:space:]]*"changelog"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' update.json | head -n 1)"
+[ "$update_zip" = "$expected_zip" ] || fail "update.json zipUrl is not $expected_zip"
+[ "$update_changelog" = "$expected_changelog" ] || fail "update.json changelog is not $expected_changelog"
 
-if rg -n "s/v//;s/\\\\?\\.//g|s/v//;s/\\.//g" .github/workflows Makefile >/tmp/release-manifest-old-code.$$ 2>/dev/null; then
+if grep -REn 's/v//;s/\\?\.//g|s/v//;s/\.//g' .github/workflows Makefile >/tmp/release-manifest-old-code.$$ 2>/dev/null; then
   cat /tmp/release-manifest-old-code.$$ >&2
   rm -f /tmp/release-manifest-old-code.$$
   fail "old dot-stripping versionCode formula is forbidden"
