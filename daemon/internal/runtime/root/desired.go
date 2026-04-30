@@ -77,7 +77,7 @@ func mapAppSelection(cfg *config.Config) runtimev2.AppSelection {
 func mapRoutingMode(cfg *config.Config) string {
 	switch cfg.Routing.Mode {
 	case "all":
-		if cfg.Apps.Mode == "whitelist" || cfg.Apps.Mode == "all" {
+		if cfg.Apps.Mode == "whitelist" {
 			return "PER_APP"
 		}
 		if cfg.Apps.Mode == "blacklist" {

@@ -343,6 +343,23 @@ class NodeListViewModel @Inject constructor(
      * shown as importable, because persistence goes through the same parser.
      */
     fun detectUris(text: String) {
+        val cleanText = text.trim()
+        if (LinkParser.isSubscriptionUrl(cleanText)) {
+            _uiState.update {
+                it.copy(
+                    showImportSheet = true,
+                    importSheetTab = ImportSheetTab.SUBSCRIPTION,
+                    importInitialText = cleanText,
+                    importCandidates = emptyList(),
+                    pendingSubscriptionPreview = null,
+                    errorMessage = null,
+                    statusMessage = null,
+                )
+            }
+            fetchSubscription(cleanText)
+            return
+        }
+
         val detectedUris = LinkParser.detectUris(text)
         if (detectedUris.isEmpty()) {
             _uiState.update {

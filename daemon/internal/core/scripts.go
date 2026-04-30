@@ -29,17 +29,51 @@ var SelfTestProtectedPackages = []string{
 var builtInAlwaysDirectExact = map[string]bool{
 	// Sensitive Russian apps that should never be routed through RKNnoVPN.
 	"ru.oneme.app":                   true, // MAX
+	"ru.yandex.searchplugin":         true,
+	"com.yandex.browser":             true,
+	"ru.yandex.browser":              true,
+	"ru.yandex.browser.lite":         true,
+	"ru.yandex.yandexmaps":           true,
+	"ru.yandex.maps":                 true,
+	"ru.yandex.music":                true,
+	"com.vkontakte.android":          true,
+	"com.vk.im":                      true,
+	"com.vk.mail":                    true,
+	"com.vk.video":                   true,
+	"com.vk.vkvideo":                 true,
+	"com.uma.musicvk":                true,
+	"ru.vk.store":                    true,
+	"ru.mail.mailapp":                true,
+	"ru.mail.cloud":                  true,
+	"ru.ok.android":                  true,
+	"ru.dublgis.dgismobile":          true,
+	"ru.dublgis.mobile":              true,
+	"ru.nspk.mirpay":                 true,
+	"com.programmisty.emiasapp":      true,
+	"com.allgoritm.youla":            true,
+	"com.edadeal.android":            true,
+	"ru.foodfox.client":              true,
+	"ru.sbcs.store":                  true,
 	"ru.vtb24.mobilebanking.android": true,
 	"com.avito.android":              true,
 	"ru.ozon.app.android":            true,
+	"com.ozon.bank.android":          true,
 	"com.wildberries.ru":             true,
+	"ru.kinopoisk":                   true,
+	"ru.kinopoisk.tv":                true,
+	"ru.megamarket.marketplace":      true,
+	"rtb.mobile.android":             true,
+	"ru.zen.android":                 true,
+	"com.lamoda.lite":                true,
+	"ru.filit.mvideo.b2c":            true,
+	"ru.dns.shop.android":            true,
+	"ru.sportmaster.app":             true,
+	"ru.perekrestok.app":             true,
+	"ru.pyaterochka.app.browser":     true,
+	"ru.tander.magnit":               true,
+	"ru.vkusvill":                    true,
 	"ru.beru.android":                true,
 	"ru.yandex.taxi":                 true,
-	"ru.yandex.yandexmaps":           true,
-	"ru.yandex.searchplugin":         true,
-	"ru.yandex.browser":              true,
-	"ru.yandex.browser.lite":         true,
-	"ru.yandex.music":                true,
 	"ru.yandex.disk":                 true,
 	"ru.yandex.mail":                 true,
 	"ru.yandex.market":               true,
@@ -56,6 +90,7 @@ var builtInAlwaysDirectExact = map[string]bool{
 	"ru.rosbank.android":             true,
 	"ru.psbank.online":               true,
 	"ru.mts.bank":                    true,
+	"ru.rostel":                      true,
 	"ru.gosuslugi.pos":               true,
 	"ru.fns.lkfl":                    true,
 	"ru.nalog.ibr":                   true,
@@ -68,12 +103,18 @@ var builtInAlwaysDirectExact = map[string]bool{
 	// VPN/proxy clients and network cores.
 	"com.wireguard.android":                true,
 	"org.torproject.android":               true,
+	"org.torproject.torbrowser":            true,
 	"ch.protonvpn.android":                 true,
 	"net.mullvad.mullvadvpn":               true,
 	"com.cloudflare.onedotonedotonedotone": true,
 	"org.amnezia.vpn":                      true,
+	"org.amnezia.awg":                      true,
 	"app.hiddify.com":                      true,
+	"ang.hiddify.com":                      true,
 	"com.v2ray.ang":                        true,
+	"com.v2raytun.android":                 true,
+	"com.agn.v2ray":                        true,
+	"com.happproxy":                        true,
 	"io.nekohasekai.sfa":                   true,
 	"io.nekohasekai.sagernet":              true,
 	"moe.nb4a":                             true,
@@ -91,6 +132,36 @@ var builtInAlwaysDirectExact = map[string]bool{
 var builtInAlwaysDirectPrefixes = []string{
 	"ru.yandex.",
 	"com.yandex.",
+	"com.vk.",
+	"ru.vk.",
+	"ru.mail.",
+	"com.mail.ru",
+	"ru.ok.",
+	"ru.dublgis.",
+	"ru.nspk.",
+	"com.programmisty.emiasapp",
+	"com.allgoritm.youla",
+	"com.edadeal.",
+	"ru.foodfox.",
+	"ru.sbcs.",
+	"ru.ozon.",
+	"com.ozon.",
+	"com.wildberries.",
+	"ru.wildberries.",
+	"ru.kinopoisk",
+	"ru.megamarket.",
+	"rtb.mobile.android",
+	"com.uma.musicvk",
+	"ru.vk.store",
+	"ru.zen.",
+	"com.lamoda.",
+	"ru.filit.mvideo.",
+	"ru.dns.shop.",
+	"ru.sportmaster.",
+	"ru.perekrestok.",
+	"ru.pyaterochka.",
+	"ru.tander.magnit",
+	"ru.vkusvill",
 	"ru.vtb",
 	"ru.sber",
 	"ru.alfabank",
@@ -107,6 +178,12 @@ var builtInAlwaysDirectPrefixes = []string{
 	"com.avito",
 	"ru.ozon",
 	"com.wildberries",
+	"org.amnezia.",
+	"app.hiddify.",
+	"ang.hiddify.",
+	"com.v2ray.",
+	"com.v2raytun.",
+	"com.happproxy",
 }
 
 var builtInAlwaysDirectKeywords = []string{
@@ -194,18 +271,78 @@ func ExecScript(scriptPath string, command string, env map[string]string) error 
 // WaitForPort blocks until a TCP connection to host:port succeeds or the
 // timeout elapses. It polls every 250 ms.
 func WaitForPort(host string, port int, timeout time.Duration) error {
-	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+	_, err := WaitForAnyPort([]string{host}, port, timeout)
+	return err
+}
+
+func LocalListenerHosts() []string {
+	// The root netfilter rules deliver IPv4 TPROXY/DNS traffic to 127.0.0.1.
+	// Treating an IPv6-only loopback listener as ready would leave marked IPv4
+	// traffic routed into a closed local socket.
+	return []string{"127.0.0.1"}
+}
+
+func WaitForLocalPort(port int, timeout time.Duration) (string, error) {
+	return WaitForAnyPort(LocalListenerHosts(), port, timeout)
+}
+
+func WaitForAnyPort(hosts []string, port int, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
+	var lastErr error
 
 	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		host, err := DialAnyPort(hosts, port, 500*time.Millisecond)
 		if err == nil {
-			_ = conn.Close()
-			return nil
+			return host, nil
 		}
+		lastErr = err
 		time.Sleep(250 * time.Millisecond)
 	}
-	return fmt.Errorf("port %s not listening after %s", addr, timeout)
+	if lastErr != nil {
+		return "", fmt.Errorf("port %s not listening after %s: %w", formatPortTargets(hosts, port), timeout, lastErr)
+	}
+	return "", fmt.Errorf("port %s not listening after %s", formatPortTargets(hosts, port), timeout)
+}
+
+func DialAnyPort(hosts []string, port int, timeout time.Duration) (string, error) {
+	hosts = normalizeProbeHosts(hosts)
+	errs := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+		conn, err := net.DialTimeout("tcp", addr, timeout)
+		if err == nil {
+			_ = conn.Close()
+			return host, nil
+		}
+		errs = append(errs, fmt.Sprintf("%s: %v", addr, err))
+	}
+	return "", fmt.Errorf("%s", strings.Join(errs, "; "))
+}
+
+func normalizeProbeHosts(hosts []string) []string {
+	seen := make(map[string]bool, len(hosts))
+	normalized := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		host = strings.TrimSpace(host)
+		if host == "" || seen[host] {
+			continue
+		}
+		seen[host] = true
+		normalized = append(normalized, host)
+	}
+	if len(normalized) == 0 {
+		return []string{"127.0.0.1"}
+	}
+	return normalized
+}
+
+func formatPortTargets(hosts []string, port int) string {
+	hosts = normalizeProbeHosts(hosts)
+	targets := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		targets = append(targets, net.JoinHostPort(host, fmt.Sprintf("%d", port)))
+	}
+	return strings.Join(targets, ",")
 }
 
 // ExecCommand runs an arbitrary command and returns its combined output.
@@ -233,6 +370,40 @@ func ResolveAlwaysDirectUIDsDetailed(packages []string) PackageUIDResolution {
 	return resolvePackageUIDsFromSources(userPackages.values(), func(pkgName string) bool {
 		return userPackages[pkgName] || IsBuiltInAlwaysDirectPackage(pkgName)
 	}, false)
+}
+
+// ResolveAlwaysDirectPackageNames returns installed packages that should be
+// treated as privacy-sensitive and kept out of RKNnoVPN. The result is used for
+// OS-level privacy guards where package names, not UIDs, are the control plane.
+func ResolveAlwaysDirectPackageNames(packages []string) []string {
+	userPackages := packageSet(packages)
+	seen := make(map[string]bool)
+	result := make([]string, 0)
+	add := func(pkgName string) {
+		pkgName = strings.TrimSpace(pkgName)
+		if pkgName == "" || seen[pkgName] {
+			return
+		}
+		seen[pkgName] = true
+		result = append(result, pkgName)
+	}
+
+	for _, pkgName := range userPackages.values() {
+		add(pkgName)
+	}
+	for _, catalog := range loadPackageUIDCatalogs(false) {
+		if len(catalog.uids) == 0 {
+			continue
+		}
+		for pkgName := range catalog.uids {
+			if userPackages[pkgName] || IsBuiltInAlwaysDirectPackage(pkgName) {
+				add(pkgName)
+			}
+		}
+		break
+	}
+	sort.Strings(result)
+	return result
 }
 
 // BuildPackageRoutingResolution resolves both app-routing package sets from a

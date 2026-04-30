@@ -26,7 +26,7 @@
     "fallback_policy": "OFFER_RESET"
   },
   "routing": {
-    "mode": "whitelist",
+    "mode": "all",
     "bypass_lan": true,
     "bypass_china": false,
     "bypass_russia": false,
@@ -36,7 +36,7 @@
     "always_direct_apps": []
   },
   "apps": {
-    "mode": "whitelist",
+    "mode": "all",
     "list": [],
     "app_groups": {}
   },

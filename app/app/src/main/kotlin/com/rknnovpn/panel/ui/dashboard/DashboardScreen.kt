@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -66,6 +67,14 @@ fun DashboardScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
+            if (state.errorMessage == null && state.statusMessage != null) {
+                StatusMessageCard(
+                    text = state.statusMessage ?: "",
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
             if (state.operationalDegraded) {
                 StatusMessageCard(
                     text = state.operationalIssueMessage
@@ -100,6 +109,13 @@ fun DashboardScreen(
                 hasActiveNode = !state.activeNodeName.isNullOrBlank(),
                 runtimeActionActive = state.runtimeActionActive,
                 onClick = viewModel::toggleConnection,
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            RestartBackendButton(
+                runtimeActionActive = state.runtimeActionActive,
+                onClick = viewModel::restartBackend,
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -149,6 +165,31 @@ fun DashboardScreen(
             TrafficCountersRow(state)
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun RestartBackendButton(
+    runtimeActionActive: Boolean,
+    onClick: () -> Unit,
+) {
+    FilledTonalButton(
+        onClick = onClick,
+        enabled = !runtimeActionActive,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp),
+    ) {
+        Icon(
+            Icons.Filled.RestartAlt,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = stringResource(R.string.restart_daemon),
+            style = MaterialTheme.typography.titleSmall,
+        )
     }
 }
 

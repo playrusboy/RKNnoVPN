@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -766,32 +765,32 @@ func runSingBoxConfigCheck(binPath string, configPath string, timeout time.Durat
 }
 
 func (m *CoreManager) waitForPortOrExit(port int, timeout time.Duration, exitCh <-chan error, logPath string) error {
-	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
+	var lastErr error
 
 	for {
-		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		_, err := DialAnyPort(LocalListenerHosts(), port, 500*time.Millisecond)
 		if err == nil {
-			_ = conn.Close()
 			return nil
 		}
+		lastErr = err
 
 		select {
 		case exitErr := <-exitCh:
 			tail := tailFile(logPath, 4096)
 			if tail != "" {
-				return fmt.Errorf("sing-box exited before listening on %s: %v; log tail: %s", addr, exitErr, tail)
+				return fmt.Errorf("sing-box exited before listening on %s: %v; log tail: %s", formatPortTargets(LocalListenerHosts(), port), exitErr, tail)
 			}
-			return fmt.Errorf("sing-box exited before listening on %s: %v", addr, exitErr)
+			return fmt.Errorf("sing-box exited before listening on %s: %v", formatPortTargets(LocalListenerHosts(), port), exitErr)
 		case <-ticker.C:
 			if time.Now().After(deadline) {
 				tail := tailFile(logPath, 4096)
 				if tail != "" {
-					return fmt.Errorf("port %s not listening after %s; sing-box log tail: %s", addr, timeout, tail)
+					return fmt.Errorf("port %s not listening after %s: %v; sing-box log tail: %s", formatPortTargets(LocalListenerHosts(), port), timeout, lastErr, tail)
 				}
-				return fmt.Errorf("port %s not listening after %s", addr, timeout)
+				return fmt.Errorf("port %s not listening after %s: %v", formatPortTargets(LocalListenerHosts(), port), timeout, lastErr)
 			}
 		}
 	}
@@ -1164,35 +1163,37 @@ func (m *CoreManager) scriptEnv() map[string]string {
 		m.config.Routing.AlwaysDirectApps,
 		m.config.Routing.Mode,
 	)
+	privacyGuardPackages := ResolveAlwaysDirectPackageNames(m.config.Routing.AlwaysDirectApps)
 	chainProxyPorts, chainProxyUIDs, chainProxyRules := BuildChainedProxyProtectionEnv(m.config)
 
 	return map[string]string{
-		"RKNNOVPN_DIR":       m.dataDir,
-		"CORE_GID":           strconv.Itoa(gid),
-		"TPROXY_PORT":        strconv.Itoa(tproxyPort),
-		"DNS_PORT":           strconv.Itoa(dnsPort),
-		"API_PORT":           strconv.Itoa(apiPort),
-		"SOCKS_PORT":         strconv.Itoa(profileInbounds.SocksPort),
-		"HTTP_PORT":          strconv.Itoa(profileInbounds.HTTPPort),
-		"CHAIN_PROXY_PORTS":  chainProxyPorts,
-		"CHAIN_PROXY_UIDS":   chainProxyUIDs,
-		"CHAIN_PROXY_RULES":  chainProxyRules,
-		"FWMARK":             fmt.Sprintf("0x%x", mark),
-		"ROUTE_TABLE":        "2023",
-		"ROUTE_TABLE_V6":     "2024",
-		"ROUTE_RULE_PREF":    "10000",
-		"ROUTE_RULE_PREF_V6": "10001",
-		"APP_MODE":           appRouting.AppMode,
-		"PROXY_UIDS":         appRouting.ProxyUIDs,
-		"DIRECT_UIDS":        appRouting.DirectUIDs,
-		"BYPASS_UIDS":        appRouting.BypassUIDs,
-		"DNS_SCOPE":          appRouting.DNSScope,
-		"DNS_MODE":           appRouting.DNSMode,
-		"PROXY_MODE":         "tproxy",
-		"IPV6_MODE":          m.config.IPv6.Mode,
-		"IPV6_FAIL_CLOSED":   ipv6FailClosedEnv(m.config.IPv6.Mode),
-		"SHARING_MODE":       m.config.SharingModeEnv(),
-		"SHARING_IFACES":     m.config.SharingInterfacesEnv(),
+		"RKNNOVPN_DIR":           m.dataDir,
+		"CORE_GID":               strconv.Itoa(gid),
+		"TPROXY_PORT":            strconv.Itoa(tproxyPort),
+		"DNS_PORT":               strconv.Itoa(dnsPort),
+		"API_PORT":               strconv.Itoa(apiPort),
+		"SOCKS_PORT":             strconv.Itoa(profileInbounds.SocksPort),
+		"HTTP_PORT":              strconv.Itoa(profileInbounds.HTTPPort),
+		"CHAIN_PROXY_PORTS":      chainProxyPorts,
+		"CHAIN_PROXY_UIDS":       chainProxyUIDs,
+		"CHAIN_PROXY_RULES":      chainProxyRules,
+		"FWMARK":                 fmt.Sprintf("0x%x", mark),
+		"ROUTE_TABLE":            "2023",
+		"ROUTE_TABLE_V6":         "2024",
+		"ROUTE_RULE_PREF":        "10000",
+		"ROUTE_RULE_PREF_V6":     "10001",
+		"APP_MODE":               appRouting.AppMode,
+		"PROXY_UIDS":             appRouting.ProxyUIDs,
+		"DIRECT_UIDS":            appRouting.DirectUIDs,
+		"BYPASS_UIDS":            appRouting.BypassUIDs,
+		"PRIVACY_GUARD_PACKAGES": strings.Join(privacyGuardPackages, " "),
+		"DNS_SCOPE":              appRouting.DNSScope,
+		"DNS_MODE":               appRouting.DNSMode,
+		"PROXY_MODE":             "tproxy",
+		"IPV6_MODE":              m.config.IPv6.Mode,
+		"IPV6_FAIL_CLOSED":       ipv6FailClosedEnv(m.config.IPv6.Mode),
+		"SHARING_MODE":           m.config.SharingModeEnv(),
+		"SHARING_IFACES":         m.config.SharingInterfacesEnv(),
 	}
 }
 

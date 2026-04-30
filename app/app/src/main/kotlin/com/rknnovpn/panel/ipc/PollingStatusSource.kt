@@ -137,6 +137,12 @@ class PollingStatusSource @Inject constructor(
                 _lastError.value = messages.get(com.rknnovpn.panel.R.string.error_daemon_not_found)
                 Log.w(TAG, "Daemon binary not found")
             }
+            is DaemonClientResult.DaemonUnavailable -> {
+                consecutiveFailures++
+                _connectionState.value = DaemonConnectionState.UNREACHABLE
+                _lastError.value = messages.get(com.rknnovpn.panel.R.string.error_daemon_not_running)
+                Log.w(TAG, "Daemon IPC socket is unavailable: ${result.reason}")
+            }
             is DaemonClientResult.DaemonError -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE

@@ -180,6 +180,9 @@ class AuditViewModel @Inject constructor(
                     is DaemonClientResult.DaemonNotFound -> {
                         throw IllegalStateException(string(R.string.audit_error_daemon_not_installed))
                     }
+                    is DaemonClientResult.DaemonUnavailable -> {
+                        throw IllegalStateException(string(R.string.error_daemon_not_running))
+                    }
                     is DaemonClientResult.ParseError -> {
                         throw IllegalStateException(string(R.string.audit_error_invalid_response))
                     }

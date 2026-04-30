@@ -14,6 +14,7 @@ RKNNOVPN_GID=23333
 
 DAEMON_BIN="${RKNNOVPN_DIR}/bin/daemon"
 DAEMON_PID_FILE="${RKNNOVPN_DIR}/run/daemon.pid"
+DAEMON_SOCKET="${RKNNOVPN_DIR}/run/daemon.sock"
 CONFIG_FILE="${RKNNOVPN_DIR}/config/config.json"
 MANUAL_FLAG="${RKNNOVPN_DIR}/config/manual"
 LOG_FILE="${RKNNOVPN_DIR}/logs/service.log"
@@ -24,7 +25,18 @@ LOG_ARCHIVE_DIR="${RKNNOVPN_DIR}/logs/archive"
 TAG="rknnovpn:service"
 BOOT_TIMEOUT=120
 SETTLE_DELAY=5
+DAEMON_READY_TIMEOUT=15
 OOM_SCORE_ADJ="${RKNNOVPN_OOM_SCORE_ADJ:-300}"
+APP_REPAIR=0
+
+case "${1:-}" in
+    --app-repair)
+        APP_REPAIR=1
+        BOOT_TIMEOUT=5
+        SETTLE_DELAY=0
+        DAEMON_READY_TIMEOUT=20
+        ;;
+esac
 
 if [ -f "${RKNNOVPN_DIR}/scripts/lib/rknnovpn_env.sh" ]; then
     . "${RKNNOVPN_DIR}/scripts/lib/rknnovpn_env.sh"
@@ -33,6 +45,16 @@ fi
 # ============================================================================
 # Logging
 # ============================================================================
+
+prepare_runtime_dirs() {
+    mkdir -p "${RKNNOVPN_DIR}/logs" "${RKNNOVPN_DIR}/run" "${RKNNOVPN_DIR}/config" 2>/dev/null
+    chown 0:0 "${RKNNOVPN_DIR}/logs" "${RKNNOVPN_DIR}/run" "${RKNNOVPN_DIR}/config" 2>/dev/null
+    chmod 0700 "${RKNNOVPN_DIR}/logs" "${RKNNOVPN_DIR}/run" "${RKNNOVPN_DIR}/config" 2>/dev/null
+
+    touch "$LOG_FILE" "${RKNNOVPN_DIR}/logs/daemon.log" 2>/dev/null
+    chown 0:0 "$LOG_FILE" "${RKNNOVPN_DIR}/logs/daemon.log" 2>/dev/null
+    chmod 0600 "$LOG_FILE" "${RKNNOVPN_DIR}/logs/daemon.log" 2>/dev/null
+}
 
 ts() {
     date "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "----"
@@ -144,9 +166,14 @@ detect_busybox() {
     BUSYBOX=""
 }
 
+prepare_runtime_dirs
 rotate_logs_if_version_changed
+prepare_runtime_dirs
 detect_busybox
 log_info "Busybox: ${BUSYBOX:-not found}"
+if [ "$APP_REPAIR" = "1" ]; then
+    log_info "App repair launch requested"
+fi
 
 # ============================================================================
 # 2. Wait for boot completion
@@ -212,6 +239,46 @@ fi
 # 4. Pre-launch validation
 # ============================================================================
 
+detect_arch_dir() {
+    ABI="$(getprop ro.product.cpu.abi 2>/dev/null)"
+    case "$ABI" in
+        arm64-v8a|arm64*)
+            echo "arm64"
+            ;;
+        armeabi-v7a|armeabi|armv7*|arm*)
+            echo "armv7"
+            ;;
+        *)
+            echo ""
+            ;;
+    esac
+}
+
+restore_missing_binaries() {
+    ARCH_DIR="$(detect_arch_dir)"
+    if [ -z "$ARCH_DIR" ]; then
+        log_warn "Cannot determine CPU ABI for binary restore"
+        return 0
+    fi
+    SRC_BIN="${RKNNOVPN_DIR}/binaries/${ARCH_DIR}"
+    if [ ! -d "$SRC_BIN" ]; then
+        return 0
+    fi
+
+    for bin_name in daemon daemonctl sing-box; do
+        target="${RKNNOVPN_DIR}/bin/${bin_name}"
+        source="${SRC_BIN}/${bin_name}"
+        if [ ! -x "$target" ] && [ -f "$source" ]; then
+            log_warn "Restoring missing or non-executable binary: ${target}"
+            cp -f "$source" "$target" 2>/dev/null
+            chown 0:0 "$target" 2>/dev/null
+            chmod 0755 "$target" 2>/dev/null
+        fi
+    done
+}
+
+restore_missing_binaries
+
 # Check that the daemon binary exists
 if [ ! -x "$DAEMON_BIN" ]; then
     log_error "Daemon binary not found or not executable: ${DAEMON_BIN}"
@@ -242,6 +309,37 @@ first_pid_by_cmd_path() {
     return 1
 }
 
+wait_daemon_socket() {
+    WAITED=0
+    while [ "$WAITED" -lt "$DAEMON_READY_TIMEOUT" ]; do
+        if [ -z "$DAEMON_PID" ] || ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+            DAEMON_PID="$(first_pid_by_cmd_path "$DAEMON_BIN" 2>/dev/null)"
+            if [ -z "$DAEMON_PID" ]; then
+                log_error "Daemon process exited before IPC socket became ready"
+                return 1
+            fi
+        fi
+
+        if [ -S "$DAEMON_SOCKET" ] 2>/dev/null || [ -e "$DAEMON_SOCKET" ]; then
+            log_info "Daemon IPC socket is ready: ${DAEMON_SOCKET}"
+            return 0
+        fi
+
+        sleep 1
+        WAITED=$((WAITED + 1))
+    done
+
+    log_error "Daemon IPC socket did not appear within ${DAEMON_READY_TIMEOUT}s: ${DAEMON_SOCKET}"
+    return 1
+}
+
+append_daemon_log_tail() {
+    if [ -s "${RKNNOVPN_DIR}/logs/daemon.log" ]; then
+        echo "$(ts) [ERROR] Last daemon.log lines:" >> "$LOG_FILE" 2>/dev/null
+        tail -n 40 "${RKNNOVPN_DIR}/logs/daemon.log" >> "$LOG_FILE" 2>/dev/null
+    fi
+}
+
 # ============================================================================
 # 5. Set resource limits
 # ============================================================================
@@ -261,13 +359,27 @@ launch_daemon() {
     log_info "  Config:  ${CONFIG_FILE}"
     log_info "  PID file: ${DAEMON_PID_FILE}"
 
-    # Ensure log directory is writable
-    mkdir -p "${RKNNOVPN_DIR}/logs" 2>/dev/null
-    chown 0:0 "${RKNNOVPN_DIR}/logs" 2>/dev/null
-    chmod 0700 "${RKNNOVPN_DIR}/logs" 2>/dev/null
-    touch "${RKNNOVPN_DIR}/logs/daemon.log" 2>/dev/null
-    chown 0:0 "${RKNNOVPN_DIR}/logs/daemon.log" 2>/dev/null
-    chmod 0600 "${RKNNOVPN_DIR}/logs/daemon.log" 2>/dev/null
+    prepare_runtime_dirs
+
+    EXISTING_PID="$(cat "$DAEMON_PID_FILE" 2>/dev/null)"
+    if [ -z "$EXISTING_PID" ]; then
+        EXISTING_PID="$(first_pid_by_cmd_path "$DAEMON_BIN" 2>/dev/null)"
+    fi
+    if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
+        DAEMON_PID="$EXISTING_PID"
+        if [ -S "$DAEMON_SOCKET" ] 2>/dev/null || [ -e "$DAEMON_SOCKET" ]; then
+            echo "$DAEMON_PID" > "$DAEMON_PID_FILE" 2>/dev/null
+            chown 0:0 "$DAEMON_PID_FILE" 2>/dev/null
+            chmod 0600 "$DAEMON_PID_FILE" 2>/dev/null
+            log_info "Daemon is already running with PID ${DAEMON_PID}"
+            return 0
+        fi
+        log_error "Daemon process ${DAEMON_PID} is running but IPC socket is missing: ${DAEMON_SOCKET}"
+        append_daemon_log_tail
+        return 1
+    fi
+
+    rm -f "$DAEMON_SOCKET" "$DAEMON_PID_FILE" 2>/dev/null
 
     # Launch daemon with nohup + setsid to fully detach from init
     # - nohup: ignore SIGHUP when terminal closes
@@ -293,8 +405,14 @@ launch_daemon() {
         fi
     fi
 
-    # Write PID file
+    if ! wait_daemon_socket; then
+        append_daemon_log_tail
+        return 1
+    fi
+
     echo "$DAEMON_PID" > "$DAEMON_PID_FILE" 2>/dev/null
+    chown 0:0 "$DAEMON_PID_FILE" 2>/dev/null
+    chmod 0600 "$DAEMON_PID_FILE" 2>/dev/null
     log_info "Daemon started with PID ${DAEMON_PID}"
 
     return 0

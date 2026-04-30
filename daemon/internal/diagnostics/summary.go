@@ -503,6 +503,9 @@ func PackageResolutionFromConfig(cfg *config.Config) PackageResolution {
 		report.ResolvedUIDCount == 0 {
 		report.Warnings = append(report.Warnings, "per-app routing is enabled but selected packages resolved to zero UIDs")
 	}
+	if appMode == "whitelist" && len(report.RequestedPackages) == 0 {
+		report.Warnings = append(report.Warnings, "per-app whitelist is enabled but no packages are selected; app traffic bypasses RKNnoVPN")
+	}
 	return report
 }
 

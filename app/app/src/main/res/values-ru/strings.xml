@@ -188,7 +188,7 @@
     <string name="sharing_mode">Раздача через RKNnoVPN</string>
     <string name="sharing_mode_desc">Направлять трафик клиентов хотспота через RKNnoVPN. Оставьте выключенным, если не раздаёте прокси другим устройствам.</string>
     <string name="sharing_interfaces">Интерфейсы раздачи</string>
-    <string name="sharing_interfaces_desc">Необязательные имена интерфейсов, по одному в строке. Пусто — автоопределение ap, wlan, rndis, usb, bt-pan и swlan.</string>
+    <string name="sharing_interfaces_desc">Необязательные имена интерфейсов, по одному в строке. Пусто — автоопределение ap, rndis, usb, bt-pan и swlan. Если хотспот на вашем устройстве использует wlan1, добавьте его вручную.</string>
     <string name="settings_module">Модуль</string>
     <string name="module_version">Версия</string>
     <string name="daemon_status">Статус демона</string>
@@ -265,16 +265,18 @@
     <string name="error_method_not_found_hint_reload">Используйте backend.restart.</string>
     <string name="error_method_not_found_hint_health">Используйте diagnostics.health.</string>
     <string name="error_method_not_found_hint_subscription_fetch">Используйте subscription.preview или subscription.refresh.</string>
-    <string name="error_root_access_denied">Root-доступ запрещён</string>
-    <string name="error_root_access_denied_with_reason">Root-доступ запрещён: %1$s</string>
+    <string name="error_root_access_denied">Root/SU недоступен или запрещён. Это не ошибка модуля: приложение не смогло получить root-доступ.</string>
+    <string name="error_root_access_denied_with_reason">Root/SU недоступен или запрещён. Это не ошибка модуля: приложение не смогло получить root-доступ. Причина: %1$s</string>
     <string name="error_request_timed_out">Время ожидания истекло</string>
     <string name="error_request_timed_out_with_method">Время ожидания истекло (%1$s)</string>
     <string name="error_daemon_not_installed">Демон не установлен</string>
     <string name="error_daemon_not_found">Демон не найден</string>
+    <string name="error_daemon_not_running">Демон модуля не запущен. Перезагрузите устройство или проверьте логи модуля.</string>
     <string name="error_invalid_daemon_response">Некорректный ответ демона</string>
     <string name="error_unexpected_with_reason">Неожиданная ошибка: %1$s</string>
     <string name="error_operation_failed_with_reason">Не удалось выполнить действие «%1$s»: %2$s</string>
     <string name="error_no_profile_loaded">Профиль не загружен</string>
+    <string name="error_no_runtime_node_configured">Добавьте или выберите сервер перед запуском.</string>
     <string name="operation_accepted">Операция принята. Ждём завершения…</string>
     <string name="operation_saved_runtime_stopped">Настройки сохранены. Runtime остановлен, поэтому они применятся при следующем запуске.</string>
     <string name="operation_saved_runtime_not_applied">Настройки сохранены, но runtime их не применил.</string>
@@ -363,7 +365,7 @@
     <string name="daemon_status_sing_box_unavailable">APK и модуль несовместимы: sing-box недоступен (%1$s)</string>
     <string name="daemon_status_error_with_reason">Ошибка: %1$s</string>
     <string name="daemon_status_module_not_installed">Модуль не установлен</string>
-    <string name="daemon_status_root_denied">Root-доступ запрещён</string>
+    <string name="daemon_status_root_denied">Root/SU недоступен или запрещён</string>
     <string name="daemon_status_not_responding">Демон не отвечает</string>
     <string name="daemon_status_unknown_text">Неизвестно</string>
     <string name="update_error_no_checked_update">Сначала нужно найти доступное обновление</string>
@@ -401,7 +403,7 @@
     <string name="audit_scanning">Проверка</string>
     <string name="audit_no_remediation">Рекомендация не указана.</string>
     <string name="audit_error_daemon_failed">Аудит демона завершился ошибкой: %1$s</string>
-    <string name="audit_error_root_denied">Root-доступ запрещён</string>
+    <string name="audit_error_root_denied">Root/SU недоступен или запрещён. Это не ошибка модуля: приложение не смогло получить root-доступ.</string>
     <string name="audit_error_timed_out">Время ожидания аудита истекло</string>
     <string name="audit_error_daemon_not_installed">Демон не установлен</string>
     <string name="audit_error_invalid_response">Демон вернул некорректный ответ аудита</string>

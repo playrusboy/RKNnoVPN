@@ -905,6 +905,18 @@ class SettingsViewModel @Inject constructor(
                         )
                     }
                 }
+                is DaemonClientResult.DaemonUnavailable -> {
+                    _uiState.update {
+                        it.copy(
+                            daemonStatusText = messages.get(
+                                com.rknnovpn.panel.R.string.error_daemon_not_running
+                            ),
+                            errorMessage = messages.get(
+                                com.rknnovpn.panel.R.string.error_daemon_not_running
+                            ),
+                        )
+                    }
+                }
                 is DaemonClientResult.RootDenied -> {
                     _uiState.update {
                         it.copy(

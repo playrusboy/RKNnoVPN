@@ -62,7 +62,7 @@ func TestDesiredStateFromConfigMapsRoutingMode(t *testing.T) {
 	}{
 		{name: "all routes everything when apps are not constrained", routingMode: "all", appMode: "off", want: "PROXY_ALL"},
 		{name: "all with app whitelist is per-app proxy", routingMode: "all", appMode: "whitelist", want: "PER_APP"},
-		{name: "all with app all mode is per-app proxy", routingMode: "all", appMode: "all", want: "PER_APP"},
+		{name: "all with app all mode is global proxy", routingMode: "all", appMode: "all", want: "PROXY_ALL"},
 		{name: "all with app blacklist is per-app bypass", routingMode: "all", appMode: "blacklist", want: "PER_APP_BYPASS"},
 		{name: "whitelist", routingMode: "whitelist", appMode: "off", want: "PER_APP"},
 		{name: "blacklist", routingMode: "blacklist", appMode: "off", want: "PER_APP_BYPASS"},

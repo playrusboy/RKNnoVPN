@@ -53,7 +53,7 @@ data class SubscriptionSource(
 
 @Serializable
 data class RoutingConfig(
-    val mode: RoutingMode = RoutingMode.PER_APP,
+    val mode: RoutingMode = RoutingMode.PROXY_ALL,
     /** Package names routed through the proxy (only for PER_APP mode). */
     val appProxyList: List<String> = emptyList(),
     /** Package names bypassing the proxy (only for PER_APP_BYPASS mode). */

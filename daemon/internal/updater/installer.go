@@ -497,6 +497,7 @@ func validateModuleStaging(staging string, stagedBinDir string) error {
 		"customize.sh",
 		"scripts/dns.sh",
 		"scripts/iptables.sh",
+		"scripts/privacy_guard.sh",
 		"scripts/rescue_reset.sh",
 		"scripts/routing.sh",
 		"scripts/lib/rknnovpn_env.sh",

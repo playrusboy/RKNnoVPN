@@ -147,6 +147,104 @@ func TestBuildAppRoutingEnvModes(t *testing.T) {
 	}
 }
 
+func TestBuildAppRoutingEnvGlobalKeepsBuiltInRussianAppsDirect(t *testing.T) {
+	withPackageResolverTestEnv(t, `
+com.example.app 10123 0 /data/user/0/com.example.app default
+com.yandex.browser 10130 0 /data/user/0/com.yandex.browser default
+ru.yandex.yandexmaps 10131 0 /data/user/0/ru.yandex.yandexmaps default
+com.vkontakte.android 10132 0 /data/user/0/com.vkontakte.android default
+ru.mts.mymts 10133 0 /data/user/0/ru.mts.mymts default
+ru.sberbankmobile 10134 0 /data/user/0/ru.sberbankmobile default
+com.idamob.tinkoff.android 10135 0 /data/user/0/com.idamob.tinkoff.android default
+com.vk.vkvideo 10136 0 /data/user/0/com.vk.vkvideo default
+com.wildberries.ru 10137 0 /data/user/0/com.wildberries.ru default
+ru.kinopoisk 10138 0 /data/user/0/ru.kinopoisk default
+ru.ozon.app.android 10139 0 /data/user/0/ru.ozon.app.android default
+ru.sbcs.store 10140 0 /data/user/0/ru.sbcs.store default
+ru.vk.store 10141 0 /data/user/0/ru.vk.store default
+ru.vtb24.mobilebanking.android 10142 0 /data/user/0/ru.vtb24.mobilebanking.android default
+ru.yandex.music 10143 0 /data/user/0/ru.yandex.music default
+com.avito.android 10144 0 /data/user/0/com.avito.android default
+ru.alfabank.mobile.android 10145 0 /data/user/0/ru.alfabank.mobile.android default
+ru.dublgis.dgismobile 10146 0 /data/user/0/ru.dublgis.dgismobile default
+ru.megamarket.marketplace 10147 0 /data/user/0/ru.megamarket.marketplace default
+ru.ok.android 10148 0 /data/user/0/ru.ok.android default
+ru.oneme.app 10149 0 /data/user/0/ru.oneme.app default
+rtb.mobile.android 10150 0 /data/user/0/rtb.mobile.android default
+com.uma.musicvk 10151 0 /data/user/0/com.uma.musicvk default
+com.allgoritm.youla 10152 0 /data/user/0/com.allgoritm.youla default
+ru.tander.magnit 10153 0 /data/user/0/ru.tander.magnit default
+ru.perekrestok.app 10154 0 /data/user/0/ru.perekrestok.app default
+ru.beru.android 10155 0 /data/user/0/ru.beru.android default
+ru.foodfox.client 10156 0 /data/user/0/ru.foodfox.client default
+ru.mail.mailapp 10157 0 /data/user/0/ru.mail.mailapp default
+ru.megafon.mlk 10158 0 /data/user/0/ru.megafon.mlk default
+ru.nspk.mirpay 10159 0 /data/user/0/ru.nspk.mirpay default
+ru.yandex.taxi 10160 0 /data/user/0/ru.yandex.taxi default
+ru.rostel 10161 0 /data/user/0/ru.rostel default
+ru.zen.android 10162 0 /data/user/0/ru.zen.android default
+com.programmisty.emiasapp 10163 0 /data/user/0/com.programmisty.emiasapp default
+com.edadeal.android 10164 0 /data/user/0/com.edadeal.android default
+com.v2raytun.android 10165 0 /data/user/0/com.v2raytun.android default
+com.happproxy 10166 0 /data/user/0/com.happproxy default
+org.amnezia.awg 10167 0 /data/user/0/org.amnezia.awg default
+ang.hiddify.com 10168 0 /data/user/0/ang.hiddify.com default
+`, func(bool) (string, error) {
+		return "", errors.New("fallback should not be needed")
+	})
+
+	env := BuildAppRoutingEnv("all", nil, nil)
+	if env.AppMode != "all" || env.ProxyUIDs != "" || env.DirectUIDs != "" || env.DNSScope != "all" || env.DNSMode != "all" {
+		t.Fatalf("unexpected global env: %#v", env)
+	}
+	for _, uid := range []string{
+		"10130", "10131", "10132", "10133", "10134", "10135", "10136", "10137",
+		"10138", "10139", "10140", "10141", "10142", "10143", "10144", "10145",
+		"10146", "10147", "10148", "10149", "10150", "10151", "10152", "10153",
+		"10154", "10155", "10156", "10157", "10158", "10159", "10160", "10161",
+		"10162", "10163", "10164",
+	} {
+		if !strings.Contains(" "+env.BypassUIDs+" ", " "+uid+" ") {
+			t.Fatalf("global mode must hard-bypass built-in Russian apps, missing uid %s in %#v", uid, env)
+		}
+	}
+	if strings.Contains(" "+env.BypassUIDs+" ", " 10123 ") {
+		t.Fatalf("ordinary app must remain proxied in global mode, got %#v", env)
+	}
+}
+
+func TestResolveAlwaysDirectPackageNamesIncludesInstalledBuiltInsAndManual(t *testing.T) {
+	withPackageResolverTestEnv(t, `
+com.example.direct 10123 0 /data/user/0/com.example.direct default
+com.example.other 10124 0 /data/user/0/com.example.other default
+com.edadeal.android 10125 0 /data/user/0/com.edadeal.android default
+com.programmisty.emiasapp 10126 0 /data/user/0/com.programmisty.emiasapp default
+com.vkontakte.android 10127 0 /data/user/0/com.vkontakte.android default
+com.v2raytun.android 10128 0 /data/user/0/com.v2raytun.android default
+com.happproxy 10129 0 /data/user/0/com.happproxy default
+org.amnezia.awg 10130 0 /data/user/0/org.amnezia.awg default
+ang.hiddify.com 10131 0 /data/user/0/ang.hiddify.com default
+`, func(bool) (string, error) {
+		return "", errors.New("fallback should not be needed")
+	})
+
+	names := ResolveAlwaysDirectPackageNames([]string{"com.example.direct"})
+	got := strings.Join(names, " ")
+	for _, want := range []string{"com.edadeal.android", "com.example.direct", "com.programmisty.emiasapp", "com.vkontakte.android"} {
+		if !strings.Contains(" "+got+" ", " "+want+" ") {
+			t.Fatalf("expected %s in always-direct package names, got %#v", want, names)
+		}
+	}
+	for _, want := range []string{"ang.hiddify.com", "com.happproxy", "com.v2raytun.android", "org.amnezia.awg"} {
+		if !strings.Contains(" "+got+" ", " "+want+" ") {
+			t.Fatalf("expected VPN/proxy package %s in always-direct package names, got %#v", want, names)
+		}
+	}
+	if strings.Contains(" "+got+" ", " com.example.other ") {
+		t.Fatalf("ordinary package must not be included, got %#v", names)
+	}
+}
+
 func TestBuildRuntimeAppRoutingEnvDirectHardBypass(t *testing.T) {
 	withPackageResolverTestEnv(t, "com.example.app 10123 0 /data/user/0/com.example.app default\n", func(bool) (string, error) {
 		return "", errors.New("fallback should not be needed")

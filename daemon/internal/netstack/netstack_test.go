@@ -24,9 +24,36 @@ func TestApplyRunsCleanupThenStartsRulesAndDNS(t *testing.T) {
 		"iptables.sh:stop:B",
 		"iptables.sh:start:B",
 		"dns.sh:start:B",
+		"privacy_guard.sh:start:B",
 	}
 	if strings.Join(calls, ",") != strings.Join(want, ",") {
 		t.Fatalf("unexpected calls: got %#v want %#v", calls, want)
+	}
+}
+
+func TestApplyPrivacyGuardFailureWarnsWithoutRollback(t *testing.T) {
+	var calls []string
+	manager := New("/data/adb/modules/rknnovpn", nil, func(scriptPath string, command string, env map[string]string) error {
+		call := filepath.Base(scriptPath) + ":" + command
+		calls = append(calls, call)
+		if call == "privacy_guard.sh:start" {
+			return errors.New("privacy guard unsupported")
+		}
+		return nil
+	})
+
+	report := manager.Apply()
+	if err := report.Err(); err != nil {
+		t.Fatalf("privacy guard warning must not fail apply: %v %#v", err, report)
+	}
+	if report.RollbackApplied {
+		t.Fatalf("privacy guard warning must not roll back netstack: %#v", report)
+	}
+	if len(report.Warnings) != 1 || !strings.Contains(report.Warnings[0], "privacy guard unsupported") {
+		t.Fatalf("expected privacy guard warning, got %#v", report)
+	}
+	if got := strings.Join(calls, ","); strings.Contains(got, "iptables.sh:stop,iptables.sh:stop") {
+		t.Fatalf("unexpected rollback cleanup: %s", got)
 	}
 }
 

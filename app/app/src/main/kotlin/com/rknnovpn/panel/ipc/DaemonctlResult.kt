@@ -60,6 +60,14 @@ sealed class DaemonctlResult {
     ) : DaemonctlResult()
 
     /**
+     * The daemonctl binary exists, but the long-running daemon process is not
+     * accepting IPC requests on its Unix socket.
+     */
+    data class DaemonUnavailable(
+        val reason: String
+    ) : DaemonctlResult()
+
+    /**
      * An unexpected exception occurred during execution (I/O error, parse failure, etc.).
      */
     data class UnexpectedError(
@@ -86,6 +94,7 @@ sealed class DaemonctlResult {
         is RootDenied -> throw DaemonctlException("Root denied: $reason")
         is Timeout -> throw DaemonctlException("Timeout after ${timeoutMs}ms on $method")
         is DaemonNotFound -> throw DaemonctlException("Daemon not found at $path")
+        is DaemonUnavailable -> throw DaemonctlException("Daemon unavailable: $reason")
         is UnexpectedError -> throw DaemonctlException("Unexpected: ${throwable.message}", throwable)
     }
 }

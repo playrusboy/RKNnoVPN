@@ -111,6 +111,8 @@ validate_env() {
     IPV6_FAIL_CLOSED="${IPV6_FAIL_CLOSED:-1}"
     DNS_MODE="${DNS_MODE:-per_uid}"
     DNS_SCOPE="${DNS_SCOPE:-}"
+    SHARING_MODE="${SHARING_MODE:-off}"
+    SHARING_IFACES="${SHARING_IFACES:-}"
 
     if [ -z "$DNS_SCOPE" ]; then
         case "$DNS_MODE:$APP_MODE" in
@@ -322,6 +324,7 @@ validate_runtime_values() {
     validate_enum DNS_SCOPE "$DNS_SCOPE" "off all uids all_except_uids"
     validate_enum DNS_MODE "$DNS_MODE" "off all per_uid uid"
     validate_enum PROXY_MODE "$PROXY_MODE" "tproxy"
+    validate_enum SHARING_MODE "$SHARING_MODE" "off hotspot"
     validate_port_list CHAIN_PROXY_PORTS "$CHAIN_PROXY_PORTS"
     validate_uint_list CHAIN_PROXY_UIDS "$CHAIN_PROXY_UIDS"
     validate_port_uid_rules CHAIN_PROXY_RULES "$CHAIN_PROXY_RULES"
@@ -354,7 +357,8 @@ save_snapshot() {
             FWMARK ROUTE_TABLE ROUTE_TABLE_V6 CORE_GID APP_MODE \
             PROXY_UIDS DIRECT_UIDS BYPASS_UIDS DNS_SCOPE DNS_MODE \
             PROXY_MODE ROUTE_RULE_PREF ROUTE_RULE_PREF_V6 IPV6_MODE \
-            IPV6_FAIL_CLOSED IPV6_MANGLE_APPLIED IPV6_ROUTE_APPLIED; do
+            IPV6_FAIL_CLOSED IPV6_MANGLE_APPLIED IPV6_ROUTE_APPLIED \
+            SHARING_MODE SHARING_IFACES; do
             write_snapshot_var "$_name"
         done
     } > "$_tmp"

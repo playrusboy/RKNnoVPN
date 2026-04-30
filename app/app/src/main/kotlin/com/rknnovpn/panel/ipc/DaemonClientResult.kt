@@ -20,6 +20,7 @@ sealed class DaemonClientResult<out T> {
     data class RootDenied(val reason: String) : DaemonClientResult<Nothing>()
     data class Timeout(val method: String) : DaemonClientResult<Nothing>()
     data class DaemonNotFound(val path: String) : DaemonClientResult<Nothing>()
+    data class DaemonUnavailable(val reason: String) : DaemonClientResult<Nothing>()
     data class ParseError(val raw: String, val cause: Throwable) : DaemonClientResult<Nothing>()
     data class Failure(val throwable: Throwable) : DaemonClientResult<Nothing>()
 
@@ -33,6 +34,7 @@ sealed class DaemonClientResult<out T> {
         is RootDenied -> throw DaemonctlException("Root denied: $reason")
         is Timeout -> throw DaemonctlException("Timeout on method: $method")
         is DaemonNotFound -> throw DaemonctlException("Daemon not found at: $path")
+        is DaemonUnavailable -> throw DaemonctlException("Daemon unavailable: $reason")
         is ParseError -> throw DaemonctlException("Parse error on: ${raw.take(100)}", cause)
         is Failure -> throw DaemonctlException("Unexpected failure", throwable)
     }
@@ -43,6 +45,7 @@ internal fun <T> DaemonClientResult<T>.asFailure(): DaemonClientResult<Nothing> 
     is DaemonClientResult.RootDenied -> this
     is DaemonClientResult.Timeout -> this
     is DaemonClientResult.DaemonNotFound -> this
+    is DaemonClientResult.DaemonUnavailable -> this
     is DaemonClientResult.ParseError -> this
     is DaemonClientResult.Failure -> this
     is DaemonClientResult.Ok -> error("Success result cannot be converted to failure")
@@ -67,5 +70,6 @@ internal fun <T> DaemonctlResult.toDaemonClientResultEnvelope(
     is DaemonctlResult.RootDenied -> DaemonClientResult.RootDenied(reason)
     is DaemonctlResult.Timeout -> DaemonClientResult.Timeout(method)
     is DaemonctlResult.DaemonNotFound -> DaemonClientResult.DaemonNotFound(path)
+    is DaemonctlResult.DaemonUnavailable -> DaemonClientResult.DaemonUnavailable(reason)
     is DaemonctlResult.UnexpectedError -> DaemonClientResult.Failure(throwable)
 }

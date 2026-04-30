@@ -349,11 +349,11 @@ func (h *HealthMonitor) checkProcessAlive(pid int) CheckResult {
 
 // checkPortListening verifies the tproxy port accepts TCP connections.
 func (h *HealthMonitor) checkPortListening(port int) CheckResult {
-	err := core.WaitForPort("127.0.0.1", port, 2*time.Second)
+	host, err := core.WaitForLocalPort(port, 2*time.Second)
 	if err != nil {
 		return CheckResult{Pass: false, Detail: fmt.Sprintf("порт %d: %v", port, err), Code: "TPROXY_PORT_DOWN"}
 	}
-	return CheckResult{Pass: true, Detail: fmt.Sprintf("порт %d открыт", port)}
+	return CheckResult{Pass: true, Detail: fmt.Sprintf("порт %d открыт на %s", port, host)}
 }
 
 // checkIptablesIntact verifies the RKNNOVPN_PRE chain is still hooked in
@@ -425,11 +425,11 @@ func (h *HealthMonitor) checkDNSListener() CheckResult {
 	if port <= 0 {
 		port = 10856
 	}
-	err := core.WaitForPort("127.0.0.1", port, 2*time.Second)
+	host, err := core.WaitForLocalPort(port, 2*time.Second)
 	if err != nil {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("DNS listener 127.0.0.1:%d недоступен: %v", port, err), Code: "DNS_LISTENER_DOWN"}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("DNS listener %d недоступен на loopback: %v", port, err), Code: "DNS_LISTENER_DOWN"}
 	}
-	return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS listener 127.0.0.1:%d открыт", port)}
+	return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS listener %s:%d открыт", host, port)}
 }
 
 // checkDNS intentionally does not send a standalone query to the local DNS

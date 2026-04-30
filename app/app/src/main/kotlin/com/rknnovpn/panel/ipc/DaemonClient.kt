@@ -211,6 +211,7 @@ class DaemonClient @Inject constructor(
             is DaemonClientResult.RootDenied -> return result.asFailure()
             is DaemonClientResult.Timeout -> return result.asFailure()
             is DaemonClientResult.DaemonNotFound -> return result.asFailure()
+            is DaemonClientResult.DaemonUnavailable -> return result.asFailure()
             is DaemonClientResult.ParseError -> return result.asFailure()
             is DaemonClientResult.Failure -> return result.asFailure()
         }
@@ -439,6 +440,7 @@ class DaemonClient @Inject constructor(
                     is DaemonClientResult.RootDenied -> return contractResult
                     is DaemonClientResult.Timeout -> return contractResult
                     is DaemonClientResult.DaemonNotFound -> return contractResult
+                    is DaemonClientResult.DaemonUnavailable -> return contractResult
                     is DaemonClientResult.Failure -> return contractResult
                 }
                 val issue = ipcCompatibilityIssue(
@@ -464,6 +466,7 @@ class DaemonClient @Inject constructor(
             is DaemonClientResult.RootDenied -> result
             is DaemonClientResult.Timeout -> result
             is DaemonClientResult.DaemonNotFound -> result
+            is DaemonClientResult.DaemonUnavailable -> result
             is DaemonClientResult.ParseError -> DaemonClientResult.DaemonError(
                 DaemonClientErrorCodes.COMPATIBILITY,
                 "APK и модуль несовместимы: некорректный ответ version",

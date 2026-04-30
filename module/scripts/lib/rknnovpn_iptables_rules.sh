@@ -65,6 +65,36 @@ chain_proxy_port_reserved() {
     return 1
 }
 
+sharing_enabled() {
+    [ "${SHARING_MODE:-off}" = "hotspot" ]
+}
+
+sharing_ifaces() {
+    if [ -n "${SHARING_IFACES:-}" ]; then
+        printf '%s\n' ${SHARING_IFACES}
+    else
+        # Conservative tether defaults. Plain wlan+ is intentionally omitted:
+        # on many devices wlan0 is the phone's own Wi-Fi uplink, not a hotspot
+        # client interface. Users can still enter wlan1/ap-specific names.
+        printf '%s\n' ap+ rndis+ usb+ bt-pan+ swlan+
+    fi
+}
+
+emit_sharing_prerouting_marks() {
+    ps_emit_chain="$1"
+    ps_iface=""
+    sharing_enabled || return 0
+    for ps_iface in $(sharing_ifaces); do
+        case "${ps_iface}" in
+            ''|*[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:+-]*)
+                continue
+                ;;
+        esac
+        echo "-A ${ps_emit_chain} -i ${ps_iface} -p tcp -j MARK --set-mark ${FWMARK}"
+        echo "-A ${ps_emit_chain} -i ${ps_iface} -p udp -j MARK --set-mark ${FWMARK}"
+    done
+}
+
 emit_chain_proxy_port_protection() {
     ps_emit_chain="$1"
     ps_proxy_port=""
@@ -231,6 +261,7 @@ done)
 -A ${CHAIN_PRE} -p tcp -m socket --transparent -j ${CHAIN_DIVERT}
 -A ${CHAIN_PRE} -p udp -m socket --transparent -j ${CHAIN_DIVERT}
 -A ${CHAIN_PRE} -j ${CHAIN_BYPASS}
+$(emit_sharing_prerouting_marks "${CHAIN_PRE}")
 -A ${CHAIN_PRE} -p tcp -m mark --mark ${FWMARK} -j TPROXY --on-ip 127.0.0.1 --on-port ${TPROXY_PORT} --tproxy-mark ${FWMARK}
 -A ${CHAIN_PRE} -p udp -m mark --mark ${FWMARK} -j TPROXY --on-ip 127.0.0.1 --on-port ${TPROXY_PORT} --tproxy-mark ${FWMARK}
 
@@ -325,6 +356,7 @@ done)
 -A ${CHAIN_PRE} -p tcp -m socket --transparent -j ${CHAIN_DIVERT}
 -A ${CHAIN_PRE} -p udp -m socket --transparent -j ${CHAIN_DIVERT}
 -A ${CHAIN_PRE} -j ${CHAIN_BYPASS}
+$(emit_sharing_prerouting_marks "${CHAIN_PRE}")
 -A ${CHAIN_PRE} -p tcp -m mark --mark ${FWMARK} -j TPROXY --on-ip ::1 --on-port ${TPROXY_PORT} --tproxy-mark ${FWMARK}
 -A ${CHAIN_PRE} -p udp -m mark --mark ${FWMARK} -j TPROXY --on-ip ::1 --on-port ${TPROXY_PORT} --tproxy-mark ${FWMARK}
 

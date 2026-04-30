@@ -508,7 +508,7 @@ private fun NodeCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                if (node.responseMs != null || node.testStatus != null) {
+                if (testSummary.isNotBlank()) {
                     Text(
                         text = testSummary,
                         style = MaterialTheme.typography.labelSmall,
@@ -525,7 +525,7 @@ private fun NodeCard(
             val chipMs = when {
                 node.responseMs != null -> node.responseMs
                 hasFailedDataPlane -> -1
-                else -> node.latencyMs
+                else -> null
             }
             chipMs?.let { ms ->
                 LatencyChip(ms)

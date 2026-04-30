@@ -188,7 +188,7 @@
     <string name="sharing_mode">Hotspot sharing</string>
     <string name="sharing_mode_desc">Route tethered client traffic through RKNnoVPN. Leave off unless you explicitly share the proxy to other devices.</string>
     <string name="sharing_interfaces">Sharing interfaces</string>
-    <string name="sharing_interfaces_desc">Optional interface names, one per line. Empty means auto-detect ap, wlan, rndis, usb, bt-pan and swlan tethering interfaces.</string>
+    <string name="sharing_interfaces_desc">Optional interface names, one per line. Empty means auto-detect ap, rndis, usb, bt-pan and swlan tethering interfaces. Add wlan1 manually if your device uses it for hotspot clients.</string>
     <string name="settings_module">Module</string>
     <string name="module_version">Version</string>
     <string name="daemon_status">Daemon status</string>
@@ -264,16 +264,18 @@
     <string name="error_method_not_found_hint_reload">Use backend.restart.</string>
     <string name="error_method_not_found_hint_health">Use diagnostics.health.</string>
     <string name="error_method_not_found_hint_subscription_fetch">Use subscription.preview or subscription.refresh.</string>
-    <string name="error_root_access_denied">Root access denied</string>
-    <string name="error_root_access_denied_with_reason">Root access denied: %1$s</string>
+    <string name="error_root_access_denied">Root/SU is unavailable or denied. This is not a module error: the app could not get root access.</string>
+    <string name="error_root_access_denied_with_reason">Root/SU is unavailable or denied. This is not a module error: the app could not get root access. Reason: %1$s</string>
     <string name="error_request_timed_out">Request timed out</string>
     <string name="error_request_timed_out_with_method">Request timed out (%1$s)</string>
     <string name="error_daemon_not_installed">Daemon not installed</string>
     <string name="error_daemon_not_found">Daemon not found</string>
+    <string name="error_daemon_not_running">Module daemon is not running. Reboot the device or check module logs.</string>
     <string name="error_invalid_daemon_response">Invalid daemon response</string>
     <string name="error_unexpected_with_reason">Unexpected error: %1$s</string>
     <string name="error_operation_failed_with_reason">%1$s failed: %2$s</string>
     <string name="error_no_profile_loaded">No profile loaded</string>
+    <string name="error_no_runtime_node_configured">Add or select a server before starting.</string>
     <string name="error_config_saved_not_applied">Settings were saved, but runtime did not apply them: %1$s</string>
     <string name="operation_accepted">Operation accepted. Waiting for completion…</string>
     <string name="operation_saved_runtime_stopped">Settings were saved. Runtime is stopped, so they will apply on the next start.</string>
@@ -363,7 +365,7 @@
     <string name="daemon_status_sing_box_unavailable">APK and module are incompatible: sing-box unavailable (%1$s)</string>
     <string name="daemon_status_error_with_reason">Error: %1$s</string>
     <string name="daemon_status_module_not_installed">Module not installed</string>
-    <string name="daemon_status_root_denied">Root access denied</string>
+    <string name="daemon_status_root_denied">Root/SU is unavailable or denied</string>
     <string name="daemon_status_not_responding">Daemon not responding</string>
     <string name="daemon_status_unknown_text">Unknown</string>
     <string name="update_error_no_checked_update">No checked update is available to download</string>
@@ -401,7 +403,7 @@
     <string name="audit_scanning">Scanning</string>
     <string name="audit_no_remediation">No remediation provided.</string>
     <string name="audit_error_daemon_failed">Daemon audit failed: %1$s</string>
-    <string name="audit_error_root_denied">Root access denied</string>
+    <string name="audit_error_root_denied">Root/SU is unavailable or denied. This is not a module error: the app could not get root access.</string>
     <string name="audit_error_timed_out">Audit timed out</string>
     <string name="audit_error_daemon_not_installed">Daemon not installed</string>
     <string name="audit_error_invalid_response">Invalid audit response from daemon</string>

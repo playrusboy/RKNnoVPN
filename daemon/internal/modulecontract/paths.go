@@ -32,10 +32,11 @@ const (
 	IPRuleErrorName     = "ip_rule.err"
 	IPRouteErrorName    = "ip_route.err"
 
-	RescueResetScriptName = "rescue_reset.sh"
-	DNSScriptName         = "dns.sh"
-	IPTablesScriptName    = "iptables.sh"
-	RoutingScriptName     = "routing.sh"
+	RescueResetScriptName  = "rescue_reset.sh"
+	DNSScriptName          = "dns.sh"
+	IPTablesScriptName     = "iptables.sh"
+	PrivacyGuardScriptName = "privacy_guard.sh"
+	RoutingScriptName      = "routing.sh"
 
 	EnvModuleDir  = "RKNNOVPN_DIR"
 	EnvRunDir     = "RUN_DIR"
@@ -87,7 +88,10 @@ func (p Paths) RescueResetScript() string {
 }
 func (p Paths) DNSScript() string      { return filepath.Join(p.ScriptsDir(), DNSScriptName) }
 func (p Paths) IPTablesScript() string { return filepath.Join(p.ScriptsDir(), IPTablesScriptName) }
-func (p Paths) RoutingScript() string  { return filepath.Join(p.ScriptsDir(), RoutingScriptName) }
+func (p Paths) PrivacyGuardScript() string {
+	return filepath.Join(p.ScriptsDir(), PrivacyGuardScriptName)
+}
+func (p Paths) RoutingScript() string { return filepath.Join(p.ScriptsDir(), RoutingScriptName) }
 
 func (p Paths) RuntimeSnapshotFiles() []string {
 	return []string{

@@ -239,7 +239,7 @@ func Normalize(doc Document) (Document, []Warning, error) {
 	doc.Name = firstNonEmpty(strings.TrimSpace(doc.Name), "Default")
 	doc.Runtime.BackendKind = firstNonEmpty(strings.TrimSpace(doc.Runtime.BackendKind), "ROOT_TPROXY")
 	doc.Runtime.FallbackPolicy = firstNonEmpty(strings.TrimSpace(doc.Runtime.FallbackPolicy), "OFFER_RESET")
-	doc.Routing.Mode = firstNonEmpty(strings.TrimSpace(doc.Routing.Mode), "PER_APP")
+	doc.Routing.Mode = firstNonEmpty(strings.TrimSpace(doc.Routing.Mode), "PROXY_ALL")
 	doc.DNS.RemoteDNS = firstNonEmpty(strings.TrimSpace(doc.DNS.RemoteDNS), "https://1.1.1.1/dns-query")
 	doc.DNS.DirectDNS = firstNonEmpty(strings.TrimSpace(doc.DNS.DirectDNS), "https://dns.google/dns-query")
 	doc.DNS.BootstrapIP = firstNonEmpty(strings.TrimSpace(doc.DNS.BootstrapIP), "1.1.1.1")

@@ -285,11 +285,11 @@ func DefaultConfig() *Config {
 			FallbackPolicy: "OFFER_RESET",
 		},
 		Routing: RoutingConfig{
-			Mode:      "whitelist",
+			Mode:      "all",
 			BypassLAN: true,
 		},
 		Apps: AppsConfig{
-			Mode: "whitelist",
+			Mode: "all",
 		},
 		DNS: DNSConfig{
 			HijackPerUID: true,

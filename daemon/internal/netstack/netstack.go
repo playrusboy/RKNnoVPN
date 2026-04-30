@@ -86,6 +86,12 @@ func (m Manager) Apply() Report {
 		return report
 	}
 	report.addOK("dns-start", "")
+
+	if err := m.run("privacy_guard", "start"); err != nil {
+		report.addWarning("privacy-guard-start", err)
+	} else {
+		report.addOK("privacy-guard-start", "")
+	}
 	return report
 }
 
@@ -333,6 +339,15 @@ func (r *Report) addFailure(name string, err error) {
 	r.Errors = append(r.Errors, name+": "+detail)
 }
 
+func (r *Report) addWarning(name string, err error) {
+	detail := ""
+	if err != nil {
+		detail = err.Error()
+	}
+	r.Steps = append(r.Steps, Step{Name: name, Status: "warning", Detail: detail})
+	r.Warnings = append(r.Warnings, name+": "+detail)
+}
+
 func (m Manager) cleanupInto(report *Report, tolerateMissing bool) {
 	for _, name := range []string{"dns", "iptables"} {
 		stepName := name + "-stop"
@@ -358,6 +373,8 @@ func (m Manager) run(name string, command string) error {
 		return m.execScript(paths.DNSScript(), command, m.env)
 	case "iptables":
 		return m.execScript(paths.IPTablesScript(), command, m.env)
+	case "privacy_guard":
+		return m.execScript(paths.PrivacyGuardScript(), command, m.env)
 	default:
 		return fmt.Errorf("unknown netstack script %q", name)
 	}

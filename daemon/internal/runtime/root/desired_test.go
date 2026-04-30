@@ -17,6 +17,9 @@ func TestDesiredStateFromConfigUsesRootDefaults(t *testing.T) {
 	if desired.FallbackPolicy != runtimev2.FallbackOfferReset {
 		t.Fatalf("fallback = %q", desired.FallbackPolicy)
 	}
+	if desired.RoutingMode != "PROXY_ALL" {
+		t.Fatalf("default routing mode = %q", desired.RoutingMode)
+	}
 }
 
 func TestDesiredStateFromConfigMapsRuntimeIntent(t *testing.T) {

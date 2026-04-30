@@ -474,3 +474,19 @@ func TestRuntimeListenerWaitsSkipDisabledAPI(t *testing.T) {
 		t.Fatalf("default listener ports not applied: %#v", specs)
 	}
 }
+
+func TestWaitForPortOrExitRejectsIPv6OnlyLoopbackListener(t *testing.T) {
+	listener, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("IPv6 loopback is unavailable: %v", err)
+	}
+	defer listener.Close()
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	manager := NewCoreManager(config.DefaultConfig(), t.TempDir(), nil)
+	exitCh := make(chan error)
+
+	if err := manager.waitForPortOrExit(port, time.Second, exitCh, ""); err == nil {
+		t.Fatal("IPv6-only loopback listener must not satisfy IPv4 TPROXY readiness")
+	}
+}

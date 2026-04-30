@@ -8,8 +8,11 @@ import com.rknnovpn.panel.model.BackendPhase
 import com.rknnovpn.panel.model.ConnectionState
 import com.rknnovpn.panel.model.DaemonConnectionState
 import com.rknnovpn.panel.model.DaemonStatus
+import com.rknnovpn.panel.model.Node
+import com.rknnovpn.panel.model.ProfileConfig
 import com.rknnovpn.panel.model.TrafficStats
 import com.rknnovpn.panel.repository.CommandOutcome
+import com.rknnovpn.panel.repository.ProfileRepository
 import com.rknnovpn.panel.repository.StatusRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,6 +46,8 @@ data class DashboardUiState(
     val runtimeActionActive: Boolean = false,
     /** Error message from the last daemon operation, or null. */
     val errorMessage: String? = null,
+    /** Informational message from the last daemon operation, or null. */
+    val statusMessage: String? = null,
     /** True when the daemon process is not reachable at all. */
     val daemonUnreachable: Boolean = false,
 )
@@ -56,6 +61,7 @@ private const val PEAK_RATE_FOR_NORMALIZATION = 10_000_000f // 10 MB/s
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
     private val statusRepository: StatusRepository,
+    private val profileRepository: ProfileRepository,
     private val messages: UserMessageFormatter,
 ) : ViewModel() {
 
@@ -64,12 +70,17 @@ class DashboardViewModel @Inject constructor(
 
     /** Mutable ring buffer backing the sparkline. */
     private val _trafficRing = ArrayDeque<Float>(TRAFFIC_HISTORY_SIZE)
+    private var latestStatus: DaemonStatus? = null
 
     init {
         observeDaemonStatus()
         observeDaemonConnectionState()
         observePollErrors()
+        observeProfile()
         statusRepository.startPolling()
+        viewModelScope.launch {
+            profileRepository.getOrLoad()
+        }
     }
 
     // ---- Public actions ----
@@ -88,7 +99,7 @@ class DashboardViewModel @Inject constructor(
 
     fun refresh() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isRefreshing = true, errorMessage = null) }
+            _uiState.update { it.copy(isRefreshing = true, errorMessage = null, statusMessage = null) }
             statusRepository.pollNow()
             // Give the poller a moment to complete, then clear refresh flag.
             // The actual data update comes via the status flow observer.
@@ -97,15 +108,74 @@ class DashboardViewModel @Inject constructor(
         }
     }
 
+    fun restartBackend() {
+        if (_uiState.value.runtimeActionActive) return
+        _uiState.update {
+            it.copy(
+                runtimeActionActive = true,
+                errorMessage = null,
+                statusMessage = messages.get(com.rknnovpn.panel.R.string.daemon_status_restarting),
+            )
+        }
+        viewModelScope.launch {
+            when (val outcome = statusRepository.reload()) {
+                is CommandOutcome.Success -> {
+                    Log.d(TAG, "Backend restart succeeded from dashboard")
+                    _uiState.update {
+                        it.copy(
+                            statusMessage = messages.get(com.rknnovpn.panel.R.string.daemon_status_restarted),
+                            errorMessage = null,
+                        )
+                    }
+                }
+                is CommandOutcome.Failed -> {
+                    Log.w(TAG, "Backend restart failed from dashboard: ${outcome.message}")
+                    _uiState.update {
+                        it.copy(
+                            statusMessage = null,
+                            errorMessage = outcome.message,
+                            runtimeActionActive = false,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     // ---- Internal ----
 
     private fun connect() {
         viewModelScope.launch {
+            val profile = profileRepository.getOrLoad()
+            if (profile == null) {
+                _uiState.update {
+                    it.copy(
+                        connectionState = ConnectionState.ERROR,
+                        runtimeActionActive = false,
+                        errorMessage = profileRepository.error.value
+                            ?: messages.get(com.rknnovpn.panel.R.string.error_no_profile_loaded),
+                        statusMessage = null,
+                    )
+                }
+                return@launch
+            }
+            if (availableNodes(profile).isEmpty()) {
+                _uiState.update {
+                    it.copy(
+                        connectionState = ConnectionState.DISCONNECTED,
+                        runtimeActionActive = false,
+                        errorMessage = messages.get(com.rknnovpn.panel.R.string.no_nodes),
+                        statusMessage = null,
+                    )
+                }
+                return@launch
+            }
             _uiState.update {
                 it.copy(
                     connectionState = ConnectionState.CONNECTING,
                     runtimeActionActive = true,
                     errorMessage = null,
+                    statusMessage = null,
                 )
             }
             when (val outcome = statusRepository.start()) {
@@ -120,6 +190,7 @@ class DashboardViewModel @Inject constructor(
                             connectionState = ConnectionState.ERROR,
                             runtimeActionActive = false,
                             errorMessage = outcome.message,
+                            statusMessage = null,
                         )
                     }
                 }
@@ -135,6 +206,7 @@ class DashboardViewModel @Inject constructor(
                     runtimePhase = BackendPhase.STOPPING,
                     runtimeActionActive = true,
                     errorMessage = null,
+                    statusMessage = null,
                 )
             }
             when (val outcome = statusRepository.stop()) {
@@ -155,6 +227,7 @@ class DashboardViewModel @Inject constructor(
                             connectionState = ConnectionState.ERROR,
                             runtimeActionActive = false,
                             errorMessage = outcome.message,
+                            statusMessage = null,
                         )
                     }
                 }
@@ -208,6 +281,20 @@ class DashboardViewModel @Inject constructor(
         }
     }
 
+    private fun observeProfile() {
+        viewModelScope.launch {
+            profileRepository.profile.collect { profile ->
+                val status = latestStatus ?: return@collect
+                _uiState.update {
+                    it.copy(
+                        activeNodeName = formatActiveNodeName(status, profile),
+                        activeNodeProtocol = formatActiveNodeSubtitle(status, profile),
+                    )
+                }
+            }
+        }
+    }
+
     fun applyDaemonStatus(status: DaemonStatus) {
         // Push a normalized RX rate sample into the sparkline ring buffer
         val rxRate = status.traffic.rxRate
@@ -220,6 +307,7 @@ class DashboardViewModel @Inject constructor(
         } else if (status.state == ConnectionState.DISCONNECTED) {
             _trafficRing.clear()
         }
+        latestStatus = status
 
         _uiState.update {
             val showRuntimeHealth = status.shouldShowRuntimeHealth()
@@ -249,8 +337,8 @@ class DashboardViewModel @Inject constructor(
             it.copy(
                 connectionState = status.state,
                 runtimePhase = status.health.phase,
-                activeNodeName = status.activeNodeName,
-                activeNodeProtocol = formatActiveNodeSubtitle(status),
+                activeNodeName = formatActiveNodeName(status, profileRepository.profile.value),
+                activeNodeProtocol = formatActiveNodeSubtitle(status, profileRepository.profile.value),
                 egressIp = status.egressIp,
                 countryFlag = status.countryFlag,
                 latencyMs = status.latencyMs,
@@ -274,6 +362,17 @@ class DashboardViewModel @Inject constructor(
                     status.state == ConnectionState.ERROR -> healthIssueMessage
                     else -> null
                 },
+                statusMessage = if (
+                    activeOperationStuckMessage == null &&
+                    !operationalDegraded &&
+                    lastOperationFailure == null &&
+                    status.state != ConnectionState.ERROR &&
+                    status.activeOperation == null
+                ) {
+                    it.statusMessage
+                } else {
+                    null
+                },
             )
         }
     }
@@ -287,17 +386,52 @@ class DashboardViewModel @Inject constructor(
         }
     }
 
-    private fun formatActiveNodeSubtitle(status: DaemonStatus): String? {
-        return when (status.activeNodeMode) {
+    private fun formatActiveNodeName(status: DaemonStatus, profile: ProfileConfig?): String? {
+        status.activeNodeName?.trim()?.ifBlank { null }?.let { return it }
+        return when (effectiveActiveNodeMode(status, profile)) {
             "auto_selector" -> messages.get(com.rknnovpn.panel.R.string.active_node_mode_auto)
+            "manual_missing" -> null
+            else -> effectiveActiveNode(status, profile)?.name
+        }
+    }
+
+    private fun formatActiveNodeSubtitle(status: DaemonStatus, profile: ProfileConfig?): String? {
+        return when (effectiveActiveNodeMode(status, profile)) {
+            "auto_selector" -> null
             "manual" -> status.activeNodeProtocol?.let {
+                messages.get(com.rknnovpn.panel.R.string.active_node_mode_manual, it)
+            } ?: effectiveActiveNode(status, profile)?.protocol?.name?.let {
                 messages.get(com.rknnovpn.panel.R.string.active_node_mode_manual, it)
             }
             "manual_missing" -> messages.get(com.rknnovpn.panel.R.string.active_node_mode_missing)
-            "single_node" -> status.activeNodeProtocol
-            else -> status.activeNodeProtocol
+            "single_node" -> status.activeNodeProtocol ?: effectiveActiveNode(status, profile)?.protocol?.name
+            else -> status.activeNodeProtocol ?: effectiveActiveNode(status, profile)?.protocol?.name
         }
     }
+
+    private fun effectiveActiveNodeMode(status: DaemonStatus, profile: ProfileConfig?): String? {
+        status.activeNodeMode?.trim()?.ifBlank { null }?.let { return it }
+        val nodes = availableNodes(profile)
+        if (nodes.isEmpty()) return null
+        val configuredId = profile?.activeNodeId?.trim()?.ifBlank { null }
+        return when {
+            configuredId != null && nodes.any { it.id == configuredId } -> "manual"
+            configuredId != null -> "manual_missing"
+            nodes.size == 1 -> "single_node"
+            else -> "auto_selector"
+        }
+    }
+
+    private fun effectiveActiveNode(status: DaemonStatus, profile: ProfileConfig?): Node? {
+        val nodes = availableNodes(profile)
+        if (nodes.isEmpty()) return null
+        val activeId = status.activeNodeId?.trim()?.ifBlank { null }
+            ?: profile?.activeNodeId?.trim()?.ifBlank { null }
+        return activeId?.let { id -> nodes.firstOrNull { it.id == id } } ?: nodes.firstOrNull()
+    }
+
+    private fun availableNodes(profile: ProfileConfig?): List<Node> =
+        profile?.nodes?.filterNot { it.stale }.orEmpty()
 
     private fun DaemonStatus.shouldShowRuntimeHealth(): Boolean {
         val runtimeSettled = health.phase !in TRANSIENT_OR_STOPPED_PHASES

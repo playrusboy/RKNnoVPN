@@ -14,6 +14,9 @@ entrypoint.
   cleanup, and launch `daemon`. It must not implement its own stale
   process/socket/PID cleanup.
 - `scripts/rescue_reset.sh` is the canonical root cleanup API.
+- `scripts/privacy_guard.sh` owns best-effort Android package visibility
+  hardening for sensitive direct apps. It must not claim or implement
+  netfilter/procfs cleanup.
 - `uninstall.sh` delegates runtime cleanup to `scripts/rescue_reset.sh` and
   only handles uninstall-specific preservation/restoration.
 
@@ -82,3 +85,6 @@ marker, or netfilter cleanup.
   and runtime snapshots in `run/env.sh`; rule text and listener verification
   belong in `scripts/lib/rknnovpn_iptables_rules.sh`.
 - `scripts/dns.sh` owns classic DNS nat interception.
+- `scripts/privacy_guard.sh` owns persistent `QUERY_ALL_PACKAGES` AppOps
+  hardening for resolved always-direct packages. It is intentionally not part
+  of reset cleanup because it does not create RKNnoVPN netstack state.

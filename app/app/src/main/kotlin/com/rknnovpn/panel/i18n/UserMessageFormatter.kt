@@ -36,6 +36,7 @@ class UserMessageFormatter @Inject constructor(
             when (result.code) {
                 DaemonClientErrorCodes.COMPATIBILITY -> result.message
                 DaemonClientErrorCodes.METHOD_NOT_FOUND -> formatMethodNotFound(result)
+                DaemonClientErrorCodes.CONFIG_ERROR -> formatConfigError(result)
                 else -> formatSubscriptionRejection(result) ?: if (result.configWasSaved()) {
                     get(R.string.error_config_saved_not_applied, result.message)
                 } else if (result.code == DaemonClientErrorCodes.RUNTIME_BUSY) {
@@ -51,6 +52,7 @@ class UserMessageFormatter @Inject constructor(
         is DaemonClientResult.RootDenied -> get(R.string.error_root_access_denied)
         is DaemonClientResult.Timeout -> get(R.string.error_request_timed_out_with_method, result.method)
         is DaemonClientResult.DaemonNotFound -> get(R.string.error_daemon_not_installed)
+        is DaemonClientResult.DaemonUnavailable -> get(R.string.error_daemon_not_running)
         is DaemonClientResult.ParseError -> get(R.string.error_invalid_daemon_response)
         is DaemonClientResult.Failure -> formatControlPlaneFailure(
             result.throwable.message,
@@ -58,6 +60,26 @@ class UserMessageFormatter @Inject constructor(
         )
         is DaemonClientResult.Ok -> get(R.string.dns_ok)
     }
+
+    private fun formatConfigError(result: DaemonClientResult.DaemonError): String =
+        formatSubscriptionRejection(result) ?: if (result.configWasSaved()) {
+            get(R.string.error_config_saved_not_applied, result.message)
+        } else if (result.message.contains("no node configured", ignoreCase = true)) {
+            get(R.string.error_no_runtime_node_configured)
+        } else {
+            get(
+                R.string.error_daemon_with_code,
+                result.code,
+                result.message,
+            )
+        }
+
+    private fun formatRuntimeReason(reason: String): String =
+        if (reason.contains("no node configured", ignoreCase = true)) {
+            get(R.string.error_no_runtime_node_configured)
+        } else {
+            reason
+        }
 
     private fun formatSubscriptionRejection(result: DaemonClientResult.DaemonError): String? {
         val details = result.detailObject() ?: return null
@@ -103,7 +125,7 @@ class UserMessageFormatter @Inject constructor(
     }
 
     fun formatOperationFailure(@StringRes operationResId: Int, reason: String): String =
-        get(R.string.error_operation_failed_with_reason, get(operationResId), reason)
+        get(R.string.error_operation_failed_with_reason, get(operationResId), formatRuntimeReason(reason))
 
     fun formatConfigMutationNotice(info: ConfigMutationInfo): String? {
         val base = when (info.runtimeApply) {

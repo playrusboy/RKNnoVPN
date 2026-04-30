@@ -2,6 +2,7 @@ package com.rknnovpn.panel.ipc
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -46,6 +47,17 @@ import kotlin.coroutines.resume
 class DaemonctlExecutor @Inject constructor() {
 
     private val daemonctlPath = "/data/adb/modules/rknnovpn/bin/daemonctl"
+    private val rootCommands = listOf(
+        RootCommand("su", "su", "-c"),
+        RootCommand("/system/bin/su", "/system/bin/su", "-c"),
+        RootCommand("/system/xbin/su", "/system/xbin/su", "-c"),
+        RootCommand("/sbin/su", "/sbin/su", "-c"),
+        RootCommand("/su/bin/su", "/su/bin/su", "-c"),
+        RootCommand("/vendor/bin/su", "/vendor/bin/su", "-c"),
+        RootCommand("/data/adb/ksu/bin/su", "/data/adb/ksu/bin/su", "-c"),
+        RootCommand("/system/bin/magisk su", "/system/bin/magisk", "su", "-c"),
+        RootCommand("/sbin/magisk su", "/sbin/magisk", "su", "-c"),
+    )
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -57,10 +69,18 @@ class DaemonctlExecutor @Inject constructor() {
         private const val TAG = "DaemonctlExecutor"
         private const val DEFAULT_TIMEOUT_MS = 5_000L
         private const val INLINE_PARAMS_LIMIT = 16 * 1024
+        private const val MODULE_SERVICE_PATH = "/data/adb/modules/rknnovpn/service.sh"
+        private const val REPAIR_COOLDOWN_MS = 15_000L
+        private const val REPAIR_RETRY_DELAY_MS = 1_500L
+        private const val REPAIR_RETRY_TIMEOUT_MS = 5_000L
+        private const val REPAIR_TOTAL_WAIT_MS = 24_000L
 
         /** Exit code returned by `su` when the user denies the superuser prompt. */
         private const val SU_DENIED_EXIT_CODE = 13
     }
+
+    @Volatile
+    private var lastRepairAttemptAtMs: Long = 0L
 
     /**
      * Execute a single daemonctl JSON-RPC method.
@@ -79,6 +99,9 @@ class DaemonctlExecutor @Inject constructor() {
             val result = withTimeoutOrNull(timeoutMs) {
                 executeRaw(method, params)
             }
+            if (result is DaemonctlResult.DaemonUnavailable && triggerModuleDaemonRepair(result.reason)) {
+                return@withContext retryAfterModuleDaemonRepair(method, params, timeoutMs)
+            }
             result ?: DaemonctlResult.Timeout(timeoutMs, method)
         } catch (e: Exception) {
             Log.e(TAG, "execute($method) failed unexpectedly", e)
@@ -88,36 +111,85 @@ class DaemonctlExecutor @Inject constructor() {
 
     // ---- internals ----
 
+    private suspend fun retryAfterModuleDaemonRepair(
+        method: String,
+        params: JsonObject,
+        timeoutMs: Long,
+    ): DaemonctlResult {
+        val deadline = System.currentTimeMillis() + REPAIR_TOTAL_WAIT_MS
+        var lastResult: DaemonctlResult = DaemonctlResult.DaemonUnavailable("daemon repair is still starting")
+        while (System.currentTimeMillis() < deadline) {
+            delay(REPAIR_RETRY_DELAY_MS)
+            val retry = withTimeoutOrNull(timeoutMs.coerceAtLeast(REPAIR_RETRY_TIMEOUT_MS)) {
+                executeRaw(method, params)
+            } ?: DaemonctlResult.Timeout(timeoutMs, method)
+            lastResult = retry
+            if (retry !is DaemonctlResult.DaemonUnavailable && retry !is DaemonctlResult.Timeout) {
+                return retry
+            }
+        }
+        Log.w(TAG, "Daemon repair did not become ready within ${REPAIR_TOTAL_WAIT_MS}ms")
+        return lastResult
+    }
+
     private suspend fun executeRaw(
         method: String,
         params: JsonObject
+    ): DaemonctlResult {
+        val paramsJson = params.toString()
+        val useStdin = params.isNotEmpty() &&
+            paramsJson.toByteArray(StandardCharsets.UTF_8).size > INLINE_PARAMS_LIMIT
+        val commandString = when {
+            params.isEmpty() -> "$daemonctlPath $method"
+            useStdin -> "RKNNOVPN_STDIN_PARAMS=1 $daemonctlPath $method"
+            else -> "$daemonctlPath $method ${shellQuote(paramsJson)}"
+        }
+        Log.d(
+            TAG,
+            ">>> daemonctl method=$method params=${if (params.isEmpty()) "none" else "redacted"}"
+        )
+
+        return executeRootCommandWithFallbacks(
+            commandString = commandString,
+            stdinParams = if (useStdin) paramsJson else null,
+            method = method,
+        )
+    }
+
+    private suspend fun executeRootCommandWithFallbacks(
+        commandString: String,
+        stdinParams: String?,
+        method: String,
+    ): DaemonctlResult {
+        val rootUnavailableReasons = mutableListOf<String>()
+        for (candidate in rootCommands) {
+            val result = executeRootCommand(candidate, commandString, stdinParams, method)
+            if (result is DaemonctlResult.RootDenied && shouldTryNextRootCommand(result.reason)) {
+                rootUnavailableReasons += "${candidate.label}: ${result.reason}"
+                continue
+            }
+            return result
+        }
+        return DaemonctlResult.RootDenied(
+            "root command is not available: ${rootUnavailableReasons.joinToString("; ")}"
+        )
+    }
+
+    private suspend fun executeRootCommand(
+        candidate: RootCommand,
+        commandString: String,
+        stdinParams: String?,
+        method: String,
     ): DaemonctlResult = suspendCancellableCoroutine { cont ->
         var process: Process? = null
         try {
-            val paramsJson = params.toString()
-            val useStdin = params.isNotEmpty() &&
-                paramsJson.toByteArray(StandardCharsets.UTF_8).size > INLINE_PARAMS_LIMIT
-            val commandString = when {
-                params.isEmpty() -> "$daemonctlPath $method"
-                useStdin -> "RKNNOVPN_STDIN_PARAMS=1 $daemonctlPath $method"
-                else -> "$daemonctlPath $method ${shellQuote(paramsJson)}"
-            }
-            val command = arrayOf(
-                "su", "-c", commandString
-            )
-
-            Log.d(
-                TAG,
-                ">>> daemonctl method=$method params=${if (params.isEmpty()) "none" else "redacted"}"
-            )
-
-            process = Runtime.getRuntime().exec(command)
-
+            process = Runtime.getRuntime().exec(candidate.argv(commandString))
             cont.invokeOnCancellation {
                 terminateProcess(process, "cancelled")
             }
+            Log.d(TAG, "daemonctl root command=${candidate.label}")
 
-            writeParamsSafely(process, if (useStdin) paramsJson else null)
+            writeParamsSafely(process, stdinParams)
 
             var stdout = ""
             var stderr = ""
@@ -132,17 +204,88 @@ class DaemonctlExecutor @Inject constructor() {
             stdoutReader.join()
             stderrReader.join()
 
-            Log.d(TAG, "<<< daemonctl method=$method exit=$exitCode")
-
-            val result = parseResponse(exitCode, stdout, stderr, method)
+            Log.d(TAG, "<<< daemonctl method=$method root=${candidate.label} exit=$exitCode")
             if (cont.isActive) {
-                cont.resume(result)
+                cont.resume(parseResponse(exitCode, stdout, stderr, method))
             }
         } catch (e: Exception) {
             terminateProcess(process, "failed")
             if (cont.isActive) {
-                cont.resume(DaemonctlResult.UnexpectedError(e))
+                cont.resume(classifyLaunchException(e))
             }
+        }
+    }
+
+    private fun classifyLaunchException(e: Exception): DaemonctlResult {
+        if (e is RootCommandUnavailableException) {
+            return DaemonctlResult.RootDenied("root command is not available: ${e.summary}")
+        }
+        if (e is IOException && e.message.orEmpty().contains("su", ignoreCase = true)) {
+            return DaemonctlResult.RootDenied("su executable is not available: ${e.message}")
+        }
+        return DaemonctlResult.UnexpectedError(e)
+    }
+
+    private fun shouldTryNextRootCommand(reason: String): Boolean {
+        val text = reason.lowercase()
+        if (text.contains("permission denied") || text.contains("denied") || text.contains("code 13")) {
+            return false
+        }
+        return text.contains("not available") ||
+            text.contains("no such file") ||
+            text.contains("not found") ||
+            text.contains("no su program detected") ||
+            text.contains("inaccessible or not found")
+    }
+
+    private fun startRootProcess(commandString: String): Process {
+        val failures = mutableListOf<String>()
+        var firstError: IOException? = null
+        for (candidate in rootCommands) {
+            try {
+                val process = Runtime.getRuntime().exec(candidate.argv(commandString))
+                Log.d(TAG, "daemonctl root command=${candidate.label}")
+                return process
+            } catch (e: IOException) {
+                if (firstError == null) firstError = e
+                failures += "${candidate.label}: ${e.message.orEmpty()}"
+                Log.d(TAG, "root command ${candidate.label} is unavailable: ${e.message}")
+            }
+        }
+        throw RootCommandUnavailableException(
+            failures.joinToString("; ").ifBlank { "no executable candidates" },
+            firstError,
+        )
+    }
+
+    private fun triggerModuleDaemonRepair(reason: String): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - lastRepairAttemptAtMs < REPAIR_COOLDOWN_MS) {
+            Log.d(TAG, "Skipping daemon repair; cooldown is active")
+            return false
+        }
+        lastRepairAttemptAtMs = now
+
+        val commandString = "RKNNOVPN_APP_REPAIR=1 /system/bin/sh $MODULE_SERVICE_PATH --app-repair >/dev/null 2>&1 &"
+        var process: Process? = null
+        return try {
+            Log.w(TAG, "Daemon IPC unavailable; starting module repair: ${reason.take(160)}")
+            process = startRootProcess(commandString)
+            if (!process.waitFor(2, TimeUnit.SECONDS)) {
+                terminateProcess(process, "app repair launch timeout")
+                false
+            } else {
+                val ok = process.exitValue() == 0
+                if (!ok) {
+                    Log.w(TAG, "Module repair launcher exited with ${process.exitValue()}")
+                }
+                ok
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Module repair launch failed: ${e.message}")
+            false
+        } finally {
+            terminateProcess(process, "app repair launch")
         }
     }
 
@@ -213,6 +356,12 @@ class DaemonctlExecutor @Inject constructor() {
             stderr.contains("daemonctl", ignoreCase = true)
         ) {
             return DaemonctlResult.DaemonNotFound(daemonctlPath)
+        }
+
+        if (looksLikeDaemonSocketFailure(stdout, stderr)) {
+            return DaemonctlResult.DaemonUnavailable(
+                stderr.ifBlank { stdout }.ifBlank { "daemon IPC socket is unavailable" }
+            )
         }
 
         // Old daemonctl binary that doesn't know the requested command.
@@ -347,6 +496,17 @@ class DaemonctlExecutor @Inject constructor() {
         else -> null
     }
 
+    private fun looksLikeDaemonSocketFailure(stdout: String, stderr: String): Boolean {
+        val text = "$stderr\n$stdout"
+        return text.contains("cannot connect to daemon", ignoreCase = true) ||
+            text.contains("daemon.sock", ignoreCase = true) &&
+            (
+                text.contains("no such file or directory", ignoreCase = true) ||
+                    text.contains("connection refused", ignoreCase = true) ||
+                    text.contains("is daemon running", ignoreCase = true)
+                )
+    }
+
     private fun JsonElement.daemonEnvelopeOrNull(): JsonObject? {
         val obj = runCatching { jsonObject }.getOrNull() ?: return null
         return obj.daemonEnvelopeOrNull()
@@ -375,6 +535,19 @@ class DaemonctlExecutor @Inject constructor() {
     }
 
 }
+
+private class RootCommand(
+    val label: String,
+    private vararg val prefix: String,
+) {
+    fun argv(commandString: String): Array<String> =
+        prefix.toList().plus(commandString).toTypedArray()
+}
+
+private class RootCommandUnavailableException(
+    val summary: String,
+    cause: Throwable?,
+) : IOException("No root command candidate could be launched: $summary", cause)
 
 /** Convenience alias for an empty JsonObject. */
 fun emptyJsonObject(): JsonObject = JsonObject(emptyMap())

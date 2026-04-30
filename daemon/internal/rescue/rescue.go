@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -317,30 +318,32 @@ func (r *RescueManager) scriptEnv() map[string]string {
 		r.cfg.Routing.AlwaysDirectApps,
 		r.cfg.Routing.Mode,
 	)
+	privacyGuardPackages := core.ResolveAlwaysDirectPackageNames(r.cfg.Routing.AlwaysDirectApps)
 	chainProxyPorts, chainProxyUIDs, chainProxyRules := core.BuildChainedProxyProtectionEnv(r.cfg)
 
 	return map[string]string{
-		"RKNNOVPN_DIR":      r.dataDir,
-		"CORE_GID":          fmt.Sprintf("%d", gid),
-		"TPROXY_PORT":       fmt.Sprintf("%d", tproxyPort),
-		"DNS_PORT":          fmt.Sprintf("%d", dnsPort),
-		"API_PORT":          fmt.Sprintf("%d", apiPort),
-		"SOCKS_PORT":        fmt.Sprintf("%d", profileInbounds.SocksPort),
-		"HTTP_PORT":         fmt.Sprintf("%d", profileInbounds.HTTPPort),
-		"CHAIN_PROXY_PORTS": chainProxyPorts,
-		"CHAIN_PROXY_UIDS":  chainProxyUIDs,
-		"CHAIN_PROXY_RULES": chainProxyRules,
-		"FWMARK":            fmt.Sprintf("0x%x", mark),
-		"ROUTE_TABLE":       "2023",
-		"ROUTE_TABLE_V6":    "2024",
-		"APP_MODE":          appRouting.AppMode,
-		"PROXY_UIDS":        appRouting.ProxyUIDs,
-		"DIRECT_UIDS":       appRouting.DirectUIDs,
-		"BYPASS_UIDS":       appRouting.BypassUIDs,
-		"DNS_SCOPE":         appRouting.DNSScope,
-		"DNS_MODE":          appRouting.DNSMode,
-		"PROXY_MODE":        "tproxy",
-		"SHARING_MODE":      r.cfg.SharingModeEnv(),
-		"SHARING_IFACES":    r.cfg.SharingInterfacesEnv(),
+		"RKNNOVPN_DIR":           r.dataDir,
+		"CORE_GID":               fmt.Sprintf("%d", gid),
+		"TPROXY_PORT":            fmt.Sprintf("%d", tproxyPort),
+		"DNS_PORT":               fmt.Sprintf("%d", dnsPort),
+		"API_PORT":               fmt.Sprintf("%d", apiPort),
+		"SOCKS_PORT":             fmt.Sprintf("%d", profileInbounds.SocksPort),
+		"HTTP_PORT":              fmt.Sprintf("%d", profileInbounds.HTTPPort),
+		"CHAIN_PROXY_PORTS":      chainProxyPorts,
+		"CHAIN_PROXY_UIDS":       chainProxyUIDs,
+		"CHAIN_PROXY_RULES":      chainProxyRules,
+		"FWMARK":                 fmt.Sprintf("0x%x", mark),
+		"ROUTE_TABLE":            "2023",
+		"ROUTE_TABLE_V6":         "2024",
+		"APP_MODE":               appRouting.AppMode,
+		"PROXY_UIDS":             appRouting.ProxyUIDs,
+		"DIRECT_UIDS":            appRouting.DirectUIDs,
+		"BYPASS_UIDS":            appRouting.BypassUIDs,
+		"PRIVACY_GUARD_PACKAGES": strings.Join(privacyGuardPackages, " "),
+		"DNS_SCOPE":              appRouting.DNSScope,
+		"DNS_MODE":               appRouting.DNSMode,
+		"PROXY_MODE":             "tproxy",
+		"SHARING_MODE":           r.cfg.SharingModeEnv(),
+		"SHARING_IFACES":         r.cfg.SharingInterfacesEnv(),
 	}
 }
