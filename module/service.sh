@@ -28,7 +28,7 @@ SETTLE_DELAY=5
 DAEMON_READY_TIMEOUT=15
 OOM_SCORE_ADJ="${RKNNOVPN_OOM_SCORE_ADJ:-300}"
 APP_REPAIR=0
-SERVICE_LOCK_DIR="${RKNNOVPN_DIR}/run/service.lock"
+SERVICE_LOCK_DIR="${RKNNOVPN_DIR}/config/service.lock"
 SERVICE_LOCK_WAIT="${RKNNOVPN_SERVICE_LOCK_WAIT:-60}"
 SERVICE_LOCK_HELD=0
 
@@ -173,7 +173,16 @@ prepare_runtime_dirs
 
 service_lock_owner_alive() {
     _pid="$(cat "${SERVICE_LOCK_DIR}/pid" 2>/dev/null)"
-    [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null
+    [ -n "$_pid" ] || return 1
+    kill -0 "$_pid" 2>/dev/null || return 1
+    [ -r "/proc/${_pid}/cmdline" ] || return 1
+    _cmd="$(cat "/proc/${_pid}/cmdline" 2>/dev/null | tr '\000' ' ')"
+    case "$_cmd" in
+        *"${RKNNOVPN_DIR}/service.sh"*)
+            return 0
+            ;;
+    esac
+    return 1
 }
 
 release_service_lock() {
@@ -285,35 +294,54 @@ is_reset_active() {
     [ -f "${RKNNOVPN_DIR}/run/reset.lock" ]
 }
 
-if [ -x "${RKNNOVPN_DIR}/scripts/rescue_reset.sh" ]; then
-    EXISTING_DAEMON_PID="$(first_pid_by_cmd_path "$DAEMON_BIN" 2>/dev/null)"
-    DAEMON_PROCESS_WITHOUT_SOCKET=0
-    if [ -n "$EXISTING_DAEMON_PID" ] && ! { [ -S "$DAEMON_SOCKET" ] 2>/dev/null || [ -e "$DAEMON_SOCKET" ]; }; then
-        DAEMON_PROCESS_WITHOUT_SOCKET=1
-    fi
+daemon_socket_exists() {
+    [ -S "$DAEMON_SOCKET" ] 2>/dev/null || [ -e "$DAEMON_SOCKET" ]
+}
 
-    if [ "$APP_REPAIR" = "1" ] && is_reset_active && [ -n "$EXISTING_DAEMON_PID" ]; then
-        log_info "Reset lock is active; app repair will not interrupt the running reset"
-    elif has_boot_cleanup_markers || [ "$DAEMON_PROCESS_WITHOUT_SOCKET" = "1" ]; then
+has_orphan_runtime_processes() {
+    first_pid_by_cmd_path "$DAEMON_BIN" >/dev/null 2>&1 && return 0
+    first_pid_by_cmd_path "${RKNNOVPN_DIR}/bin/sing-box" >/dev/null 2>&1 && return 0
+    first_pid_by_cmd_path "${RKNNOVPN_DIR}/scripts/net_handler.sh" >/dev/null 2>&1 && return 0
+    return 1
+}
+
+if [ "$APP_REPAIR" = "1" ]; then
+    if is_reset_active; then
+        log_info "Reset lock is active; app repair will not interrupt cleanup"
+        exit 0
+    fi
+    log_info "App repair uses daemon-only ensure; boot cleanup is skipped"
+elif [ -x "${RKNNOVPN_DIR}/scripts/rescue_reset.sh" ]; then
+    EXISTING_DAEMON_PID="$(first_pid_by_cmd_path "$DAEMON_BIN" 2>/dev/null)"
+    if [ -n "$EXISTING_DAEMON_PID" ] && daemon_socket_exists; then
+        log_info "Daemon already has an IPC socket; boot cleanup is skipped"
+    elif has_boot_cleanup_markers || has_orphan_runtime_processes; then
         log_info "Running boot rescue cleanup"
         if "${RKNNOVPN_DIR}/scripts/rescue_reset.sh" --boot-clean >> "$LOG_FILE" 2>&1; then
             log_info "Boot rescue cleanup completed"
         else
             log_warn "Boot rescue cleanup reported leftovers; daemon will still start for diagnostics"
         fi
-    elif [ "$APP_REPAIR" = "1" ]; then
-        log_info "No stale runtime markers; app repair will start/check daemon without boot cleanup"
     else
-        log_info "Running boot rescue cleanup probe without stale runtime markers"
-        if "${RKNNOVPN_DIR}/scripts/rescue_reset.sh" --boot-clean >> "$LOG_FILE" 2>&1; then
-            log_info "Boot rescue cleanup completed"
-        else
-            log_warn "Boot rescue cleanup reported leftovers; daemon will still start for diagnostics"
-        fi
+        log_info "No stale runtime markers or orphan processes; boot cleanup skipped"
     fi
 else
     log_warn "Boot rescue cleanup script not found"
 fi
+
+stop_daemon_process_only() {
+    pid="$1"
+    [ -n "$pid" ] || return 0
+    if kill -0 "$pid" 2>/dev/null; then
+        log_warn "Stopping daemon-only process ${pid}; IPC socket did not become ready"
+        kill -TERM "$pid" 2>/dev/null || true
+        sleep 1
+    fi
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -KILL "$pid" 2>/dev/null || true
+    fi
+    rm -f "$DAEMON_PID_FILE" "$DAEMON_SOCKET" 2>/dev/null
+}
 
 if [ -f "$MANUAL_FLAG" ]; then
     log_info "Manual flag detected at ${MANUAL_FLAG} — daemon will start, proxy autostart stays disabled"
@@ -435,16 +463,30 @@ launch_daemon() {
     fi
     if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
         DAEMON_PID="$EXISTING_PID"
-        if [ -S "$DAEMON_SOCKET" ] 2>/dev/null || [ -e "$DAEMON_SOCKET" ]; then
+        if daemon_socket_exists; then
             echo "$DAEMON_PID" > "$DAEMON_PID_FILE" 2>/dev/null
             chown 0:0 "$DAEMON_PID_FILE" 2>/dev/null
             chmod 0600 "$DAEMON_PID_FILE" 2>/dev/null
             log_info "Daemon is already running with PID ${DAEMON_PID}"
             return 0
         fi
-        log_error "Daemon process ${DAEMON_PID} is running but IPC socket is missing: ${DAEMON_SOCKET}"
-        append_daemon_log_tail
-        return 1
+
+        if [ "$APP_REPAIR" = "1" ]; then
+            log_warn "Daemon process ${DAEMON_PID} is running without IPC socket; waiting before daemon-only repair"
+            if wait_daemon_socket; then
+                echo "$DAEMON_PID" > "$DAEMON_PID_FILE" 2>/dev/null
+                chown 0:0 "$DAEMON_PID_FILE" 2>/dev/null
+                chmod 0600 "$DAEMON_PID_FILE" 2>/dev/null
+                log_info "Daemon IPC became ready for existing PID ${DAEMON_PID}"
+                return 0
+            fi
+            append_daemon_log_tail
+            stop_daemon_process_only "$DAEMON_PID"
+        else
+            log_error "Daemon process ${DAEMON_PID} is running but IPC socket is missing: ${DAEMON_SOCKET}"
+            append_daemon_log_tail
+            return 1
+        fi
     fi
 
     rm -f "$DAEMON_SOCKET" "$DAEMON_PID_FILE" 2>/dev/null
