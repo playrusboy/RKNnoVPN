@@ -339,6 +339,33 @@ com.proxy.owner 10123 0 /data/user/0/com.proxy.owner default 3003
 	}
 }
 
+func TestVerifyChainedProxyOwnerPackagesRejectsAnyMismatchedListenerOnSamePort(t *testing.T) {
+	withProcNetTCPTestEnv(t, `
+  sl  local_address rem_address   st tx_queue tx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000:2A38 00000000:0000 0A 00000000:00000000 00:00000000 00000000 10999 0 111 1 00000000
+   1: 0100007F:2A38 00000000:0000 0A 00000000:00000000 00:00000000 00000000 10123 0 112 1 00000000
+`, "")
+	withPackageResolverTestEnv(t, `
+com.proxy.owner 10123 0 /data/user/0/com.proxy.owner default 3003
+`, func(bool) (string, error) {
+		return "", fmt.Errorf("unexpected package command")
+	})
+	cfg := config.DefaultConfig()
+	cfg.Profile.Nodes = jsonRawMessage(t, `{
+		"id":"nekobox",
+		"protocol":"SOCKS",
+		"server":"127.0.0.1",
+		"port":10808,
+		"ownerPackage":"com.proxy.owner",
+		"outbound":{"protocol":"socks","settings":{"address":"127.0.0.1","port":10808}}
+	}`)
+
+	err := VerifyChainedProxyOwnerPackages(cfg)
+	if err == nil || !strings.Contains(err.Error(), "owned by UID 10999") {
+		t.Fatalf("expected any same-port mismatched owner to fail, got %v", err)
+	}
+}
+
 func TestVerifyChainedProxyOwnerPackagesChecksIPv6LoopbackListener(t *testing.T) {
 	withProcNetTCPTestEnv(t, "", `
   sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode

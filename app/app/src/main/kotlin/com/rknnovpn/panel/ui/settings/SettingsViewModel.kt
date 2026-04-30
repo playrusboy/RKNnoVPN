@@ -13,6 +13,7 @@ import com.rknnovpn.panel.ipc.contractSurfaceMismatches
 import com.rknnovpn.panel.ipc.currentReleaseWarning
 import com.rknnovpn.panel.ipc.missingRequiredMethods
 import com.rknnovpn.panel.ipc.releaseMismatch
+import com.rknnovpn.panel.ipc.runtimePreflightWarning
 import com.rknnovpn.panel.model.ConnectionState
 import com.rknnovpn.panel.model.DaemonStatus
 import com.rknnovpn.panel.model.DnsIpv6Mode
@@ -835,9 +836,11 @@ class SettingsViewModel @Inject constructor(
                     val contractSurfaceMismatches = info.contractSurfaceMismatches(DaemonClient.REQUIRED_METHODS)
                     val releaseMismatch = info.releaseMismatch(BuildConfig.VERSION_NAME)
                     val currentReleaseWarning = info.currentReleaseWarning()
+                    val runtimePreflightWarning = info.runtimePreflightWarning()
                     val compatibilityWarning = when {
                         releaseMismatch != null -> releaseMismatch
                         currentReleaseWarning != null -> currentReleaseWarning
+                        runtimePreflightWarning != null -> runtimePreflightWarning
                         requiredMethodMismatches.isNotEmpty() ->
                             "APK и модуль несовместимы: daemon APK required methods не совпадают (${requiredMethodMismatches.joinToString(", ")})"
                         contractSurfaceMismatches.isNotEmpty() ->

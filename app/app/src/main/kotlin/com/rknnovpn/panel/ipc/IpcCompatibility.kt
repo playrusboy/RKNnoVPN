@@ -137,6 +137,14 @@ fun VersionInfo.currentReleaseWarning(): String? {
     return "Каталог текущего релиза повреждён$detail. Запуск не заблокирован; используйте сброс root-части или переустановку модуля, если runtime ведёт себя нестабильно."
 }
 
+fun VersionInfo.runtimePreflightWarning(): String? {
+    if (runtimePreflightOK) return null
+    val issue = runtimePreflightIssues.firstOrNull()?.ifBlank { null }
+        ?: runtimePreflightWarnings.firstOrNull()?.ifBlank { null }
+        ?: "unknown"
+    return "APK и модуль несовместимы: runtime preflight не пройден ($issue)"
+}
+
 internal fun ipcCompatibilityRequirement(requiredMethods: Set<String>): IpcCompatibilityRequirement {
     val policies = requiredMethods.map { method -> GeneratedDaemonContract.METHOD_COMPATIBILITY[method].orEmpty() }
     val enforceReleaseMatch = policies.none { it == COMPAT_RELEASE_MISMATCH_ALLOWED }
@@ -163,6 +171,7 @@ internal fun ipcCompatibilityIssue(
     val missingMethods = contract.missingRequiredMethods(contractRequiredMethods)
     val contractMismatches = contract.contractSurfaceMismatches(contractRequiredMethods)
     val releaseMismatch = info.releaseMismatch(apkVersion)
+    val runtimePreflightWarning = info.runtimePreflightWarning()
     contract.headerMismatch(info, requirement, minControlProtocolVersion, minSchemaVersion)
         ?.let { return it }
     if (contractMismatches.isNotEmpty()) {
@@ -171,6 +180,8 @@ internal fun ipcCompatibilityIssue(
     return when {
         requirement.enforceReleaseMatch && releaseMismatch != null ->
             releaseMismatch
+        requirement.requiresSingBox && runtimePreflightWarning != null ->
+            runtimePreflightWarning
         info.controlProtocolVersion < minControlProtocolVersion ->
             "APK и модуль несовместимы: APK $apkVersion, daemon ${info.daemonVersion}, module ${info.moduleVersion}; control protocol ${info.controlProtocolVersion}, нужен $minControlProtocolVersion"
         requirement.requiresSchemaVersion && info.schemaVersion < minSchemaVersion ->

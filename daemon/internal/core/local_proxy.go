@@ -235,11 +235,13 @@ func tcpListenerOwnersByPort(ports []int) map[int][]int {
 		if err != nil {
 			continue
 		}
-		for port, uid := range parseProcNetTCPListeners(string(data), wanted) {
+		for port, uids := range parseProcNetTCPListeners(string(data), wanted) {
 			if owners[port] == nil {
 				owners[port] = map[int]bool{}
 			}
-			owners[port][uid] = true
+			for _, uid := range uids {
+				owners[port][uid] = true
+			}
 		}
 	}
 
@@ -255,8 +257,8 @@ func tcpListenerOwnersByPort(ports []int) map[int][]int {
 	return result
 }
 
-func parseProcNetTCPListeners(raw string, wanted map[int]bool) map[int]int {
-	result := map[int]int{}
+func parseProcNetTCPListeners(raw string, wanted map[int]bool) map[int][]int {
+	result := map[int]map[int]bool{}
 	for _, line := range strings.Split(raw, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 10 || fields[0] == "sl" || fields[3] != "0A" {
@@ -270,9 +272,21 @@ func parseProcNetTCPListeners(raw string, wanted map[int]bool) map[int]int {
 		if err != nil {
 			continue
 		}
-		result[port] = uid
+		if result[port] == nil {
+			result[port] = map[int]bool{}
+		}
+		result[port][uid] = true
 	}
-	return result
+	out := map[int][]int{}
+	for port, set := range result {
+		uids := make([]int, 0, len(set))
+		for uid := range set {
+			uids = append(uids, uid)
+		}
+		sort.Ints(uids)
+		out[port] = uids
+	}
+	return out
 }
 
 func parseProcNetPort(localAddress string) (int, error) {

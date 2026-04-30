@@ -98,6 +98,13 @@ internal fun parseVersionInfo(element: JsonElement): VersionInfo {
         currentReleaseVersion = obj["current_release"]?.jsonObject?.get("version")?.jsonPrimitive?.content ?: "",
         currentReleaseOK = obj["current_release"]?.jsonObject?.get("ok")?.jsonPrimitive?.booleanOrNull,
         currentReleaseError = obj["current_release"]?.jsonObject?.get("error")?.jsonPrimitive?.contentOrNull ?: "",
+        runtimePreflightOK = obj["runtime_preflight"]?.jsonObject?.get("ok")?.jsonPrimitive?.booleanOrNull ?: true,
+        runtimePreflightIssues = obj["runtime_preflight"]?.jsonObject?.get("issues")?.jsonArray?.mapNotNull {
+            it.jsonPrimitive.contentOrNull
+        }.orEmpty(),
+        runtimePreflightWarnings = obj["runtime_preflight"]?.jsonObject?.get("warnings")?.jsonArray?.mapNotNull {
+            it.jsonPrimitive.contentOrNull
+        }.orEmpty(),
         singBoxAvailable = obj["sing_box"]?.jsonObject?.get("error")?.jsonPrimitive?.contentOrNull.isNullOrBlank(),
         singBoxError = obj["sing_box"]?.jsonObject?.get("error")?.jsonPrimitive?.contentOrNull ?: "",
         controlProtocolVersion = obj["control_protocol_version"]?.jsonPrimitive?.intOrNull
