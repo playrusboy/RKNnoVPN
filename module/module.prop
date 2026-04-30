@@ -1,7 +1,7 @@
 id=rknnovpn
 name=RKNnoVPN
-version=v2.0.0
-versionCode=2000
+version=v2.0.3
+versionCode=2003
 author=RKNnoVPN
 description=Transparent proxy via tproxy+iptables with sing-box. No VpnService, no TUN.
 updateJson=https://raw.githubusercontent.com/youtubediscord/RKNnoVPN/main/update.json
