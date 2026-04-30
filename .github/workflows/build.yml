@@ -254,7 +254,11 @@ jobs:
         run: |
           mkdir -p "out/${{ matrix.arch }}"
           cd sing-box-src
-          LDFLAGS="$(cat release/LDFLAGS)"
+          if [[ -f release/LDFLAGS ]]; then
+            LDFLAGS="$(cat release/LDFLAGS)"
+          else
+            LDFLAGS="-X 'internal/godebug.defaultGODEBUG=multipathtcp=0' -checklinkname=0"
+          fi
           export CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.cc }}"
           CGO_ENABLED=1 GOOS=android GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} go build \
             -trimpath \
