@@ -28,6 +28,9 @@ SETTLE_DELAY=5
 DAEMON_READY_TIMEOUT=15
 OOM_SCORE_ADJ="${RKNNOVPN_OOM_SCORE_ADJ:-300}"
 APP_REPAIR=0
+SERVICE_LOCK_DIR="${RKNNOVPN_DIR}/run/service.lock"
+SERVICE_LOCK_WAIT="${RKNNOVPN_SERVICE_LOCK_WAIT:-60}"
+SERVICE_LOCK_HELD=0
 
 case "${1:-}" in
     --app-repair)
@@ -167,6 +170,47 @@ detect_busybox() {
 }
 
 prepare_runtime_dirs
+
+service_lock_owner_alive() {
+    _pid="$(cat "${SERVICE_LOCK_DIR}/pid" 2>/dev/null)"
+    [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null
+}
+
+release_service_lock() {
+    if [ "$SERVICE_LOCK_HELD" = "1" ]; then
+        rm -rf "$SERVICE_LOCK_DIR" 2>/dev/null
+        SERVICE_LOCK_HELD=0
+    fi
+}
+
+acquire_service_lock() {
+    _waited=0
+    while ! mkdir "$SERVICE_LOCK_DIR" 2>/dev/null; do
+        if ! service_lock_owner_alive; then
+            rm -rf "$SERVICE_LOCK_DIR" 2>/dev/null
+            continue
+        fi
+        if [ "$_waited" -ge "$SERVICE_LOCK_WAIT" ]; then
+            log_warn "Another service launch is still running; skipping this invocation"
+            return 1
+        fi
+        if [ "$_waited" = "0" ]; then
+            log_info "Another service launch is running; waiting for lock"
+        fi
+        sleep 1
+        _waited=$((_waited + 1))
+    done
+
+    SERVICE_LOCK_HELD=1
+    echo "$$" > "${SERVICE_LOCK_DIR}/pid" 2>/dev/null
+    trap release_service_lock EXIT HUP INT TERM
+    return 0
+}
+
+if ! acquire_service_lock; then
+    exit 0
+fi
+
 rotate_logs_if_version_changed
 prepare_runtime_dirs
 detect_busybox
@@ -203,6 +247,23 @@ wait_boot_completed
 log_info "Settle delay: ${SETTLE_DELAY}s"
 sleep "$SETTLE_DELAY"
 
+first_pid_by_cmd_path() {
+    wanted="$1"
+    for p in /proc/[0-9]*; do
+        pid="${p##*/}"
+        [ "$pid" = "$$" ] && continue
+        [ -r "$p/cmdline" ] || continue
+        cmd="$(cat "$p/cmdline" 2>/dev/null | tr '\000' ' ')"
+        case "$cmd" in
+            *"$wanted"*)
+                echo "$pid"
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
 # ============================================================================
 # 3. Boot rescue cleanup
 # ============================================================================
@@ -216,16 +277,39 @@ has_boot_cleanup_markers() {
     return 1
 }
 
+is_reset_active() {
+    if command -v rknnovpn_is_reset_active >/dev/null 2>&1; then
+        rknnovpn_is_reset_active
+        return $?
+    fi
+    [ -f "${RKNNOVPN_DIR}/run/reset.lock" ]
+}
+
 if [ -x "${RKNNOVPN_DIR}/scripts/rescue_reset.sh" ]; then
-    if has_boot_cleanup_markers; then
+    EXISTING_DAEMON_PID="$(first_pid_by_cmd_path "$DAEMON_BIN" 2>/dev/null)"
+    DAEMON_PROCESS_WITHOUT_SOCKET=0
+    if [ -n "$EXISTING_DAEMON_PID" ] && ! { [ -S "$DAEMON_SOCKET" ] 2>/dev/null || [ -e "$DAEMON_SOCKET" ]; }; then
+        DAEMON_PROCESS_WITHOUT_SOCKET=1
+    fi
+
+    if [ "$APP_REPAIR" = "1" ] && is_reset_active && [ -n "$EXISTING_DAEMON_PID" ]; then
+        log_info "Reset lock is active; app repair will not interrupt the running reset"
+    elif has_boot_cleanup_markers || [ "$DAEMON_PROCESS_WITHOUT_SOCKET" = "1" ]; then
         log_info "Running boot rescue cleanup"
+        if "${RKNNOVPN_DIR}/scripts/rescue_reset.sh" --boot-clean >> "$LOG_FILE" 2>&1; then
+            log_info "Boot rescue cleanup completed"
+        else
+            log_warn "Boot rescue cleanup reported leftovers; daemon will still start for diagnostics"
+        fi
+    elif [ "$APP_REPAIR" = "1" ]; then
+        log_info "No stale runtime markers; app repair will start/check daemon without boot cleanup"
     else
         log_info "Running boot rescue cleanup probe without stale runtime markers"
-    fi
-    if "${RKNNOVPN_DIR}/scripts/rescue_reset.sh" --boot-clean >> "$LOG_FILE" 2>&1; then
-        log_info "Boot rescue cleanup completed"
-    else
-        log_warn "Boot rescue cleanup reported leftovers; daemon will still start for diagnostics"
+        if "${RKNNOVPN_DIR}/scripts/rescue_reset.sh" --boot-clean >> "$LOG_FILE" 2>&1; then
+            log_info "Boot rescue cleanup completed"
+        else
+            log_warn "Boot rescue cleanup reported leftovers; daemon will still start for diagnostics"
+        fi
     fi
 else
     log_warn "Boot rescue cleanup script not found"
@@ -292,22 +376,6 @@ if [ ! -f "$CONFIG_FILE" ]; then
     log_error "Copy config.json to ${RKNNOVPN_DIR}/config/ and reboot"
     exit 1
 fi
-
-first_pid_by_cmd_path() {
-    wanted="$1"
-    for p in /proc/[0-9]*; do
-        pid="${p##*/}"
-        [ "$pid" = "$$" ] && continue
-        cmd="$(tr '\000' ' ' < "$p/cmdline" 2>/dev/null)"
-        case "$cmd" in
-            *"$wanted"*)
-                echo "$pid"
-                return 0
-                ;;
-        esac
-    done
-    return 1
-}
 
 wait_daemon_socket() {
     WAITED=0
