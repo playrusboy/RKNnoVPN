@@ -32,10 +32,14 @@ type InstallTracker struct {
 	state InstallState
 }
 
+func InstallStatePath(dataDir string) string {
+	return filepath.Join(modulecontract.NewPaths(dataDir).RunDir(), installStateFileName)
+}
+
 func NewInstallTracker(dataDir string, generation int64, modulePath string, apkPath string) *InstallTracker {
 	now := time.Now().Format(time.RFC3339)
 	return &InstallTracker{
-		path: filepath.Join(modulecontract.NewPaths(dataDir).RunDir(), installStateFileName),
+		path: InstallStatePath(dataDir),
 		state: InstallState{
 			Status:     "running",
 			Generation: generation,
@@ -50,7 +54,7 @@ func NewInstallTracker(dataDir string, generation int64, modulePath string, apkP
 func NewDownloadTracker(dataDir string) *InstallTracker {
 	now := time.Now().Format(time.RFC3339)
 	return &InstallTracker{
-		path: filepath.Join(modulecontract.NewPaths(dataDir).RunDir(), installStateFileName),
+		path: InstallStatePath(dataDir),
 		state: InstallState{
 			Status:    "downloading",
 			Step:      "update-download",
@@ -61,7 +65,7 @@ func NewDownloadTracker(dataDir string) *InstallTracker {
 }
 
 func ReadInstallState(dataDir string) (*InstallState, error) {
-	data, err := os.ReadFile(filepath.Join(modulecontract.NewPaths(dataDir).RunDir(), installStateFileName))
+	data, err := os.ReadFile(InstallStatePath(dataDir))
 	if err != nil {
 		return nil, err
 	}

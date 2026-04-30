@@ -37,9 +37,8 @@ func (p rootRuntimePorts) Stop() error {
 }
 
 func (p rootRuntimePorts) RuntimeProfile() (*config.NodeProfile, bool) {
-	p.d.mu.Lock()
-	defer p.d.mu.Unlock()
-	return p.d.cfg.ResolveProfile(), len(config.ProfilesFromConfigNodes(p.d.cfg)) > 0
+	cfg := p.d.currentConfig()
+	return cfg.ResolveProfile(), len(config.ProfilesFromConfigNodes(cfg)) > 0
 }
 
 func (p rootRuntimePorts) BeginRuntimeStartOperation() uint64 {
@@ -75,9 +74,7 @@ func (p rootRuntimePorts) RefreshRuntimeHealth(allowEgressProbe bool) runtimev2.
 }
 
 func (p rootRuntimePorts) ReapplyRuntimeRules() error {
-	p.d.mu.Lock()
-	cfg := p.d.cfg
-	p.d.mu.Unlock()
+	cfg := p.d.currentConfig()
 	_, err := rootruntime.ReapplyRuntimeRules(cfg, p.d.dataDir, rootruntime.BuildScriptEnv(cfg, p.d.dataDir), core.ExecScript)
 	return err
 }

@@ -51,14 +51,16 @@ func (h UpdateHandlers) UpdateDownload(params *json.RawMessage) (interface{}, *i
 			return nil, &ipc.RPCError{
 				Code:    ipc.CodeInvalidParams,
 				Message: err.Error(),
+				Data:    updateDownloadErrorData("UPDATE_NOT_AVAILABLE", err.Error()),
 			}
 		}
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInternalError,
 			Message: "download failed: " + err.Error(),
+			Data:    updateDownloadErrorData("UPDATE_DOWNLOAD_FAILED", err.Error()),
 		}
 	}
-	return downloaded, nil
+	return updateDownloadResult(downloaded), nil
 }
 
 func (h UpdateHandlers) UpdateInstall(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -129,4 +131,24 @@ func (h UpdateHandlers) logf(format string, args ...interface{}) {
 		return
 	}
 	log.Printf("[updater] "+format, args...)
+}
+
+func updateDownloadResult(downloaded *updater.DownloadedUpdate) map[string]interface{} {
+	result := map[string]interface{}{
+		"operation": updateDownloadOperation("downloaded", "", ""),
+	}
+	if downloaded == nil {
+		return result
+	}
+	result["module_path"] = downloaded.ModulePath
+	result["apk_path"] = downloaded.ApkPath
+	result["manifest_path"] = downloaded.ManifestPath
+	result["checksums"] = downloaded.Checksums
+	return result
+}
+
+func updateDownloadErrorData(code string, message string) map[string]interface{} {
+	return map[string]interface{}{
+		"operation": updateDownloadOperation("failed", code, message),
+	}
 }

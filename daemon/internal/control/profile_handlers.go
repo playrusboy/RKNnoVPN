@@ -2,22 +2,23 @@ package control
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
+	applytx "github.com/youtubediscord/RKNnoVPN/daemon/internal/apply"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/subscription"
 )
 
-type CurrentProfileFunc func() profiledoc.Document
-
-type ApplyProfileFunc func(profiledoc.Document, bool, string, int) (interface{}, *ipc.RPCError)
-
 type ProfileHandlers struct {
-	CurrentProfile     CurrentProfileFunc
-	ApplyProfile       ApplyProfileFunc
-	SubscriptionClient subscription.Client
-	Now                func() time.Time
+	CurrentConfig         CurrentConfigFunc
+	PersistConfigMutation PersistConfigMutationFunc
+	RuntimeStatus         RuntimeStatusFunc
+	SubscriptionClient    subscription.Client
+	Now                   func() time.Time
 }
 
 func (h ProfileHandlers) ProfileGet(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -45,7 +46,7 @@ func (h ProfileHandlers) ProfileImportNodes(params *json.RawMessage) (interface{
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
-	next, stats := profiledoc.ImportNodes(current, request.Nodes)
+	next, stats := profiledoc.MergeNodes(current, request.Nodes)
 	result, rpcErr := h.applyProfile(next, request.Reload, "profile.importNodes", len(request.Nodes))
 	if rpcErr != nil {
 		return nil, rpcErr
@@ -120,17 +121,66 @@ func (h ProfileHandlers) SubscriptionRefresh(params *json.RawMessage) (interface
 }
 
 func (h ProfileHandlers) currentProfile() (profiledoc.Document, *ipc.RPCError) {
-	if h.CurrentProfile == nil {
-		return profiledoc.Document{}, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "profile state provider is not configured"}
+	current, rpcErr := h.currentConfig()
+	if rpcErr != nil {
+		return profiledoc.Document{}, rpcErr
 	}
-	return h.CurrentProfile(), nil
+	return profiledoc.FromConfig(current), nil
 }
 
 func (h ProfileHandlers) applyProfile(doc profiledoc.Document, reload bool, action string, updated int) (interface{}, *ipc.RPCError) {
-	if h.ApplyProfile == nil {
-		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "profile apply callback is not configured"}
+	before, hasBefore := h.runtimeStatus()
+	if !hasBefore {
+		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "runtime status provider is not configured"}
 	}
-	return h.ApplyProfile(doc, reload, action, updated)
+	current, rpcErr := h.currentConfig()
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	nextCfg, warnings, err := profiledoc.ApplyToConfig(current, doc)
+	if err != nil {
+		return nil, ProfileValidationRPCError(action, before, err, warnings, updated)
+	}
+	mutation, err := h.persistConfigMutation(nextCfg, reload, action)
+	if err != nil {
+		status, ok := h.runtimeStatus()
+		if !ok {
+			status = before
+		}
+		return nil, ProfileRPCErrorSaved(action, err, mutation.ConfigSaved, status, before, warnings, updated)
+	}
+	status, ok := h.runtimeStatus()
+	if !ok {
+		status = before
+	}
+	result := ProfileSuccess(action, reload, mutation.RuntimeWasRunning, status, before, warnings, updated)
+	result["profile"] = profiledoc.FromConfig(nextCfg)
+	return result, nil
+}
+
+func (h ProfileHandlers) currentConfig() (*config.Config, *ipc.RPCError) {
+	if h.CurrentConfig == nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "config state provider is not configured"}
+	}
+	current := h.CurrentConfig()
+	if current == nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "config state is not available"}
+	}
+	return current, nil
+}
+
+func (h ProfileHandlers) persistConfigMutation(nextCfg *config.Config, reload bool, action string) (applytx.ConfigTransactionResult, error) {
+	if h.PersistConfigMutation == nil {
+		return applytx.ConfigTransactionResult{}, fmt.Errorf("profile mutation callback is not configured")
+	}
+	return h.PersistConfigMutation(nextCfg, reload, action)
+}
+
+func (h ProfileHandlers) runtimeStatus() (runtimev2.Status, bool) {
+	if h.RuntimeStatus == nil {
+		return runtimev2.Status{}, false
+	}
+	return h.RuntimeStatus()
 }
 
 func (h ProfileHandlers) subscriptionClient() subscription.Client {

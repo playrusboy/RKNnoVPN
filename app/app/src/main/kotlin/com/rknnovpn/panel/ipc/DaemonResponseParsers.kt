@@ -73,6 +73,7 @@ internal fun parseUpdateDownloadInfo(element: JsonElement): UpdateDownloadInfo {
         apkPath = obj["apk_path"]?.jsonPrimitive?.content ?: "",
         manifestPath = obj["manifest_path"]?.jsonPrimitive?.content ?: "",
         checksums = obj["checksums"]?.jsonPrimitive?.booleanOrNull ?: false,
+        operation = obj["operation"],
     )
 }
 

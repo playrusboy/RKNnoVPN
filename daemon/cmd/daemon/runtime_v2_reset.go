@@ -69,10 +69,7 @@ func (h daemonResetHooks) RescueResetCore() error {
 }
 
 func (h daemonResetHooks) ScriptEnv() map[string]string {
-	h.d.mu.Lock()
-	cfg := h.d.cfg
-	h.d.mu.Unlock()
-	return rootruntime.BuildScriptEnv(cfg, h.d.dataDir)
+	return rootruntime.BuildScriptEnv(h.d.currentConfig(), h.d.dataDir)
 }
 
 func (h daemonResetHooks) ExecRescueReset(scriptPath string, env map[string]string) error {
@@ -87,10 +84,7 @@ func (h daemonResetHooks) ClearRuntimeState() {
 }
 
 func (h daemonResetHooks) VerifyCleanup() []string {
-	h.d.mu.Lock()
-	cfg := h.d.cfg
-	h.d.mu.Unlock()
-	return h.d.collectNetworkLeftovers(cfg)
+	return h.d.collectNetworkLeftovers(h.d.currentConfig())
 }
 
 func (d *daemon) shouldSkipRootReconcile() (bool, string) {

@@ -13,10 +13,7 @@ import (
 )
 
 func (d *daemon) startSubsystems() {
-	d.mu.Lock()
-	cfg := d.cfg
-	d.mu.Unlock()
-
+	cfg := d.currentConfig()
 	if d.healthMon != nil && cfg != nil && cfg.Health.Enabled && cfg.Health.IntervalSec > 0 {
 		d.healthMon.Start()
 	}
@@ -65,19 +62,15 @@ func (d *daemon) reloadConfig() error {
 func (d *daemon) dumpState() {
 	status := d.coreMgr.Status()
 
-	d.mu.Lock()
-	cfgPath := d.cfgPath
-	dataDir := d.dataDir
 	rescueEnabled := false
-	if d.cfg != nil {
-		rescueEnabled = d.cfg.Rescue.Enabled
+	if cfg := d.currentConfig(); cfg != nil {
+		rescueEnabled = cfg.Rescue.Enabled
 	}
-	d.mu.Unlock()
 
 	state := map[string]interface{}{
 		"version":         Version,
-		"config_path":     cfgPath,
-		"data_dir":        dataDir,
+		"config_path":     d.cfgPath,
+		"data_dir":        d.dataDir,
 		"core_state":      status.State,
 		"core_pid":        status.PID,
 		"uptime":          status.Uptime,

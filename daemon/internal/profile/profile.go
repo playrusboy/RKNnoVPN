@@ -373,26 +373,22 @@ func Normalize(doc Document) (Document, []Warning, error) {
 	return doc, warnings, nil
 }
 
-func MergeNodes(current Document, incoming []Node, markRemovedStale bool) (Document, map[string]int) {
+func MergeNodes(current Document, incoming []Node) (Document, map[string]int) {
 	next := current
 	byKey := map[string]int{}
 	for i, node := range next.Nodes {
-		if key := nodeMatchKey(node); key != "" {
+		if key := NodeMatchKey(node); key != "" {
 			byKey[key] = i
 		}
 	}
 	stats := map[string]int{"added": 0, "updated": 0, "unchanged": 0, "stale": 0}
 	seenIncoming := map[string]bool{}
-	providerKeys := map[string]bool{}
 	for _, node := range incoming {
-		key := nodeMatchKey(node)
+		key := NodeMatchKey(node)
 		if key == "" || seenIncoming[key] {
 			continue
 		}
 		seenIncoming[key] = true
-		if strings.EqualFold(node.Source.Type, "SUBSCRIPTION") {
-			providerKeys[node.Source.ProviderKey] = true
-		}
 		if index, ok := byKey[key]; ok {
 			existing := next.Nodes[index]
 			node.ID = existing.ID
@@ -408,16 +404,6 @@ func MergeNodes(current Document, incoming []Node, markRemovedStale bool) (Docum
 		} else {
 			stats["added"]++
 			next.Nodes = append(next.Nodes, node)
-		}
-	}
-	if markRemovedStale {
-		for i, node := range next.Nodes {
-			if strings.EqualFold(node.Source.Type, "SUBSCRIPTION") && providerKeys[node.Source.ProviderKey] && !seenIncoming[nodeMatchKey(node)] {
-				if !node.Stale {
-					stats["stale"]++
-				}
-				next.Nodes[i].Stale = true
-			}
 		}
 	}
 	if next.ActiveNodeID == "" || nodeByID(next.Nodes, next.ActiveNodeID) == nil || nodeByID(next.Nodes, next.ActiveNodeID).Stale {
@@ -628,7 +614,7 @@ func decodeInbounds(raw json.RawMessage) InboundsConfig {
 	return inbounds
 }
 
-func nodeMatchKey(node Node) string {
+func NodeMatchKey(node Node) string {
 	sourceType := strings.ToUpper(strings.TrimSpace(node.Source.Type))
 	if sourceType == "" {
 		sourceType = "MANUAL"

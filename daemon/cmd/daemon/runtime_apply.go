@@ -10,14 +10,8 @@ import (
 )
 
 func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, operation runtimev2.OperationKind) error {
-	wasRunning := d.coreMgr.GetState() == core.StateRunning ||
-		d.coreMgr.GetState() == core.StateDegraded
-
-	d.mu.Lock()
-	oldCfg := d.cfg
-	d.mu.Unlock()
 	needsFullRestart := rootruntime.ReloadNeedsFullRestart(
-		rootruntime.BuildScriptEnv(oldCfg, d.dataDir),
+		rootruntime.BuildScriptEnv(d.currentConfig(), d.dataDir),
 		rootruntime.BuildScriptEnv(newCfg, d.dataDir),
 	)
 
@@ -27,14 +21,12 @@ func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, op
 			ConfigPath:       d.cfgPath,
 			Reload:           reload,
 			Operation:        operation,
-			WasRunning:       wasRunning,
+			WasRunning:       d.isRuntimeRunningOrDegraded(),
 			NeedsFullRestart: needsFullRestart,
 		},
 		applytx.RuntimeConfigApplyDeps{
-			EnsureIdle: d.failIfRuntimeOperationActive,
-			CommitConfig: func(newCfg *config.Config) {
-				d.commitAppliedRuntimeConfig(newCfg)
-			},
+			EnsureIdle:       d.failIfRuntimeOperationActive,
+			CommitConfig:     d.commitAppliedRuntimeConfig,
 			SyncDesiredState: d.syncRuntimeV2DesiredState,
 			RunOperation: func(kind runtimev2.OperationKind, phase runtimev2.Phase, fn func(generation int64) error) error {
 				_, err := d.runtimeV2.RunOperation(kind, phase, fn)
@@ -73,39 +65,23 @@ func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context stri
 			FullRestart: fullRestart,
 		},
 		rootruntime.ConfigReloadDeps{
-			StopSubsystems: func() {
-				d.stopSubsystems()
-			},
+			StopSubsystems: d.stopSubsystems,
 			FullRestart: func(generation int64) error {
 				return newRootRuntimeBackend(d).RestartAfterConfigChange(generation)
 			},
-			LastRuntimeReport: func() core.RuntimeStageReport {
-				return d.coreMgr.LastRuntimeReport()
-			},
-			HotSwap: func(profile *config.NodeProfile) error {
-				return d.coreMgr.HotSwap(profile)
-			},
+			LastRuntimeReport: d.coreMgr.LastRuntimeReport,
+			HotSwap:           d.coreMgr.HotSwap,
 			ReapplyRuntimeRules: func(cfg *config.Config) (netstack.Report, error) {
 				return rootruntime.ReapplyRuntimeRules(cfg, d.dataDir, rootruntime.BuildScriptEnv(cfg, d.dataDir), core.ExecScript)
 			},
 			ResetNetworkState: func(generation int64) runtimev2.ResetReport {
 				return d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
 			},
-			ResetRescueState: func() {
-				d.rescueMgr.Reset()
-			},
-			StartSubsystems: func() {
-				d.startSubsystems()
-			},
-			RefreshHealth: func() runtimev2.HealthSnapshot {
-				return d.runtimeV2.RefreshHealth()
-			},
-			RuntimeErrorCode: func(err error, fallback string) string {
-				return rootruntime.RuntimeErrorCode(err, fallback)
-			},
-			ObserveReloadReport: func(report core.RuntimeStageReport) {
-				d.setLastReloadReport(report)
-			},
+			ResetRescueState:    d.rescueMgr.Reset,
+			StartSubsystems:     d.startSubsystems,
+			RefreshHealth:       d.runtimeV2.RefreshHealth,
+			RuntimeErrorCode:    rootruntime.RuntimeErrorCode,
+			ObserveReloadReport: d.setLastReloadReport,
 		},
 	)
 }

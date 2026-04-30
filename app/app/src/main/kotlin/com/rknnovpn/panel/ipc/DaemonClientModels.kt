@@ -52,6 +52,7 @@ data class UpdateDownloadInfo(
     val apkPath: String,
     val checksums: Boolean,
     val manifestPath: String = "",
+    val operation: JsonElement? = null,
 )
 
 data class UpdateInstallInfo(

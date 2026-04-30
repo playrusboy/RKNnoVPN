@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.annotation.StringRes
 import com.rknnovpn.panel.R
 import com.rknnovpn.panel.ipc.ConfigMutationInfo
+import com.rknnovpn.panel.ipc.DaemonClientErrorCodes
 import com.rknnovpn.panel.ipc.DaemonClientResult
 import com.rknnovpn.panel.ipc.RejectedSubscriptionNode
 import com.rknnovpn.panel.model.RuntimeStageReport
@@ -20,11 +21,6 @@ import javax.inject.Singleton
 class UserMessageFormatter @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
-    private companion object {
-        const val COMPATIBILITY_ERROR_CODE = -32090
-        const val RUNTIME_BUSY_CODE = -32004
-    }
-
     fun get(@StringRes resId: Int, vararg args: Any): String = context.getString(resId, *args)
 
     fun defaultGroupName(): String = get(R.string.default_group_name)
@@ -38,10 +34,10 @@ class UserMessageFormatter @Inject constructor(
     fun formatDaemonFailure(result: DaemonClientResult<*>): String = when (result) {
         is DaemonClientResult.DaemonError ->
             when (result.code) {
-                COMPATIBILITY_ERROR_CODE -> result.message
+                DaemonClientErrorCodes.COMPATIBILITY -> result.message
                 else -> formatSubscriptionRejection(result) ?: if (result.configWasSaved()) {
                     get(R.string.error_config_saved_not_applied, result.message)
-                } else if (result.code == RUNTIME_BUSY_CODE) {
+                } else if (result.code == DaemonClientErrorCodes.RUNTIME_BUSY) {
                     formatRuntimeBusy(result)
                 } else {
                     get(

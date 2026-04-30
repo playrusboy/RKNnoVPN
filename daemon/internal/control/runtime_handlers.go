@@ -11,23 +11,22 @@ import (
 )
 
 type RuntimeHandlers struct {
-	DataDir                string
-	Initialized            func() bool
-	RefreshCompatibility   func()
-	RefreshActiveProgress  func() runtimev2.Status
-	Status                 func() runtimev2.Status
-	IsRunningOrDegraded    func() bool
-	CurrentHealth          func() runtimev2.HealthSnapshot
-	RefreshHealth          func() runtimev2.HealthSnapshot
-	ApplyDesiredState      func(runtimev2.DesiredState) (runtimev2.Status, error)
-	DesiredStateApplyError func(error) *ipc.RPCError
-	SyncDesiredState       func() error
-	Start                  func() (runtimev2.Status, error)
-	Stop                   func() (runtimev2.Status, error)
-	Restart                func() (runtimev2.Status, error)
-	Reset                  func() (runtimev2.Status, error)
-	TestNodes              func(url string, timeoutMS int, nodeIDs []string) ([]runtimev2.NodeProbeResult, error)
-	RuntimeError           func(error) *ipc.RPCError
+	DataDir               string
+	Initialized           func() bool
+	RefreshCompatibility  func()
+	RefreshActiveProgress func() runtimev2.Status
+	Status                func() runtimev2.Status
+	IsRunningOrDegraded   func() bool
+	CurrentHealth         func() runtimev2.HealthSnapshot
+	RefreshHealth         func() runtimev2.HealthSnapshot
+	ApplyDesiredState     func(runtimev2.DesiredState) (runtimev2.Status, error)
+	SyncDesiredState      func() error
+	Start                 func() (runtimev2.Status, error)
+	Stop                  func() (runtimev2.Status, error)
+	Restart               func() (runtimev2.Status, error)
+	Reset                 func() (runtimev2.Status, error)
+	TestNodes             func(url string, timeoutMS int, nodeIDs []string) ([]runtimev2.NodeProbeResult, error)
+	RuntimeError          func(error) *ipc.RPCError
 }
 
 func (h RuntimeHandlers) BackendStatus(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -66,7 +65,7 @@ func (h RuntimeHandlers) BackendApplyDesiredState(params *json.RawMessage) (inte
 	}
 	status, err := h.ApplyDesiredState(desired)
 	if err != nil {
-		return nil, h.desiredStateApplyError(err)
+		return nil, DesiredStateApplyRPCError(err)
 	}
 	return status, nil
 }
@@ -220,13 +219,6 @@ func (h RuntimeHandlers) refreshHealth() runtimev2.HealthSnapshot {
 		return h.RefreshHealth()
 	}
 	return runtimev2.HealthSnapshot{}
-}
-
-func (h RuntimeHandlers) desiredStateApplyError(err error) *ipc.RPCError {
-	if h.DesiredStateApplyError != nil {
-		return h.DesiredStateApplyError(err)
-	}
-	return h.runtimeError(err)
 }
 
 func (h RuntimeHandlers) runtimeError(err error) *ipc.RPCError {

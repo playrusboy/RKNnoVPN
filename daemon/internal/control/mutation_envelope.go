@@ -241,6 +241,162 @@ func ProfileOperation(
 	return result
 }
 
+func ProfileValidationRPCError(action string, before runtimev2.Status, err error, warnings []profiledoc.Warning, updated int) *ipc.RPCError {
+	return &ipc.RPCError{
+		Code:    ipc.CodeConfigError,
+		Message: "profile validation failed: " + err.Error(),
+		Data: ProfileOperation(
+			action,
+			"failed",
+			false,
+			false,
+			"not_started",
+			ProfileDesiredGeneration(before, before),
+			before.AppliedState.Generation,
+			"CONFIG_VALIDATION_FAILED",
+			err.Error(),
+			nil,
+			warnings,
+			updated,
+		),
+	}
+}
+
+func ProfileRPCErrorSaved(action string, err error, saved bool, status runtimev2.Status, before runtimev2.Status, warnings []profiledoc.Warning, updated int) *ipc.RPCError {
+	resultStatus := "failed"
+	runtimeApply := "not_started"
+	if saved {
+		resultStatus = "saved_not_applied"
+		runtimeApply = "failed"
+	}
+	data := ProfileOperation(
+		action,
+		resultStatus,
+		saved,
+		false,
+		runtimeApply,
+		ProfileDesiredGeneration(status, before),
+		status.AppliedState.Generation,
+		rootruntime.RuntimeErrorCode(err, "PROFILE_APPLY_FAILED"),
+		err.Error(),
+		rootruntime.ResetReportFromError(err),
+		warnings,
+		updated,
+	)
+	var busy *runtimev2.OperationBusyError
+	if errors.As(err, &busy) {
+		data["busy"] = busy.Data()
+		return &ipc.RPCError{
+			Code:    ipc.CodeRuntimeBusy,
+			Message: busy.Error(),
+			Data:    data,
+		}
+	}
+	var validation applytx.ConfigValidationError
+	if errors.As(err, &validation) {
+		return &ipc.RPCError{
+			Code:    ipc.CodeConfigError,
+			Message: err.Error(),
+			Data:    data,
+		}
+	}
+	return &ipc.RPCError{
+		Code:    ipc.CodeInternalError,
+		Message: err.Error(),
+		Data:    data,
+	}
+}
+
+func ProfileSuccess(action string, reload bool, runtimeWasRunning bool, status runtimev2.Status, before runtimev2.Status, warnings []profiledoc.Warning, updated int) map[string]interface{} {
+	runtimeApply := RuntimeApplyStatus(reload, runtimeWasRunning)
+	runtimeApplied := runtimeApply == "applied"
+	if runtimeApply == "accepted" {
+		runtimeApplied = false
+	}
+	resultStatus := "ok"
+	if runtimeApply == "skipped_runtime_stopped" {
+		resultStatus = "saved"
+	}
+	result := ProfileOperation(
+		action,
+		resultStatus,
+		true,
+		runtimeApplied,
+		runtimeApply,
+		ProfileDesiredGeneration(status, before),
+		status.AppliedState.Generation,
+		"",
+		"",
+		nil,
+		warnings,
+		updated,
+	)
+	result["ok"] = true
+	result["runtimeStatus"] = status
+	return result
+}
+
+func ProfileDesiredGeneration(status runtimev2.Status, before runtimev2.Status) int64 {
+	if status.ActiveOperation != nil {
+		return status.ActiveOperation.Generation
+	}
+	if status.AppliedState.Generation > before.AppliedState.Generation {
+		return status.AppliedState.Generation
+	}
+	return before.AppliedState.Generation + 1
+}
+
+func updateDownloadOperation(status string, code string, message string) map[string]interface{} {
+	const operationType = "update-download"
+	stageStatuses := map[string]string{
+		"update-check":      "ok",
+		"update-download":   "ok",
+		"update-verify":     "ok",
+		"persist-artifacts": "ok",
+	}
+	if status == "failed" {
+		failedStage := updateDownloadFailedStage(code)
+		for name := range stageStatuses {
+			stageStatuses[name] = "not_started"
+		}
+		policy, _ := ipc.OperationPolicyForType(operationType)
+		for _, name := range policy.Stages {
+			stageStatuses[name] = "ok"
+			if name == failedStage {
+				stageStatuses[name] = "failed"
+				break
+			}
+		}
+	}
+	policy, _ := ipc.OperationPolicyForType(operationType)
+	operation := map[string]interface{}{
+		"type":   operationType,
+		"action": "update-download",
+		"status": status,
+		"stages": mutationStagesInOrder(policy.Stages, stageStatuses),
+	}
+	if code != "" {
+		operation["code"] = code
+	}
+	if message != "" {
+		operation["message"] = message
+	}
+	return operation
+}
+
+func updateDownloadFailedStage(code string) string {
+	switch code {
+	case "UPDATE_CHECK_FAILED", "UPDATE_NOT_AVAILABLE":
+		return "update-check"
+	case "UPDATE_DOWNLOAD_FAILED":
+		return "update-download"
+	case "UPDATE_VERIFY_FAILED":
+		return "update-verify"
+	default:
+		return "persist-artifacts"
+	}
+}
+
 func mutationStages(operationType string, status string, saved bool, runtimeApplyStageStatus string, runtimeApply string, code string, resetReport interface{}) []map[string]interface{} {
 	validateStatus, renderStatus := validationStageStatuses(status, saved, code)
 	stageStatuses := map[string]string{

@@ -18,10 +18,7 @@ func (d *daemon) installRescueCallbacks() {
 				log.Printf("rescue skipped: runtime changed before recovery")
 				return nil
 			}
-			d.mu.Lock()
-			rescueEnabled := d.cfg.Rescue.Enabled
-			d.mu.Unlock()
-			if !rescueEnabled {
+			if !d.currentConfig().Rescue.Enabled {
 				log.Printf("rescue disabled, skipping automatic recovery")
 				return nil
 			}
@@ -29,9 +26,7 @@ func (d *daemon) installRescueCallbacks() {
 				return d.canRunRuntimeRecovery(epoch)
 			}); err != nil {
 				log.Printf("rescue attempt failed: %v", err)
-				d.mu.Lock()
-				maxAttempts := d.cfg.Rescue.MaxAttempts
-				d.mu.Unlock()
+				maxAttempts := d.currentConfig().Rescue.MaxAttempts
 				if maxAttempts < 1 {
 					maxAttempts = 1
 				}

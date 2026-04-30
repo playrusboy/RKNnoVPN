@@ -24,9 +24,6 @@ import kotlinx.serialization.json.putJsonArray
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val COMPATIBILITY_ERROR_CODE = -32090
-private const val CONFIG_APPLY_ERROR_CODE = -32003
-
 /**
  * Typed, high-level client for daemon IPC methods.
  *
@@ -408,7 +405,7 @@ class DaemonClient @Inject constructor(
                 val info = json.parseConfigMutationInfo(element)
                 if (!info.ok) {
                     DaemonClientResult.DaemonError(
-                        CONFIG_APPLY_ERROR_CODE,
+                        DaemonClientErrorCodes.CONFIG_ERROR,
                         info.message.ifBlank { "configuration was not applied" },
                         element,
                     )
@@ -424,19 +421,19 @@ class DaemonClient @Inject constructor(
                 val info = result.data
                 if ("ipc.contract" !in info.supportedMethods) {
                     return DaemonClientResult.DaemonError(
-                        COMPATIBILITY_ERROR_CODE,
+                        DaemonClientErrorCodes.COMPATIBILITY,
                         "APK и модуль несовместимы: daemon не рекламирует IPC contract",
                     )
                 }
                 val contract = when (val contractResult = ipcContract()) {
                     is DaemonClientResult.Ok -> contractResult.data
                     is DaemonClientResult.DaemonError -> return DaemonClientResult.DaemonError(
-                        COMPATIBILITY_ERROR_CODE,
+                        DaemonClientErrorCodes.COMPATIBILITY,
                         "APK и модуль несовместимы: daemon не отдал IPC contract (${contractResult.message})",
                         contractResult.details,
                     )
                     is DaemonClientResult.ParseError -> return DaemonClientResult.DaemonError(
-                        COMPATIBILITY_ERROR_CODE,
+                        DaemonClientErrorCodes.COMPATIBILITY,
                         "APK и модуль несовместимы: некорректный IPC contract",
                     )
                     is DaemonClientResult.RootDenied -> return contractResult
@@ -455,12 +452,12 @@ class DaemonClient @Inject constructor(
                 if (issue == null) {
                     null
                 } else {
-                    DaemonClientResult.DaemonError(COMPATIBILITY_ERROR_CODE, issue)
+                    DaemonClientResult.DaemonError(DaemonClientErrorCodes.COMPATIBILITY, issue)
                 }
             }
             is DaemonClientResult.DaemonError ->
                 DaemonClientResult.DaemonError(
-                    COMPATIBILITY_ERROR_CODE,
+                    DaemonClientErrorCodes.COMPATIBILITY,
                     "APK и модуль несовместимы: daemon не сообщает capabilities (${result.message})",
                     result.details,
                 )
@@ -468,7 +465,7 @@ class DaemonClient @Inject constructor(
             is DaemonClientResult.Timeout -> result
             is DaemonClientResult.DaemonNotFound -> result
             is DaemonClientResult.ParseError -> DaemonClientResult.DaemonError(
-                COMPATIBILITY_ERROR_CODE,
+                DaemonClientErrorCodes.COMPATIBILITY,
                 "APK и модуль несовместимы: некорректный ответ version",
             )
             is DaemonClientResult.Failure -> result

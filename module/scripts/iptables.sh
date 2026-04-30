@@ -8,6 +8,7 @@
 # ============================================================================
 
 set -eu
+set -f
 
 TAG="RKNnoVPN:iptables"
 SCRIPT_VERSION="v1.8.0"
@@ -115,6 +116,8 @@ validate_env() {
             *) DNS_SCOPE="off" ;;
         esac
     fi
+
+    validate_runtime_values
 }
 
 ipv6_mangle_available() {
@@ -146,38 +149,193 @@ ip_rule_present() {
         END { exit found ? 0 : 1 }'
 }
 
+local_route_present() {
+    _family="$1"
+    _table="$2"
+    if [ "$_family" = "6" ]; then
+        ip -6 route show table "$_table" 2>/dev/null | grep -q "local default dev lo"
+    else
+        ip route show table "$_table" 2>/dev/null | grep -q "local default dev lo"
+    fi
+}
+
+validate_uint() {
+    _name="$1"
+    _value="$2"
+    case "$_value" in
+        ''|*[!0-9]*)
+            log_error "Invalid ${_name}: expected unsigned integer"
+            exit 1
+            ;;
+    esac
+}
+
+validate_hex_mark() {
+    _name="$1"
+    _value="$2"
+    case "$_value" in
+        0x[0-9a-fA-F]*)
+            ;;
+        *)
+            log_error "Invalid ${_name}: expected hex mark like 0x2023"
+            exit 1
+            ;;
+    esac
+    case "${_value#0x}" in
+        ''|*[!0-9a-fA-F]*)
+            log_error "Invalid ${_name}: expected hex mark like 0x2023"
+            exit 1
+            ;;
+    esac
+}
+
+validate_enum() {
+    _name="$1"
+    _value="$2"
+    _allowed="$3"
+    case " ${_allowed} " in
+        *" ${_value} "*) ;;
+        *)
+            log_error "Invalid ${_name}: ${_value}"
+            exit 1
+            ;;
+    esac
+}
+
+validate_uint_list() {
+    _name="$1"
+    _value="$2"
+    _item=""
+    for _item in $_value; do
+        validate_uint "$_name" "$_item"
+    done
+}
+
+validate_port_uid_rules() {
+    _name="$1"
+    _value="$2"
+    _item=""
+    _port=""
+    _uid=""
+    for _item in $_value; do
+        case "$_item" in
+            *:*)
+                _port="${_item%%:*}"
+                _uid="${_item#*:}"
+                validate_uint "$_name port" "$_port"
+                validate_uint "$_name uid" "$_uid"
+                ;;
+            *)
+                log_error "Invalid ${_name}: expected port:uid entries"
+                exit 1
+                ;;
+        esac
+    done
+}
+
+validate_runtime_values() {
+    validate_uint TPROXY_PORT "$TPROXY_PORT"
+    validate_uint DNS_PORT "$DNS_PORT"
+    validate_uint API_PORT "$API_PORT"
+    validate_uint SOCKS_PORT "$SOCKS_PORT"
+    validate_uint HTTP_PORT "$HTTP_PORT"
+    validate_uint CORE_GID "$CORE_GID"
+    validate_uint ROUTE_TABLE "$ROUTE_TABLE"
+    validate_uint ROUTE_TABLE_V6 "$ROUTE_TABLE_V6"
+    validate_hex_mark FWMARK "$FWMARK"
+    validate_enum APP_MODE "$APP_MODE" "whitelist blacklist all off"
+    validate_enum DNS_SCOPE "$DNS_SCOPE" "off all uids all_except_uids"
+    validate_enum DNS_MODE "$DNS_MODE" "off all per_uid uid"
+    validate_enum PROXY_MODE "$PROXY_MODE" "tproxy"
+    validate_uint_list CHAIN_PROXY_PORTS "$CHAIN_PROXY_PORTS"
+    validate_uint_list CHAIN_PROXY_UIDS "$CHAIN_PROXY_UIDS"
+    validate_port_uid_rules CHAIN_PROXY_RULES "$CHAIN_PROXY_RULES"
+    validate_uint_list PROXY_UIDS "$PROXY_UIDS"
+    validate_uint_list DIRECT_UIDS "$DIRECT_UIDS"
+    validate_uint_list BYPASS_UIDS "$BYPASS_UIDS"
+    IPV6_MANGLE_APPLIED="${IPV6_MANGLE_APPLIED:-0}"
+    IPV6_ROUTE_APPLIED="${IPV6_ROUTE_APPLIED:-0}"
+    validate_enum IPV6_MANGLE_APPLIED "$IPV6_MANGLE_APPLIED" "0 1"
+    validate_enum IPV6_ROUTE_APPLIED "$IPV6_ROUTE_APPLIED" "0 1"
+}
+
+write_snapshot_var() {
+    _name="$1"
+    eval "_value=\${${_name}:-}"
+    printf "%s='%s'\n" "$_name" "$_value"
+}
+
 save_snapshot() {
     mkdir -p "${SNAPSHOT_DIR}"
 
-    cat > "${SNAPSHOT_DIR}/env.sh" <<SNAPSHOT_EOF
-# RKNnoVPN runtime snapshot — generated at $(date)
-TPROXY_PORT=${TPROXY_PORT}
-DNS_PORT=${DNS_PORT}
-API_PORT=${API_PORT}
-SOCKS_PORT=${SOCKS_PORT}
-HTTP_PORT=${HTTP_PORT}
-CHAIN_PROXY_PORTS="${CHAIN_PROXY_PORTS}"
-CHAIN_PROXY_UIDS="${CHAIN_PROXY_UIDS}"
-CHAIN_PROXY_RULES="${CHAIN_PROXY_RULES}"
-FWMARK=${FWMARK}
-ROUTE_TABLE=${ROUTE_TABLE}
-ROUTE_TABLE_V6=${ROUTE_TABLE_V6}
-CORE_GID=${CORE_GID}
-APP_MODE=${APP_MODE}
-PROXY_UIDS="${PROXY_UIDS}"
-DIRECT_UIDS="${DIRECT_UIDS}"
-BYPASS_UIDS="${BYPASS_UIDS}"
-DNS_SCOPE=${DNS_SCOPE}
-DNS_MODE=${DNS_MODE}
-PROXY_MODE=${PROXY_MODE}
-SNAPSHOT_EOF
+    validate_runtime_values
+    _tmp="${SNAPSHOT_DIR}/env.sh.tmp.$$"
+    {
+        echo "# RKNnoVPN runtime snapshot - generated at $(date)"
+        for _name in TPROXY_PORT DNS_PORT API_PORT SOCKS_PORT HTTP_PORT \
+            CHAIN_PROXY_PORTS CHAIN_PROXY_UIDS CHAIN_PROXY_RULES \
+            FWMARK ROUTE_TABLE ROUTE_TABLE_V6 CORE_GID APP_MODE \
+            PROXY_UIDS DIRECT_UIDS BYPASS_UIDS DNS_SCOPE DNS_MODE \
+            PROXY_MODE IPV6_MANGLE_APPLIED IPV6_ROUTE_APPLIED; do
+            write_snapshot_var "$_name"
+        done
+    } > "$_tmp"
+    chmod 0600 "$_tmp" 2>/dev/null || true
+    mv "$_tmp" "${SNAPSHOT_DIR}/env.sh"
 
     log_info "Runtime snapshot saved to ${SNAPSHOT_DIR}/env.sh"
 }
 
 load_snapshot() {
     if [ -f "${SNAPSHOT_DIR}/env.sh" ]; then
-        . "${SNAPSHOT_DIR}/env.sh"
+        _line=""
+        _name=""
+        _value=""
+        while IFS= read -r _line || [ -n "$_line" ]; do
+            case "$_line" in
+                ''|\#*) continue ;;
+            esac
+            _name="${_line%%=*}"
+            _value="${_line#*=}"
+            case "$_value" in
+                \'*\')
+                    _value="${_value#\'}"
+                    _value="${_value%\'}"
+                    ;;
+                *)
+                    log_error "Invalid runtime snapshot entry for ${_name}"
+                    return 1
+                    ;;
+            esac
+            case "$_name" in
+                TPROXY_PORT) TPROXY_PORT="$_value" ;;
+                DNS_PORT) DNS_PORT="$_value" ;;
+                API_PORT) API_PORT="$_value" ;;
+                SOCKS_PORT) SOCKS_PORT="$_value" ;;
+                HTTP_PORT) HTTP_PORT="$_value" ;;
+                CHAIN_PROXY_PORTS) CHAIN_PROXY_PORTS="$_value" ;;
+                CHAIN_PROXY_UIDS) CHAIN_PROXY_UIDS="$_value" ;;
+                CHAIN_PROXY_RULES) CHAIN_PROXY_RULES="$_value" ;;
+                FWMARK) FWMARK="$_value" ;;
+                ROUTE_TABLE) ROUTE_TABLE="$_value" ;;
+                ROUTE_TABLE_V6) ROUTE_TABLE_V6="$_value" ;;
+                CORE_GID) CORE_GID="$_value" ;;
+                APP_MODE) APP_MODE="$_value" ;;
+                PROXY_UIDS) PROXY_UIDS="$_value" ;;
+                DIRECT_UIDS) DIRECT_UIDS="$_value" ;;
+                BYPASS_UIDS) BYPASS_UIDS="$_value" ;;
+                DNS_SCOPE) DNS_SCOPE="$_value" ;;
+                DNS_MODE) DNS_MODE="$_value" ;;
+                PROXY_MODE) PROXY_MODE="$_value" ;;
+                IPV6_MANGLE_APPLIED) IPV6_MANGLE_APPLIED="$_value" ;;
+                IPV6_ROUTE_APPLIED) IPV6_ROUTE_APPLIED="$_value" ;;
+                *)
+                    log_error "Unknown runtime snapshot key ${_name}"
+                    return 1
+                    ;;
+            esac
+        done < "${SNAPSHOT_DIR}/env.sh"
+        validate_runtime_values
         log_info "Loaded runtime snapshot from ${SNAPSHOT_DIR}/env.sh"
         return 0
     fi
@@ -187,12 +345,30 @@ load_snapshot() {
 setup_policy_routing() {
     teardown_policy_routing
 
-    ip rule add fwmark ${FWMARK} table ${ROUTE_TABLE} 2>/dev/null || true
-    ip route add local default dev lo table ${ROUTE_TABLE} 2>/dev/null || true
-    ip -6 rule add fwmark ${FWMARK} table ${ROUTE_TABLE_V6} 2>/dev/null || true
-    ip -6 route add local default dev lo table ${ROUTE_TABLE_V6} 2>/dev/null || true
+    IPV6_ROUTE_APPLIED=0
 
-    log_info "Policy routing configured (table=${ROUTE_TABLE}/${ROUTE_TABLE_V6}, mark=${FWMARK})"
+    if ! ip rule add fwmark ${FWMARK} table ${ROUTE_TABLE} 2>/dev/null && ! ip_rule_present 4 "$ROUTE_TABLE"; then
+        log_error "Failed to add IPv4 policy rule fwmark ${FWMARK} table ${ROUTE_TABLE}"
+        return 1
+    fi
+    if ! ip route add local default dev lo table ${ROUTE_TABLE} 2>/dev/null && ! local_route_present 4 "$ROUTE_TABLE"; then
+        log_error "Failed to add IPv4 local route table ${ROUTE_TABLE}"
+        return 1
+    fi
+
+    if ip -6 rule add fwmark ${FWMARK} table ${ROUTE_TABLE_V6} 2>/dev/null || ip_rule_present 6 "$ROUTE_TABLE_V6"; then
+        if ip -6 route add local default dev lo table ${ROUTE_TABLE_V6} 2>/dev/null || local_route_present 6 "$ROUTE_TABLE_V6"; then
+            IPV6_ROUTE_APPLIED=1
+        else
+            log_warn "IPv6 local route unavailable; continuing with IPv4-only routing"
+            while ip -6 rule del fwmark ${FWMARK} table ${ROUTE_TABLE_V6} 2>/dev/null; do :; done
+            ip -6 route del local default dev lo table ${ROUTE_TABLE_V6} 2>/dev/null || true
+        fi
+    else
+        log_warn "IPv6 policy routing unavailable; continuing with IPv4-only routing"
+    fi
+
+    log_info "Policy routing configured (table=${ROUTE_TABLE}, mark=${FWMARK}, ipv6=${IPV6_ROUTE_APPLIED})"
 }
 
 teardown_policy_routing() {
@@ -239,14 +415,19 @@ do_start() {
     log_info "  DNS_SCOPE=${DNS_SCOPE}"
     log_info "========================================="
 
+    IPV6_MANGLE_APPLIED=0
+    IPV6_ROUTE_APPLIED=0
+
     flush_chains iptables
     if ipv6_mangle_available; then
         flush_chains ip6tables
     else
         log_warn "IPv6 iptables mangle/restore unavailable; continuing with IPv4-only interception"
     fi
-    save_snapshot
-    setup_policy_routing
+    if ! setup_policy_routing; then
+        do_stop
+        exit 1
+    fi
 
     mkdir -p "${SNAPSHOT_DIR}"
     gen_mangle_v4 > "${SNAPSHOT_DIR}/iptables.rules"
@@ -267,6 +448,12 @@ do_start() {
             log_warn "ip6tables-restore failed for IPv6; continuing with IPv4-only interception"
             cat "${SNAPSHOT_DIR}/ip6tables.rules" >&2
             flush_chains ip6tables
+            IPV6_MANGLE_APPLIED=0
+            IPV6_ROUTE_APPLIED=0
+            while ip -6 rule del fwmark ${FWMARK} table ${ROUTE_TABLE_V6} 2>/dev/null; do :; done
+            ip -6 route del local default dev lo table ${ROUTE_TABLE_V6} 2>/dev/null || true
+        else
+            IPV6_MANGLE_APPLIED=1
         fi
     else
         log_warn "Skipping IPv6 rules apply: ip6tables/ip6tables-restore unavailable"
@@ -283,6 +470,8 @@ do_start() {
         fi
     fi
 
+    save_snapshot
+
     log_info "========================================="
     log_info "RKNnoVPN iptables rules applied successfully"
     log_info "========================================="
@@ -293,7 +482,9 @@ do_stop() {
 
     if [ -f "${SNAPSHOT_DIR}/env.sh" ]; then
         log_info "Loading runtime snapshot for teardown..."
-        load_snapshot
+        if ! load_snapshot; then
+            log_warn "Runtime snapshot is invalid; continuing teardown with current environment"
+        fi
     else
         log_warn "No runtime snapshot found — using current environment"
     fi
@@ -339,7 +530,10 @@ do_status() {
         missing=1
     fi
 
-    if ip6tables ${IPT_WAIT} -t mangle -L >/dev/null 2>&1; then
+    IPV6_MANGLE_APPLIED="${IPV6_MANGLE_APPLIED:-0}"
+    IPV6_ROUTE_APPLIED="${IPV6_ROUTE_APPLIED:-0}"
+
+    if [ "$IPV6_MANGLE_APPLIED" = "1" ]; then
         if ! ip6tables ${IPT_WAIT} -t mangle -L "${CHAIN_OUT}" -n >/dev/null 2>&1; then
             log_error "missing IPv6 mangle chain ${CHAIN_OUT}"
             missing=1
@@ -369,12 +563,12 @@ do_status() {
         log_error "missing IPv4 local route in table ${ROUTE_TABLE}"
         missing=1
     fi
-    if ip -6 rule show >/dev/null 2>&1; then
+    if [ "$IPV6_ROUTE_APPLIED" = "1" ]; then
         if ! ip_rule_present 6 "$ROUTE_TABLE_V6"; then
             log_error "missing IPv6 policy rule fwmark ${FWMARK} lookup ${ROUTE_TABLE_V6}"
             missing=1
         fi
-        if ! ip -6 route show table "${ROUTE_TABLE_V6}" | grep -q "local default dev lo"; then
+        if ! local_route_present 6 "$ROUTE_TABLE_V6"; then
             log_error "missing IPv6 local route in table ${ROUTE_TABLE_V6}"
             missing=1
         fi
@@ -395,7 +589,9 @@ case "${1:-}" in
     stop)
         SNAPSHOT_DIR="${RUN_DIR:-${RKNNOVPN_DIR:-/data/adb/modules/rknnovpn}/run}"
         if [ -f "${SNAPSHOT_DIR}/env.sh" ]; then
-            load_snapshot
+            if ! load_snapshot; then
+                log_warn "Runtime snapshot is invalid; continuing teardown with defaults"
+            fi
         fi
         FWMARK="${FWMARK:-0x2023}"
         ROUTE_TABLE="${ROUTE_TABLE:-2023}"
@@ -404,6 +600,10 @@ case "${1:-}" in
         ;;
     status)
         require_rule_renderer
+        SNAPSHOT_DIR="${RUN_DIR:-${RKNNOVPN_DIR:-/data/adb/modules/rknnovpn}/run}"
+        if [ -f "${SNAPSHOT_DIR}/env.sh" ]; then
+            load_snapshot
+        fi
         validate_env
         do_status
         ;;

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/control"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/resetcontroller"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
@@ -59,7 +60,7 @@ func TestRuntimeStartFailsWhileResetLockPresent(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "reset is in progress") {
 		t.Fatalf("expected reset-in-progress error, got %v", err)
 	}
-	rpcErr := d.rpcErrorFromRuntimeError(err)
+	rpcErr := control.RuntimeRPCError(err)
 	if rpcErr.Code != ipc.CodeRuntimeBusy {
 		t.Fatalf("expected runtime busy RPC code, got %#v", rpcErr)
 	}

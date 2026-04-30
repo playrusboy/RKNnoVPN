@@ -218,6 +218,9 @@ func validateContractManifest(manifest Contract) error {
 	if len(errorCodes) == 0 {
 		return fmt.Errorf("ipc contract manifest must declare error codes")
 	}
+	if expected := PublicErrorCodeNames(); !slices.Equal(manifest.ErrorCodes, expected) {
+		return fmt.Errorf("ipc contract manifest error codes drifted: got %v, expected %v", manifest.ErrorCodes, expected)
+	}
 
 	compatibilityPolicies := make(map[string]bool, len(manifest.CompatibilityPolicies))
 	for _, policy := range manifest.CompatibilityPolicies {

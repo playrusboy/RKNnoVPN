@@ -4,19 +4,15 @@ import (
 	"log"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/control"
-	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
 func (d *daemon) updateControlHandlers() control.UpdateHandlers {
 	return control.UpdateHandlers{
-		Version:       Version,
-		DataDir:       d.dataDir,
-		RuntimeStatus: d.controlRuntimeStatus,
-		RuntimeWasRunning: func() bool {
-			state := d.coreMgr.GetState()
-			return state == core.StateRunning || state == core.StateDegraded
-		},
+		Version:           Version,
+		DataDir:           d.dataDir,
+		RuntimeStatus:     d.controlRuntimeStatus,
+		RuntimeWasRunning: d.isRuntimeRunningOrDegraded,
 		RunUpdateInstallOperation: func(fn func(generation int64) error) (runtimev2.Status, error) {
 			return d.runtimeV2.RunOperation(runtimev2.OperationUpdateInstall, runtimev2.PhaseStopping, fn)
 		},
@@ -34,7 +30,7 @@ func (d *daemon) updateControlHandlers() control.UpdateHandlers {
 			return nil
 		},
 		RestoreRuntimeAfterModuleFail: d.restoreCurrentRuntimeAfterFailedUpdate,
-		RuntimeError:                  d.rpcErrorFromRuntimeError,
+		RuntimeError:                  control.RuntimeRPCError,
 		Logf: func(format string, args ...interface{}) {
 			log.Printf("[updater] "+format, args...)
 		},
@@ -47,10 +43,7 @@ func (d *daemon) restoreCurrentRuntimeAfterFailedUpdate() {
 		return
 	}
 
-	d.mu.Lock()
-	cfg := d.cfg
-	d.mu.Unlock()
-
+	cfg := d.currentConfig()
 	if cfg == nil {
 		return
 	}

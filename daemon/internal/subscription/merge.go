@@ -15,14 +15,10 @@ func MergeSubscriptionNodes(current profiledoc.Document, subscription profiledoc
 	}
 	for i := range incoming {
 		incoming[i].Source.Type = "SUBSCRIPTION"
-		if incoming[i].Source.ProviderKey == "" {
-			incoming[i].Source.ProviderKey = subscription.ProviderKey
-		}
-		if incoming[i].Source.URL == "" {
-			incoming[i].Source.URL = subscription.URL
-		}
+		incoming[i].Source.ProviderKey = subscription.ProviderKey
+		incoming[i].Source.URL = subscription.URL
 	}
-	next, stats := profiledoc.MergeNodes(current, incoming, false)
+	next, stats := profiledoc.MergeNodes(current, incoming)
 	seenIncoming := map[string]bool{}
 	for _, node := range incoming {
 		if key := profiledoc.NodeMatchKey(node); key != "" {

@@ -7,13 +7,10 @@ import (
 )
 
 func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) []runtimev2.NodeProbeResult {
-	d.mu.Lock()
-	cfg := d.cfg
-	d.mu.Unlock()
-
+	cfg := d.currentConfig()
 	state := d.coreMgr.GetState()
 	var runtimeHealth runtimev2.HealthSnapshot
-	if state == core.StateRunning || state == core.StateDegraded {
+	if coreStateRunningOrDegraded(state) {
 		runtimeHealth = d.buildRuntimeV2HealthSnapshot(d.healthMon.RunOnce(), false)
 	}
 

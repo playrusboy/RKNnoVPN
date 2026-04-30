@@ -22,9 +22,7 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 
 	snapshot := rootruntime.ClassifyHealth(input)
 	if result != nil && allowEgressProbe && snapshot.Healthy() {
-		d.mu.Lock()
-		cfg := d.cfg
-		d.mu.Unlock()
+		cfg := d.currentConfig()
 		apiPort := cfg.Proxy.APIPort
 		_, outboundURLCheck := d.refreshOutboundURLProbe(state, cfg, apiPort, 2500)
 		if result.Checks == nil {

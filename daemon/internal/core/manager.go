@@ -409,8 +409,9 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	// Write PID file.
 	pidPath := paths.SingBoxPIDFile()
 	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(m.pid)), 0640)
-	rollbackStarted := func(signal syscall.Signal, stopDNS bool, stopRules bool) {
-		if stopDNS || stopRules {
+	netstackApplied := false
+	rollbackStarted := func(signal syscall.Signal, cleanupNetstack bool) {
+		if cleanupNetstack || netstackApplied {
 			_ = m.netstack().Cleanup().Err()
 		}
 		if m.process != nil {
@@ -434,14 +435,14 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	// 4. Wait for runtime listeners.
 	if spec, err := m.waitRuntimeListeners(exitCh, logPath, recordStage); err != nil {
 		m.logger.Printf("%s port %d did not open in time, killing pid %d", spec.Label, spec.Port, m.pid)
-		rollbackStarted(syscall.SIGKILL, false, false)
+		rollbackStarted(syscall.SIGKILL, false)
 		return failStage(spec.Stage, spec.Layer, spec.Code, fmt.Errorf("%s port %d not ready: %w", spec.Label, spec.Port, err), true)
 	}
 
 	// 5-6. Apply RKNnoVPN-owned iptables and DNS interception.
 	if err := VerifyChainedProxyOwnerPackages(m.config); err != nil {
 		m.logger.Printf("local proxy owner verification failed: %v — rolling back", err)
-		rollbackStarted(syscall.SIGTERM, false, false)
+		rollbackStarted(syscall.SIGTERM, false)
 		return failStage("verify-chain-proxy-owners", "verify local proxy owners", "LOCAL_PROXY_OWNER_MISMATCH", err, true)
 	}
 	recordStage("verify-chain-proxy-owners", "ok", "", "", false)
@@ -454,9 +455,10 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 			code = netErr.Code
 		}
 		m.logger.Printf("netstack apply failed: %v — rolling back", err)
-		rollbackStarted(syscall.SIGTERM, false, false)
+		rollbackStarted(syscall.SIGTERM, true)
 		return failStage("netstack-apply", "netstack apply", code, err, true)
 	}
+	netstackApplied = true
 	m.logger.Println("netstack applied")
 	recordStage("netstack-apply", "ok", "", fmt.Sprintf("steps=%d", len(netReport.Steps)), false)
 	netVerifyReport := m.netstack().Verify()
@@ -467,7 +469,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 			code = netErr.Code
 		}
 		m.logger.Printf("netstack verify failed: %v — rolling back", err)
-		rollbackStarted(syscall.SIGTERM, false, false)
+		rollbackStarted(syscall.SIGTERM, true)
 		return failStage("netstack-verify", "netstack verify", code, err, true)
 	}
 	m.logger.Println("netstack verified")
@@ -586,23 +588,88 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 
 	m.logger.Printf("hot-swap to profile %q", profile.Protocol)
 
-	// 1. Render new config.
+	// 1. Render and validate the new config beside the active one. The active
+	// config stays intact until the new core has proved its listeners.
 	paths := modulecontract.NewPaths(m.dataDir)
 	configPath := filepath.Join(paths.RenderedConfigDir(), "singbox.json")
-	if err := renderConfig(m.config, profile, configPath); err != nil {
+	newConfigPath := filepath.Join(paths.RenderedConfigDir(), "singbox.hotswap.json")
+	_ = os.Remove(newConfigPath)
+	defer os.Remove(newConfigPath)
+	if err := renderConfig(m.config, profile, newConfigPath); err != nil {
 		return failStage("render-config", "hot-swap render", "CONFIG_RENDER_FAILED", err, false)
 	}
-	recordStage("render-config", "ok", "", configPath, false)
-	if err := m.checkSingBoxConfig(configPath); err != nil {
+	recordStage("render-config", "ok", "", newConfigPath, false)
+	if err := m.checkSingBoxConfig(newConfigPath); err != nil {
 		return failStage("config-check", "hot-swap config check", "CONFIG_CHECK_FAILED", err, false)
 	}
-	recordStage("config-check", "ok", "", configPath, false)
+	recordStage("config-check", "ok", "", newConfigPath, false)
+
+	pidPath := paths.SingBoxPIDFile()
+	oldActiveProfile := m.activeProfile
+	oldStartedAt := m.startedAt
+	cleanupAndDegrade := func() {
+		_ = m.netstack().Cleanup().Err()
+		if m.process != nil {
+			_ = m.process.Signal(syscall.SIGKILL)
+			select {
+			case <-m.exitCh:
+			case <-time.After(2 * time.Second):
+			}
+		}
+		m.process = nil
+		m.exitCh = nil
+		m.pid = 0
+		m.activeProfile = ""
+		m.startedAt = time.Time{}
+		m.state = StateDegraded
+		_ = os.Remove(pidPath)
+		_ = os.Remove(paths.ActiveFile())
+	}
+	restartOldCore := func(reason error) error {
+		if _, err := os.Stat(configPath); err != nil {
+			cleanupAndDegrade()
+			return fmt.Errorf("new core failed: %v; old config unavailable: %w", reason, err)
+		}
+
+		process, fallbackExitCh, pid, logPath, err := m.spawnSingBox(configPath)
+		if err != nil {
+			cleanupAndDegrade()
+			return fmt.Errorf("new core failed: %v; old core restart failed: %w", reason, err)
+		}
+		m.process = process
+		m.exitCh = fallbackExitCh
+		m.pid = pid
+		_ = os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0640)
+		recordStage("fallback-spawn-old-core", "ok", "", fmt.Sprintf("pid=%d", pid), true)
+
+		fallbackRecord := func(name string, status string, code string, detail string, rollbackApplied bool) {
+			recordStage("fallback-"+name, status, code, detail, rollbackApplied)
+		}
+		if spec, err := m.waitRuntimeListeners(fallbackExitCh, logPath, fallbackRecord); err != nil {
+			_ = process.Signal(syscall.SIGKILL)
+			select {
+			case <-fallbackExitCh:
+			case <-time.After(2 * time.Second):
+			}
+			cleanupAndDegrade()
+			return fmt.Errorf("new core failed: %v; old core restart %s port %d failed: %w", reason, spec.Label, spec.Port, err)
+		}
+		m.activeProfile = oldActiveProfile
+		m.startedAt = oldStartedAt
+		m.state = StateRunning
+		m.markActive()
+		recordStage("fallback-old-core", "ok", "", oldActiveProfile, true)
+		return nil
+	}
 
 	// 2. Stop sing-box (SIGTERM only, no iptables teardown).
 	if m.process != nil {
 		if err := m.killProcess(); err != nil {
 			return failStage("stop-old-core", "hot-swap kill old", "CORE_STOP_FAILED", err, false)
 		}
+		m.process = nil
+		m.exitCh = nil
+		m.pid = 0
 		recordStage("stop-old-core", "ok", "", "", false)
 	} else {
 		recordStage("stop-old-core", "already_clean", "", "no tracked process", false)
@@ -610,35 +677,25 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	m.state = StateStarting
 
 	// 3. Spawn new sing-box with the fresh config.
-	binPath := filepath.Join(paths.BinDir(), "sing-box")
-	cmd := exec.Command(binPath, "run", "-c", configPath)
-	logFile, logPath, err := m.openSingBoxLog()
+	process, exitCh, pid, logPath, err := m.spawnSingBox(newConfigPath)
 	if err != nil {
-		m.state = StateDegraded
-		return failStage("open-core-log", "hot-swap open sing-box log", "CORE_LOG_OPEN_FAILED", err, false)
+		stage := "spawn-core"
+		layer := "hot-swap spawn"
+		code := "CORE_SPAWN_FAILED"
+		if logPath == "" {
+			stage = "open-core-log"
+			layer = "hot-swap open sing-box log"
+			code = "CORE_LOG_OPEN_FAILED"
+		}
+		if fallbackErr := restartOldCore(err); fallbackErr != nil {
+			return failStage(stage, layer, code, fallbackErr, true)
+		}
+		return failStage(stage, layer, code, err, true)
 	}
-	recordStage("open-core-log", "ok", "", logPath, false)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{
-			Gid: m.coreGID(),
-		},
-	}
-
-	if err := cmd.Start(); err != nil {
-		logFile.Close()
-		m.state = StateDegraded
-		return failStage("spawn-core", "hot-swap spawn", "CORE_SPAWN_FAILED", err, false)
-	}
-	logFile.Close()
-	m.process = cmd.Process
-	m.pid = cmd.Process.Pid
-	exitCh := watchCommand(cmd)
+	m.process = process
+	m.pid = pid
 	m.exitCh = exitCh
 	recordStage("spawn-core", "ok", "", fmt.Sprintf("pid=%d", m.pid), false)
-
-	pidPath := paths.SingBoxPIDFile()
 	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(m.pid)), 0640)
 
 	// 4. Wait for runtime listeners.
@@ -654,9 +711,28 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 		m.activeProfile = ""
 		m.startedAt = time.Time{}
 		_ = os.Remove(pidPath)
-		m.state = StateDegraded
+		if fallbackErr := restartOldCore(err); fallbackErr != nil {
+			return failStage(spec.Stage, "hot-swap "+spec.Layer, spec.Code, fallbackErr, true)
+		}
 		return failStage(spec.Stage, "hot-swap "+spec.Layer, spec.Code, fmt.Errorf("%s port %d not ready: %w", spec.Label, spec.Port, err), true)
 	}
+
+	if err := os.Rename(newConfigPath, configPath); err != nil {
+		_ = m.process.Signal(syscall.SIGKILL)
+		select {
+		case <-exitCh:
+		case <-time.After(2 * time.Second):
+		}
+		m.process = nil
+		m.exitCh = nil
+		m.pid = 0
+		_ = os.Remove(pidPath)
+		if fallbackErr := restartOldCore(err); fallbackErr != nil {
+			return failStage("commit-config", "hot-swap commit config", "CONFIG_RENDER_FAILED", fallbackErr, true)
+		}
+		return failStage("commit-config", "hot-swap commit config", "CONFIG_RENDER_FAILED", err, true)
+	}
+	recordStage("commit-config", "ok", "", configPath, false)
 
 	// 5. iptables left untouched — they still point at the same tproxy port.
 	m.activeProfile = profile.Protocol + "://" + profile.Address
@@ -669,6 +745,28 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	stageReport.FinishOK()
 	m.lastRuntimeReport = stageReport
 	return nil
+}
+
+func (m *CoreManager) spawnSingBox(configPath string) (*os.Process, <-chan error, int, string, error) {
+	binPath := filepath.Join(modulecontract.NewPaths(m.dataDir).BinDir(), "sing-box")
+	cmd := exec.Command(binPath, "run", "-c", configPath)
+	logFile, logPath, err := m.openSingBoxLog()
+	if err != nil {
+		return nil, nil, 0, "", err
+	}
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{
+			Gid: m.coreGID(),
+		},
+	}
+	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		return nil, nil, 0, logPath, err
+	}
+	logFile.Close()
+	return cmd.Process, watchCommand(cmd), cmd.Process.Pid, logPath, nil
 }
 
 func (m *CoreManager) markActive() {

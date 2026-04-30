@@ -14,10 +14,16 @@ const (
 	CodeInternalError  = -32603
 
 	// Application-defined error codes (below -32000).
-	CodeProxyNotRunning = -32001
-	CodeProxyAlready    = -32002
-	CodeConfigError     = -32003
-	CodeRuntimeBusy     = -32004
+	CodeConfigError = -32003
+	CodeRuntimeBusy = -32004
+)
+
+const (
+	ErrorNameInvalidParams   = "INVALID_PARAMS"
+	ErrorNameInternalError   = "INTERNAL_ERROR"
+	ErrorNameConfigError     = "CONFIG_ERROR"
+	ErrorNameRuntimeBusy     = "RUNTIME_BUSY"
+	ErrorNameResetInProgress = "RESET_IN_PROGRESS"
 )
 
 // Request is a JSON-RPC 2.0 request object.
@@ -58,6 +64,28 @@ type RPCError struct {
 	Code    int         `json:"code"`
 	Message string      `json:"message"`
 	Data    interface{} `json:"data,omitempty"`
+}
+
+var publicErrorCodeNames = []string{
+	ErrorNameInvalidParams,
+	ErrorNameInternalError,
+	ErrorNameConfigError,
+	ErrorNameRuntimeBusy,
+	ErrorNameResetInProgress,
+}
+
+var rpcErrorCodeNames = map[int]string{
+	CodeParseError:     "PARSE_ERROR",
+	CodeInvalidRequest: "INVALID_REQUEST",
+	CodeMethodNotFound: "METHOD_NOT_FOUND",
+	CodeInvalidParams:  ErrorNameInvalidParams,
+	CodeInternalError:  ErrorNameInternalError,
+	CodeConfigError:    ErrorNameConfigError,
+	CodeRuntimeBusy:    ErrorNameRuntimeBusy,
+}
+
+func PublicErrorCodeNames() []string {
+	return append([]string(nil), publicErrorCodeNames...)
 }
 
 // NewResponse creates a successful JSON-RPC 2.0 response.
@@ -103,28 +131,10 @@ func codeName(code int, data interface{}) string {
 			return raw
 		}
 	}
-	switch code {
-	case CodeParseError:
-		return "PARSE_ERROR"
-	case CodeInvalidRequest:
-		return "INVALID_REQUEST"
-	case CodeMethodNotFound:
-		return "METHOD_NOT_FOUND"
-	case CodeInvalidParams:
-		return "INVALID_PARAMS"
-	case CodeInternalError:
-		return "INTERNAL_ERROR"
-	case CodeProxyNotRunning:
-		return "PROXY_NOT_RUNNING"
-	case CodeProxyAlready:
-		return "PROXY_ALREADY_RUNNING"
-	case CodeConfigError:
-		return "CONFIG_ERROR"
-	case CodeRuntimeBusy:
-		return "RUNTIME_BUSY"
-	default:
-		return "DAEMON_ERROR"
+	if name, ok := rpcErrorCodeNames[code]; ok {
+		return name
 	}
+	return "DAEMON_ERROR"
 }
 
 func operationFromResult(result interface{}) interface{} {

@@ -137,39 +137,6 @@ func TestProfileValidationRejectsAllowLanAndRepairsStaleActive(t *testing.T) {
 	}
 }
 
-func TestSubscriptionMergePreservesManualAndMarksRemovedStale(t *testing.T) {
-	current := Document{
-		ID:   "main",
-		Name: "Primary",
-		Nodes: []Node{
-			{ID: "manual", Name: "Manual", Protocol: "vless", Server: "shared.example", Port: 443, Outbound: json.RawMessage(`{"id":"manual"}`), Source: NodeSource{Type: "MANUAL"}},
-			{ID: "old", Name: "Old", Protocol: "vless", Server: "old.example", Port: 443, Outbound: json.RawMessage(`{"id":"old"}`), Source: NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub"}},
-			{ID: "same", Name: "Same", Protocol: "vless", Server: "same.example", Port: 443, Outbound: json.RawMessage(`{"id":"old-outbound"}`), Source: NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub"}},
-		},
-	}
-	incoming := []Node{
-		{ID: "new", Name: "New", Protocol: "vless", Server: "new.example", Port: 443, Outbound: json.RawMessage(`{"id":"new"}`), Source: NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub"}},
-		{ID: "same", Name: "Same updated", Protocol: "vless", Server: "same.example", Port: 443, Outbound: json.RawMessage(`{"id":"new-outbound"}`), Source: NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub"}},
-		{ID: "manual-lookalike", Name: "Subscription twin", Protocol: "vless", Server: "shared.example", Port: 443, Outbound: json.RawMessage(`{"id":"manual"}`), Source: NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub"}},
-	}
-	next, stats := MergeNodes(current, incoming, true)
-	if len(next.Nodes) != 5 {
-		t.Fatalf("unexpected node count after merge: %#v", next.Nodes)
-	}
-	if next.Nodes[0].ID != "manual" || next.Nodes[0].Stale {
-		t.Fatalf("manual node was not preserved: %#v", next.Nodes[0])
-	}
-	if !next.Nodes[1].Stale {
-		t.Fatalf("removed subscription node was not marked stale: %#v", next.Nodes[1])
-	}
-	if next.Nodes[2].ID != "same" || string(next.Nodes[2].Outbound) != `{"id":"new-outbound"}` {
-		t.Fatalf("subscription node was not updated in place: %#v", next.Nodes[2])
-	}
-	if stats["added"] != 2 || stats["updated"] != 1 || stats["stale"] != 1 {
-		t.Fatalf("unexpected merge stats: %#v", stats)
-	}
-}
-
 func TestNormalizeSubscriptionsRecomputesProviderCounts(t *testing.T) {
 	doc := Document{
 		ID: "main",

@@ -25,7 +25,10 @@ type DiagnosticsState struct {
 
 type DiagnosticsHandlers struct {
 	Version               string
-	CurrentState          func() DiagnosticsState
+	ConfigPath            string
+	ProfilePath           string
+	DataDir               string
+	CurrentConfig         CurrentConfigFunc
 	RunHealth             func() *health.HealthResult
 	HealthSnapshot        func(*health.HealthResult, bool) runtimev2.HealthSnapshot
 	RuntimeStatus         func() (runtimev2.Status, bool)
@@ -64,9 +67,6 @@ func (h DiagnosticsHandlers) buildReport(lines int) map[string]interface{} {
 	cfgPath := state.ConfigPath
 	profilePath := state.ProfilePath
 	dataDir := state.DataDir
-	if profilePath == "" && cfgPath != "" {
-		profilePath = profiledoc.Path(cfgPath)
-	}
 
 	modulePaths := modulecontract.NewPaths(dataDir)
 	renderedConfigPath := filepath.Join(modulePaths.RenderedConfigDir(), "singbox.json")
@@ -208,10 +208,20 @@ func (h DiagnosticsHandlers) BuildSelfCheckSummary(lines int) (diagnostics.Summa
 }
 
 func (h DiagnosticsHandlers) state() DiagnosticsState {
-	if h.CurrentState != nil {
-		return h.CurrentState()
+	profilePath := h.ProfilePath
+	if profilePath == "" && h.ConfigPath != "" {
+		profilePath = profiledoc.Path(h.ConfigPath)
 	}
-	return DiagnosticsState{}
+	var cfg *config.Config
+	if h.CurrentConfig != nil {
+		cfg = h.CurrentConfig()
+	}
+	return DiagnosticsState{
+		Config:      cfg,
+		ConfigPath:  h.ConfigPath,
+		ProfilePath: profilePath,
+		DataDir:     h.DataDir,
+	}
 }
 
 func (h DiagnosticsHandlers) runHealth() *health.HealthResult {

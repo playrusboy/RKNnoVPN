@@ -8,7 +8,7 @@
         android:required="false" />
     <uses-permission android:name="android.permission.CAMERA" />
 
-    <!-- Package enumeration for checking installed VPN clients -->
+    <!-- Package visibility for the local app picker and audit screens. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />

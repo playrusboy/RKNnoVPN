@@ -42,3 +42,9 @@ type daemon struct {
 }
 
 type latencySnapshot = rootruntime.EgressProbeState
+
+func (d *daemon) currentConfig() *config.Config {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.cfg
+}

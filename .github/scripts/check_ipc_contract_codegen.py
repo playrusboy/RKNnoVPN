@@ -7,11 +7,29 @@ import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 MANIFEST = REPO_ROOT / "daemon/internal/ipc/contract_manifest.json"
+IPC_PROTOCOL = REPO_ROOT / "daemon/internal/ipc/protocol.go"
 OUTPUT = REPO_ROOT / "app/app/src/main/kotlin/com/rknnovpn/panel/ipc/GeneratedDaemonContract.kt"
 DAEMON_CLIENT = REPO_ROOT / "app/app/src/main/kotlin/com/rknnovpn/panel/ipc/DaemonClient.kt"
+DAEMON_CLIENT_RESULT = REPO_ROOT / "app/app/src/main/kotlin/com/rknnovpn/panel/ipc/DaemonClientResult.kt"
 DAEMONCTL_EXECUTOR = REPO_ROOT / "app/app/src/main/kotlin/com/rknnovpn/panel/ipc/DaemonctlExecutor.kt"
 DAEMON_CONTROL_WIRING = REPO_ROOT / "daemon/cmd/daemon/control_wiring.go"
+DAEMON_DIAGNOSTICS_CONTROL_WIRING = REPO_ROOT / "daemon/cmd/daemon/diagnostics_control_wiring.go"
+DAEMON_RUNTIME_CONTROL_WIRING = REPO_ROOT / "daemon/cmd/daemon/runtime_control_wiring.go"
+DAEMON_RUNTIME_DESIRED = REPO_ROOT / "daemon/cmd/daemon/runtime_v2_desired.go"
+DAEMON_UPDATE_CONTROL_WIRING = REPO_ROOT / "daemon/cmd/daemon/update_control_wiring.go"
+CONTROL_REGISTRY = REPO_ROOT / "daemon/internal/control/registry.go"
+CONTROL_MUTATION_ENVELOPE = REPO_ROOT / "daemon/internal/control/mutation_envelope.go"
+CONTROL_PROFILE_HANDLERS = REPO_ROOT / "daemon/internal/control/profile_handlers.go"
+CONTROL_DIAGNOSTICS_HANDLERS = REPO_ROOT / "daemon/internal/control/diagnostics_handlers.go"
+CONTROL_RUNTIME_ERRORS = REPO_ROOT / "daemon/internal/control/runtime_errors.go"
+CONTROL_UPDATE_HANDLERS = REPO_ROOT / "daemon/internal/control/update_handlers.go"
+DAEMON_CLIENT_MODELS = REPO_ROOT / "app/app/src/main/kotlin/com/rknnovpn/panel/ipc/DaemonClientModels.kt"
+DAEMON_RESPONSE_PARSERS = REPO_ROOT / "app/app/src/main/kotlin/com/rknnovpn/panel/ipc/DaemonResponseParsers.kt"
+USER_MESSAGE_FORMATTER = REPO_ROOT / "app/app/src/main/kotlin/com/rknnovpn/panel/i18n/UserMessageFormatter.kt"
 APPLY_TRANSACTION = REPO_ROOT / "daemon/internal/apply/transaction.go"
+RUNTIME_STATE_STORE = REPO_ROOT / "daemon/internal/runtimev2/state_store.go"
+INSTALL_STATE_STORE = REPO_ROOT / "daemon/internal/updater/install_state.go"
+CONTROL_RUNTIME_HANDLERS = REPO_ROOT / "daemon/internal/control/runtime_handlers.go"
 APP_KOTLIN_ROOT = REPO_ROOT / "app/app/src/main/kotlin"
 BOOTSTRAP_METHODS = {"backend.status", "ipc.contract", "version"}
 CONFIG_TRANSACTION_REQUIRED_STAGES = {
@@ -22,6 +40,10 @@ CONFIG_TRANSACTION_REQUIRED_STAGES = {
     "verify",
     "commit-generation",
     "cleanup",
+}
+NON_ASYNC_MUTATING_RESULT_SURFACES = {
+    "backend.applyDesiredState": "runtime-status",
+    "update-download": "operation-envelope",
 }
 
 
@@ -140,7 +162,38 @@ def validate_manifest(source: dict) -> list[str]:
     for method in sorted(required_methods - seen_methods):
         errors.append(f"apkRequiredMethods contains undeclared method {method}")
     errors.extend(validate_request_examples(source, request_examples))
+    errors.extend(check_public_error_code_surface(error_codes))
     errors.extend(check_config_transaction_actions(source))
+    errors.extend(check_non_async_mutating_surfaces(source))
+    errors.extend(check_update_download_operation_surface(source))
+    errors.extend(check_state_file_surfaces())
+    errors.extend(check_apk_error_code_surface())
+    errors.extend(check_profile_operation_surface())
+    errors.extend(check_diagnostics_state_surface())
+    errors.extend(check_runtime_error_surface())
+    return errors
+
+
+def check_public_error_code_surface(error_codes: list[str]) -> list[str]:
+    if not IPC_PROTOCOL.exists():
+        return [f"{IPC_PROTOCOL.relative_to(REPO_ROOT)} is missing"]
+    protocol = IPC_PROTOCOL.read_text(encoding="utf-8")
+    errors: list[str] = []
+    required_snippets = [
+        "func PublicErrorCodeNames() []string",
+        "var publicErrorCodeNames = []string{",
+        "var rpcErrorCodeNames = map[int]string{",
+        "ErrorNameResetInProgress",
+    ]
+    for snippet in required_snippets:
+        if snippet not in protocol:
+            errors.append(f"public error code surface missing {snippet!r} in {IPC_PROTOCOL.relative_to(REPO_ROOT)}")
+    for code in error_codes:
+        const_name = "ErrorName" + "".join(part.title() for part in code.lower().split("_"))
+        if const_name not in protocol:
+            errors.append(f"public error code {code} is missing Go constant {const_name}")
+    if "CodeProxyNotRunning" in protocol or "CodeProxyAlready" in protocol:
+        errors.append("legacy proxy RPC error codes must not be restored")
     return errors
 
 
@@ -175,6 +228,337 @@ def check_config_transaction_actions(source: dict) -> list[str]:
         f"RuntimeOperationForType is missing config transaction operation type {operation_type}"
         for operation_type in sorted(expected_operation_types - mapped_operation_types)
     ]
+
+
+def check_non_async_mutating_surfaces(source: dict) -> list[str]:
+    methods = {
+        item.get("method")
+        for item in source.get("methods", [])
+        if item.get("method") and item.get("mutating") and not item.get("async")
+    }
+    expected = set(NON_ASYNC_MUTATING_RESULT_SURFACES)
+    errors: list[str] = []
+    for method in sorted(methods - expected):
+        errors.append(
+            f"non-async mutating method {method} must declare an explicit result surface in NON_ASYNC_MUTATING_RESULT_SURFACES"
+        )
+    for method in sorted(expected - methods):
+        errors.append(
+            f"NON_ASYNC_MUTATING_RESULT_SURFACES contains {method}, but it is not a non-async mutating IPC method"
+        )
+    for method, surface in sorted(NON_ASYNC_MUTATING_RESULT_SURFACES.items()):
+        if surface not in {"runtime-status", "operation-envelope"}:
+            errors.append(f"non-async mutating method {method} has unknown result surface {surface}")
+    return errors
+
+
+def check_update_download_operation_surface(source: dict) -> list[str]:
+    update_download = next(
+        (item for item in source.get("methods", []) if item.get("method") == "update-download"),
+        None,
+    )
+    if not update_download or update_download.get("operation", {}).get("type") != "update-download":
+        return []
+    errors: list[str] = []
+    required_files = [
+        CONTROL_MUTATION_ENVELOPE,
+        CONTROL_UPDATE_HANDLERS,
+        DAEMON_CLIENT_MODELS,
+        DAEMON_RESPONSE_PARSERS,
+    ]
+    for path in required_files:
+        if not path.exists():
+            errors.append(f"{path.relative_to(REPO_ROOT)} is missing")
+    if errors:
+        return errors
+    envelope = CONTROL_MUTATION_ENVELOPE.read_text(encoding="utf-8")
+    handlers = CONTROL_UPDATE_HANDLERS.read_text(encoding="utf-8")
+    models = DAEMON_CLIENT_MODELS.read_text(encoding="utf-8")
+    parsers = DAEMON_RESPONSE_PARSERS.read_text(encoding="utf-8")
+    required_snippets = {
+        CONTROL_MUTATION_ENVELOPE: [
+            'const operationType = "update-download"',
+            "func updateDownloadOperation(",
+            "func updateDownloadFailedStage(",
+        ],
+        CONTROL_UPDATE_HANDLERS: [
+            "func updateDownloadResult(",
+            "func updateDownloadErrorData(",
+            '"operation": updateDownloadOperation("downloaded"',
+            '"operation": updateDownloadOperation("failed"',
+        ],
+        DAEMON_CLIENT_MODELS: [
+            "data class UpdateDownloadInfo(",
+            "val operation: JsonElement? = null",
+        ],
+        DAEMON_RESPONSE_PARSERS: [
+            "internal fun parseUpdateDownloadInfo(",
+            'operation = obj["operation"]',
+        ],
+    }
+    sources = {
+        CONTROL_MUTATION_ENVELOPE: envelope,
+        CONTROL_UPDATE_HANDLERS: handlers,
+        DAEMON_CLIENT_MODELS: models,
+        DAEMON_RESPONSE_PARSERS: parsers,
+    }
+    for path, snippets in required_snippets.items():
+        source = sources[path]
+        for snippet in snippets:
+            if snippet not in source:
+                errors.append(
+                    f"update-download operation surface missing {snippet!r} in {path.relative_to(REPO_ROOT)}"
+                )
+    return errors
+
+
+def check_state_file_surfaces() -> list[str]:
+    errors: list[str] = []
+    required_files = [RUNTIME_STATE_STORE, INSTALL_STATE_STORE, CONTROL_RUNTIME_HANDLERS]
+    for path in required_files:
+        if not path.exists():
+            errors.append(f"{path.relative_to(REPO_ROOT)} is missing")
+    if errors:
+        return errors
+    runtime_store = RUNTIME_STATE_STORE.read_text(encoding="utf-8")
+    install_store = INSTALL_STATE_STORE.read_text(encoding="utf-8")
+    runtime_handlers = CONTROL_RUNTIME_HANDLERS.read_text(encoding="utf-8")
+    required_snippets = {
+        RUNTIME_STATE_STORE: [
+            'const runtimeStateFileName = "runtime_state.json"',
+            "func RuntimeStatePath(",
+            "func WriteRuntimeState(",
+            "func ReadRuntimeState(",
+        ],
+        INSTALL_STATE_STORE: [
+            'const installStateFileName = "install_state.json"',
+            "func InstallStatePath(",
+            "func NewInstallTracker(",
+            "func NewDownloadTracker(",
+            "func ReadInstallState(",
+            "InstallStatePath(dataDir)",
+        ],
+        CONTROL_RUNTIME_HANDLERS: [
+            "func (h RuntimeHandlers) statusWithUpdateInstallState(",
+            "updater.ReadInstallState(h.DataDir)",
+            "status.UpdateInstall = &runtimev2.UpdateInstallState{",
+            'Status: "unknown"',
+            'Code:   "UPDATE_INSTALL_STATE_INVALID"',
+        ],
+    }
+    sources = {
+        RUNTIME_STATE_STORE: runtime_store,
+        INSTALL_STATE_STORE: install_store,
+        CONTROL_RUNTIME_HANDLERS: runtime_handlers,
+    }
+    for path, snippets in required_snippets.items():
+        source = sources[path]
+        for snippet in snippets:
+            if snippet not in source:
+                errors.append(f"state file surface missing {snippet!r} in {path.relative_to(REPO_ROOT)}")
+    return errors
+
+
+def check_apk_error_code_surface() -> list[str]:
+    errors: list[str] = []
+    required_files = [DAEMON_CLIENT_RESULT, DAEMON_CLIENT, USER_MESSAGE_FORMATTER]
+    for path in required_files:
+        if not path.exists():
+            errors.append(f"{path.relative_to(REPO_ROOT)} is missing")
+    if errors:
+        return errors
+    client_result = DAEMON_CLIENT_RESULT.read_text(encoding="utf-8")
+    client = DAEMON_CLIENT.read_text(encoding="utf-8")
+    formatter = USER_MESSAGE_FORMATTER.read_text(encoding="utf-8")
+    required_snippets = {
+        DAEMON_CLIENT_RESULT: [
+            "internal object DaemonClientErrorCodes",
+            "const val CONFIG_ERROR = -32003",
+            "const val RUNTIME_BUSY = -32004",
+            "const val COMPATIBILITY = -32090",
+        ],
+        DAEMON_CLIENT: [
+            "DaemonClientErrorCodes.CONFIG_ERROR",
+            "DaemonClientErrorCodes.COMPATIBILITY",
+        ],
+        USER_MESSAGE_FORMATTER: [
+            "import com.rknnovpn.panel.ipc.DaemonClientErrorCodes",
+            "DaemonClientErrorCodes.COMPATIBILITY",
+            "DaemonClientErrorCodes.RUNTIME_BUSY",
+        ],
+    }
+    sources = {
+        DAEMON_CLIENT_RESULT: client_result,
+        DAEMON_CLIENT: client,
+        USER_MESSAGE_FORMATTER: formatter,
+    }
+    for path, snippets in required_snippets.items():
+        source = sources[path]
+        for snippet in snippets:
+            if snippet not in source:
+                errors.append(f"APK error code surface missing {snippet!r} in {path.relative_to(REPO_ROOT)}")
+    for path in [DAEMON_CLIENT, USER_MESSAGE_FORMATTER]:
+        source = sources[path]
+        for literal in ["-32003", "-32004", "-32090"]:
+            if literal in source:
+                errors.append(f"APK error code literal {literal} must live in DaemonClientErrorCodes, not {path.relative_to(REPO_ROOT)}")
+    return errors
+
+
+def check_profile_operation_surface() -> list[str]:
+    errors: list[str] = []
+    removed_daemon_file = REPO_ROOT / "daemon/cmd/daemon/profile_apply.go"
+    if removed_daemon_file.exists():
+        errors.append("daemon/cmd/daemon/profile_apply.go must not be restored; profile apply ownership lives in internal/control")
+    required_files = [CONTROL_PROFILE_HANDLERS, CONTROL_MUTATION_ENVELOPE]
+    for path in required_files:
+        if not path.exists():
+            errors.append(f"{path.relative_to(REPO_ROOT)} is missing")
+    if errors:
+        return errors
+    profile_handlers = CONTROL_PROFILE_HANDLERS.read_text(encoding="utf-8")
+    envelope = CONTROL_MUTATION_ENVELOPE.read_text(encoding="utf-8")
+    required_snippets = {
+        CONTROL_PROFILE_HANDLERS: [
+            "CurrentConfig         CurrentConfigFunc",
+            "PersistConfigMutation PersistConfigMutationFunc",
+            "RuntimeStatus         RuntimeStatusFunc",
+            "profiledoc.FromConfig(current)",
+            "ProfileValidationRPCError(",
+            "ProfileRPCErrorSaved(",
+            "ProfileSuccess(",
+        ],
+        CONTROL_MUTATION_ENVELOPE: [
+            "func ProfileValidationRPCError(",
+            "func ProfileRPCErrorSaved(",
+            "func ProfileSuccess(",
+            "func ProfileDesiredGeneration(",
+        ],
+    }
+    sources = {
+        CONTROL_PROFILE_HANDLERS: profile_handlers,
+        CONTROL_MUTATION_ENVELOPE: envelope,
+    }
+    for path, snippets in required_snippets.items():
+        source = sources[path]
+        for snippet in snippets:
+            if snippet not in source:
+                errors.append(f"profile operation surface missing {snippet!r} in {path.relative_to(REPO_ROOT)}")
+    forbidden = [
+        "control.ProfileOperation(",
+        "rootruntime.RuntimeErrorCode(",
+        "rootruntime.ResetReportFromError(",
+        "func desiredGeneration(",
+        "CurrentProfileFunc",
+        "CurrentProfile",
+        "ApplyProfileFunc",
+        "ApplyProfile       ApplyProfileFunc",
+    ]
+    for snippet in forbidden:
+        if snippet in profile_handlers:
+            errors.append(f"profile handlers must not use legacy profile apply callback/envelope wrapper: found {snippet!r}")
+    return errors
+
+
+def check_runtime_error_surface() -> list[str]:
+    errors: list[str] = []
+    required_files = [CONTROL_RUNTIME_ERRORS, DAEMON_RUNTIME_CONTROL_WIRING, DAEMON_RUNTIME_DESIRED, DAEMON_UPDATE_CONTROL_WIRING]
+    for path in required_files:
+        if not path.exists():
+            errors.append(f"{path.relative_to(REPO_ROOT)} is missing")
+    if errors:
+        return errors
+    runtime_errors = CONTROL_RUNTIME_ERRORS.read_text(encoding="utf-8")
+    runtime_wiring = DAEMON_RUNTIME_CONTROL_WIRING.read_text(encoding="utf-8")
+    runtime_desired = DAEMON_RUNTIME_DESIRED.read_text(encoding="utf-8")
+    update_wiring = DAEMON_UPDATE_CONTROL_WIRING.read_text(encoding="utf-8")
+    required_snippets = {
+        CONTROL_RUNTIME_ERRORS: [
+            "func RuntimeRPCError(",
+            "type DesiredStateApplyError struct",
+            "func DesiredStateApplyRPCError(",
+            "runtimev2.OperationBusyError",
+            "ipc.CodeRuntimeBusy",
+            "ipc.CodeConfigError",
+        ],
+        DAEMON_RUNTIME_CONTROL_WIRING: [
+            "RuntimeError:          control.RuntimeRPCError",
+        ],
+        DAEMON_UPDATE_CONTROL_WIRING: [
+            "RuntimeError:                  control.RuntimeRPCError",
+        ],
+        DAEMON_RUNTIME_DESIRED: [
+            "control.DesiredStateApplyError{",
+            "control.DesiredStateApplyStageValidate",
+            "control.DesiredStateApplyStagePersist",
+        ],
+    }
+    sources = {
+        CONTROL_RUNTIME_ERRORS: runtime_errors,
+        DAEMON_RUNTIME_CONTROL_WIRING: runtime_wiring,
+        DAEMON_RUNTIME_DESIRED: runtime_desired,
+        DAEMON_UPDATE_CONTROL_WIRING: update_wiring,
+    }
+    for path, snippets in required_snippets.items():
+        source = sources[path]
+        for snippet in snippets:
+            if snippet not in source:
+                errors.append(f"runtime error surface missing {snippet!r} in {path.relative_to(REPO_ROOT)}")
+    if "func (d *daemon) rpcErrorFromRuntimeError(" in runtime_wiring:
+        errors.append("daemon runtime control wiring must not own generic runtime RPC error mapping")
+    forbidden_sources = {
+        DAEMON_RUNTIME_CONTROL_WIRING: runtime_wiring,
+        DAEMON_RUNTIME_DESIRED: runtime_desired,
+    }
+    for path, source in forbidden_sources.items():
+        for snippet in [
+            "DesiredStateApplyError:",
+            "func (d *daemon) rpcErrorFromDesiredStateApplyError(",
+            "type desiredStateApplyError struct",
+        ]:
+            if snippet in source:
+                errors.append(f"{path.relative_to(REPO_ROOT)} must not own desired-state RPC error mapping: found {snippet!r}")
+    return errors
+
+
+def check_diagnostics_state_surface() -> list[str]:
+    errors: list[str] = []
+    required_files = [CONTROL_DIAGNOSTICS_HANDLERS, DAEMON_DIAGNOSTICS_CONTROL_WIRING]
+    for path in required_files:
+        if not path.exists():
+            errors.append(f"{path.relative_to(REPO_ROOT)} is missing")
+    if errors:
+        return errors
+    handlers = CONTROL_DIAGNOSTICS_HANDLERS.read_text(encoding="utf-8")
+    wiring = DAEMON_DIAGNOSTICS_CONTROL_WIRING.read_text(encoding="utf-8")
+    required_snippets = {
+        CONTROL_DIAGNOSTICS_HANDLERS: [
+            "CurrentConfig         CurrentConfigFunc",
+            "profiledoc.Path(h.ConfigPath)",
+            "ConfigPath:  h.ConfigPath",
+            "DataDir:     h.DataDir",
+        ],
+        DAEMON_DIAGNOSTICS_CONTROL_WIRING: [
+            "ConfigPath:            d.cfgPath",
+            "ProfilePath:           d.profilePath",
+            "DataDir:               d.dataDir",
+            "CurrentConfig:         d.currentConfig",
+        ],
+    }
+    sources = {
+        CONTROL_DIAGNOSTICS_HANDLERS: handlers,
+        DAEMON_DIAGNOSTICS_CONTROL_WIRING: wiring,
+    }
+    for path, snippets in required_snippets.items():
+        source = sources[path]
+        for snippet in snippets:
+            if snippet not in source:
+                errors.append(f"diagnostics state surface missing {snippet!r} in {path.relative_to(REPO_ROOT)}")
+    for path, source in sources.items():
+        for snippet in ["CurrentState", "func() control.DiagnosticsState"]:
+            if snippet in source:
+                errors.append(f"{path.relative_to(REPO_ROOT)} must not use diagnostics CurrentState callback wrapper")
+    return errors
 
 
 def _config_transaction_operation_types(source: dict) -> set[str]:
@@ -357,16 +741,26 @@ def check_daemon_client_gates(source: dict) -> list[str]:
 
 
 def check_daemon_control_wiring(source: dict) -> list[str]:
-    if not DAEMON_CONTROL_WIRING.exists():
-        return [f"{DAEMON_CONTROL_WIRING.relative_to(REPO_ROOT)} is missing"]
+    missing_files = [
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in [DAEMON_CONTROL_WIRING, CONTROL_REGISTRY]
+        if not path.exists()
+    ]
+    if missing_files:
+        return [f"{path} is missing" for path in missing_files]
     manifest_methods = {item.get("method") for item in source.get("methods", []) if item.get("method")}
     wiring = DAEMON_CONTROL_WIRING.read_text(encoding="utf-8")
-    registered_methods = set(_registered_daemon_control_methods(wiring))
+    registry = CONTROL_REGISTRY.read_text(encoding="utf-8")
+    registered_methods = set(_registered_daemon_control_methods(registry))
     errors: list[str] = []
+    if "RegisterDaemonHandlers(" not in wiring:
+        errors.append(f"{DAEMON_CONTROL_WIRING.relative_to(REPO_ROOT)} must call control.RegisterDaemonHandlers")
+    if "map[string]ipc.Handler{" in wiring:
+        errors.append(f"{DAEMON_CONTROL_WIRING.relative_to(REPO_ROOT)} must not own IPC method-to-handler mapping")
     for method in sorted(manifest_methods - registered_methods):
-        errors.append(f"daemon control wiring is missing IPC method {method}")
+        errors.append(f"daemon control registry is missing IPC method {method}")
     for method in sorted(registered_methods - manifest_methods):
-        errors.append(f"daemon control wiring registers undeclared IPC method {method}")
+        errors.append(f"daemon control registry registers undeclared IPC method {method}")
     return errors
 
 
@@ -407,7 +801,7 @@ def _registered_daemon_control_methods(source: str) -> list[str]:
     import re
 
     match = re.search(
-        r"RegisterContractHandlers\([^,]+,\s*map\[string\]ipc\.Handler\{(?P<body>.*?)\n\s*\}\)",
+        r"func\s+\(g\s+HandlerGroups\)\s+ContractHandlers\(\)\s+map\[string\]ipc\.Handler\s+\{\s*return\s+map\[string\]ipc\.Handler\{(?P<body>.*?)\n\s*\}\s*\n\}",
         source,
         re.S,
     )

@@ -2,6 +2,12 @@ package com.rknnovpn.panel.ipc
 
 import kotlinx.serialization.json.JsonElement
 
+internal object DaemonClientErrorCodes {
+    const val CONFIG_ERROR = -32003
+    const val RUNTIME_BUSY = -32004
+    const val COMPATIBILITY = -32090
+}
+
 sealed class DaemonClientResult<out T> {
     data class Ok<T>(val data: T) : DaemonClientResult<T>()
     data class DaemonError(
