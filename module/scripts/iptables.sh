@@ -11,7 +11,7 @@ set -eu
 set -f
 
 TAG="RKNnoVPN:iptables"
-SCRIPT_VERSION="v1.8.0"
+SCRIPT_VERSION="v2.0.0"
 SCRIPT_DIR="${0%/*}"
 
 if [ -f "${SCRIPT_DIR}/lib/rknnovpn_env.sh" ]; then
