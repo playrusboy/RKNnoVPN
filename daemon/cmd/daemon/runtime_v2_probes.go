@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )

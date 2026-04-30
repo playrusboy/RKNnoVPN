@@ -7,6 +7,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 )
 
 type MetaHandlers struct {
@@ -26,13 +27,15 @@ func (h MetaHandlers) VersionInfo(params *json.RawMessage) (interface{}, *ipc.RP
 			return "", nil
 		}
 	}
-	singBoxPath := filepath.Join(h.DataDir, "bin", "sing-box")
+	modulePaths := modulecontract.NewPaths(h.DataDir)
+	singBoxPath := filepath.Join(modulePaths.BinDir(), "sing-box")
 	return addIPCContractFields(map[string]interface{}{
 		"daemon":            h.Version,
 		"core":              h.Version,
 		"daemonctl":         h.Version,
 		"module":            diagnostics.ReadModuleVersion(),
 		"current_release":   diagnostics.ReleaseIntegrityReport(h.DataDir),
+		"runtime_preflight": diagnostics.RuntimePreflightReport(h.DataDir),
 		"sing_box":          diagnostics.SingBoxVersion(singBoxPath, 20, exec),
 		"control_protocol":  ProtocolVersion,
 		"panel_min_version": h.Version,

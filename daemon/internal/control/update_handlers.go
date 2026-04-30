@@ -6,7 +6,6 @@ import (
 	"log"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
-	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/updater"
 )
@@ -22,7 +21,6 @@ type UpdateHandlers struct {
 	SetOperationStep              func(generation int64, name, status, code, detail string)
 	StopRuntimeForModuleInstall   func() error
 	RestoreRuntimeAfterModuleFail func()
-	RuntimeError                  func(error) *ipc.RPCError
 	Logf                          func(format string, args ...interface{})
 }
 
@@ -93,7 +91,6 @@ func (h UpdateHandlers) UpdateInstall(params *json.RawMessage) (interface{}, *ip
 				},
 				StopRuntimeForModuleInstall:   h.StopRuntimeForModuleInstall,
 				RestoreRuntimeAfterModuleFail: h.RestoreRuntimeAfterModuleFail,
-				RuntimeErrorCode:              rootruntime.RuntimeErrorCode,
 				ScheduleSelfExit: func() {
 					go updater.ScheduleSelfExit(updater.SelfExitDelay)
 				},
@@ -102,7 +99,7 @@ func (h UpdateHandlers) UpdateInstall(params *json.RawMessage) (interface{}, *ip
 		})
 	})
 	if err != nil {
-		return nil, h.runtimeError(err)
+		return nil, RuntimeRPCError(err)
 	}
 	return status, nil
 }
@@ -115,14 +112,7 @@ func (h UpdateHandlers) failIfRuntimeOperationActive() *ipc.RPCError {
 	if !ok || status.ActiveOperation == nil {
 		return nil
 	}
-	return h.runtimeError(runtimev2.NewRuntimeBusyError(*status.ActiveOperation))
-}
-
-func (h UpdateHandlers) runtimeError(err error) *ipc.RPCError {
-	if h.RuntimeError != nil {
-		return h.RuntimeError(err)
-	}
-	return &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
+	return RuntimeRPCError(runtimev2.NewRuntimeBusyError(*status.ActiveOperation))
 }
 
 func (h UpdateHandlers) logf(format string, args ...interface{}) {

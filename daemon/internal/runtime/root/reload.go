@@ -7,6 +7,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimeerr"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -84,7 +85,6 @@ type ConfigReloadDeps struct {
 	ResetRescueState    func()
 	StartSubsystems     func()
 	RefreshHealth       func() runtimev2.HealthSnapshot
-	RuntimeErrorCode    func(err error, fallback string) string
 	ObserveReloadReport func(report core.RuntimeStageReport)
 }
 
@@ -113,10 +113,10 @@ func ReloadAfterConfigChange(input ConfigReloadInput, deps ConfigReloadDeps) err
 			return fmt.Errorf("%s full restart failed; %s: %w", context, savedLabel, err)
 		}
 		if err := deps.FullRestart(input.Generation); err != nil {
-			if resetReport := ResetReportFromError(err); resetReport != nil {
+			if resetReport := runtimeerr.ResetReportFromError(err); resetReport != nil {
 				recordStage("reset-after-full-restart-failure", resetReport.Status, "", resetReportDetail(*resetReport), resetReport.Status != "ok")
 			}
-			err = failStage("full-restart", reloadErrorCode(deps, err, "RUNTIME_RESTART_FAILED"), err, ResetReportFromError(err) != nil)
+			err = failStage("full-restart", runtimeerr.Code(err, "RUNTIME_RESTART_FAILED"), err, runtimeerr.ResetReportFromError(err) != nil)
 			return fmt.Errorf("%s full restart failed; %s: %w", context, savedLabel, err)
 		}
 		detail := ""
@@ -141,8 +141,8 @@ func ReloadAfterConfigChange(input ConfigReloadInput, deps ConfigReloadDeps) err
 	if err := deps.HotSwap(profile); err != nil {
 		resetReport := reloadResetReport(deps, input.Generation)
 		recordStage("reset-after-hot-swap-failure", resetReport.Status, "", resetReportDetail(resetReport), resetReport.Status != "ok")
-		err = failStage("hot-swap", reloadErrorCode(deps, err, "CORE_SPAWN_FAILED"), err, resetReport.Status != "ok")
-		return RuntimeErrorWithResetReport(
+		err = failStage("hot-swap", runtimeerr.Code(err, "CORE_SPAWN_FAILED"), err, resetReport.Status != "ok")
+		return runtimeerr.WithResetReport(
 			fmt.Errorf("%s hot-swap failed; %s, runtime stopped for safety: %w", context, savedLabel, err),
 			resetReport,
 		)
@@ -161,8 +161,8 @@ func ReloadAfterConfigChange(input ConfigReloadInput, deps ConfigReloadDeps) err
 	if err != nil {
 		resetReport := reloadResetReport(deps, input.Generation)
 		recordStage("reset-after-netstack-failure", resetReport.Status, "", resetReportDetail(resetReport), resetReport.Status != "ok")
-		err = failStage("netstack-reapply", reloadErrorCode(deps, err, "RULES_NOT_APPLIED"), err, resetReport.Status != "ok")
-		return RuntimeErrorWithResetReport(
+		err = failStage("netstack-reapply", runtimeerr.Code(err, "RULES_NOT_APPLIED"), err, resetReport.Status != "ok")
+		return runtimeerr.WithResetReport(
 			fmt.Errorf("%s rules failed; %s, runtime stopped for safety: %w", context, savedLabel, err),
 			resetReport,
 		)
@@ -185,7 +185,7 @@ func ReloadAfterConfigChange(input ConfigReloadInput, deps ConfigReloadDeps) err
 		recordStage("reset-after-health-failure", resetReport.Status, "", resetReportDetail(resetReport), resetReport.Status != "ok")
 		err := fmt.Errorf("%s", firstNonEmpty(snapshot.LastError, "readiness gates failed"))
 		err = failStage("health-refresh", firstNonEmpty(snapshot.LastCode, "READINESS_GATE_FAILED"), err, resetReport.Status != "ok")
-		return RuntimeErrorWithResetReport(
+		return runtimeerr.WithResetReport(
 			fmt.Errorf("%s readiness gates failed; %s, runtime stopped for safety: %w", context, savedLabel, err),
 			resetReport,
 		)
@@ -200,13 +200,6 @@ func observeReport(deps ConfigReloadDeps, report core.RuntimeStageReport) {
 	if deps.ObserveReloadReport != nil {
 		deps.ObserveReloadReport(report)
 	}
-}
-
-func reloadErrorCode(deps ConfigReloadDeps, err error, fallback string) string {
-	if deps.RuntimeErrorCode == nil {
-		return fallback
-	}
-	return deps.RuntimeErrorCode(err, fallback)
 }
 
 func reloadResetReport(deps ConfigReloadDeps, generation int64) runtimev2.ResetReport {

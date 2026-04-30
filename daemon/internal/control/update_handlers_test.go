@@ -18,9 +18,6 @@ func TestUpdateDownloadRejectsActiveRuntimeOperation(t *testing.T) {
 		RuntimeStatus: func() (runtimev2.Status, bool) {
 			return runtimev2.Status{ActiveOperation: &active}, true
 		},
-		RuntimeError: func(err error) *ipc.RPCError {
-			return &ipc.RPCError{Code: ipc.CodeRuntimeBusy, Message: err.Error()}
-		},
 	}
 
 	if _, rpcErr := handlers.UpdateDownload(nil); rpcErr == nil || rpcErr.Code != ipc.CodeRuntimeBusy {

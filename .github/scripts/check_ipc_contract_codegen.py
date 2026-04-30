@@ -8,6 +8,7 @@ import sys
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 MANIFEST = REPO_ROOT / "daemon/internal/ipc/contract_manifest.json"
 IPC_PROTOCOL = REPO_ROOT / "daemon/internal/ipc/protocol.go"
+IPC_SERVER = REPO_ROOT / "daemon/internal/ipc/server.go"
 OUTPUT = REPO_ROOT / "app/app/src/main/kotlin/com/rknnovpn/panel/ipc/GeneratedDaemonContract.kt"
 DAEMON_CLIENT = REPO_ROOT / "app/app/src/main/kotlin/com/rknnovpn/panel/ipc/DaemonClient.kt"
 DAEMON_CLIENT_RESULT = REPO_ROOT / "app/app/src/main/kotlin/com/rknnovpn/panel/ipc/DaemonClientResult.kt"
@@ -23,12 +24,15 @@ CONTROL_PROFILE_HANDLERS = REPO_ROOT / "daemon/internal/control/profile_handlers
 CONTROL_DIAGNOSTICS_HANDLERS = REPO_ROOT / "daemon/internal/control/diagnostics_handlers.go"
 CONTROL_RUNTIME_ERRORS = REPO_ROOT / "daemon/internal/control/runtime_errors.go"
 CONTROL_UPDATE_HANDLERS = REPO_ROOT / "daemon/internal/control/update_handlers.go"
+RUNTIME_ERROR_HELPERS = REPO_ROOT / "daemon/internal/runtimeerr/errors.go"
+ROOT_RUNTIME_ERROR_HELPERS = REPO_ROOT / "daemon/internal/runtime/root/errors.go"
 DAEMON_CLIENT_MODELS = REPO_ROOT / "app/app/src/main/kotlin/com/rknnovpn/panel/ipc/DaemonClientModels.kt"
 DAEMON_RESPONSE_PARSERS = REPO_ROOT / "app/app/src/main/kotlin/com/rknnovpn/panel/ipc/DaemonResponseParsers.kt"
 USER_MESSAGE_FORMATTER = REPO_ROOT / "app/app/src/main/kotlin/com/rknnovpn/panel/i18n/UserMessageFormatter.kt"
 APPLY_TRANSACTION = REPO_ROOT / "daemon/internal/apply/transaction.go"
 RUNTIME_STATE_STORE = REPO_ROOT / "daemon/internal/runtimev2/state_store.go"
 INSTALL_STATE_STORE = REPO_ROOT / "daemon/internal/updater/install_state.go"
+INSTALL_TRANSACTION = REPO_ROOT / "daemon/internal/updater/install_transaction.go"
 CONTROL_RUNTIME_HANDLERS = REPO_ROOT / "daemon/internal/control/runtime_handlers.go"
 APP_KOTLIN_ROOT = REPO_ROOT / "app/app/src/main/kotlin"
 BOOTSTRAP_METHODS = {"backend.status", "ipc.contract", "version"}
@@ -171,6 +175,7 @@ def validate_manifest(source: dict) -> list[str]:
     errors.extend(check_profile_operation_surface())
     errors.extend(check_diagnostics_state_surface())
     errors.extend(check_runtime_error_surface())
+    errors.extend(check_method_not_found_surface(source))
     return errors
 
 
@@ -345,11 +350,16 @@ def check_state_file_surfaces() -> list[str]:
             'Status: "unknown"',
             'Code:   "UPDATE_INSTALL_STATE_INVALID"',
         ],
+        CONTROL_DIAGNOSTICS_HANDLERS: [
+            '"runtime_state":     diagnostics.StatFile(runtimev2.RuntimeStatePath(dataDir), false)',
+            '"install_state":     diagnostics.StatFile(updater.InstallStatePath(dataDir), false)',
+        ],
     }
     sources = {
         RUNTIME_STATE_STORE: runtime_store,
         INSTALL_STATE_STORE: install_store,
         CONTROL_RUNTIME_HANDLERS: runtime_handlers,
+        CONTROL_DIAGNOSTICS_HANDLERS: CONTROL_DIAGNOSTICS_HANDLERS.read_text(encoding="utf-8") if CONTROL_DIAGNOSTICS_HANDLERS.exists() else "",
     }
     for path, snippets in required_snippets.items():
         source = sources[path]
@@ -433,6 +443,9 @@ def check_profile_operation_surface() -> list[str]:
             "func ProfileRPCErrorSaved(",
             "func ProfileSuccess(",
             "func ProfileDesiredGeneration(",
+            'github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimeerr',
+            'runtimeerr.Code(err, "PROFILE_APPLY_FAILED")',
+            "runtimeerr.ResetReportFromError(err)",
         ],
     }
     sources = {
@@ -462,13 +475,22 @@ def check_profile_operation_surface() -> list[str]:
 
 def check_runtime_error_surface() -> list[str]:
     errors: list[str] = []
-    required_files = [CONTROL_RUNTIME_ERRORS, DAEMON_RUNTIME_CONTROL_WIRING, DAEMON_RUNTIME_DESIRED, DAEMON_UPDATE_CONTROL_WIRING]
+    if ROOT_RUNTIME_ERROR_HELPERS.exists():
+        errors.append("daemon/internal/runtime/root/errors.go must not be restored; shared runtime error helpers live in internal/runtimeerr")
+    required_files = [
+        CONTROL_RUNTIME_ERRORS,
+        RUNTIME_ERROR_HELPERS,
+        DAEMON_RUNTIME_CONTROL_WIRING,
+        DAEMON_RUNTIME_DESIRED,
+        DAEMON_UPDATE_CONTROL_WIRING,
+    ]
     for path in required_files:
         if not path.exists():
             errors.append(f"{path.relative_to(REPO_ROOT)} is missing")
     if errors:
         return errors
     runtime_errors = CONTROL_RUNTIME_ERRORS.read_text(encoding="utf-8")
+    runtime_error_helpers = RUNTIME_ERROR_HELPERS.read_text(encoding="utf-8")
     runtime_wiring = DAEMON_RUNTIME_CONTROL_WIRING.read_text(encoding="utf-8")
     runtime_desired = DAEMON_RUNTIME_DESIRED.read_text(encoding="utf-8")
     update_wiring = DAEMON_UPDATE_CONTROL_WIRING.read_text(encoding="utf-8")
@@ -481,11 +503,20 @@ def check_runtime_error_surface() -> list[str]:
             "ipc.CodeRuntimeBusy",
             "ipc.CodeConfigError",
         ],
-        DAEMON_RUNTIME_CONTROL_WIRING: [
-            "RuntimeError:          control.RuntimeRPCError",
+        RUNTIME_ERROR_HELPERS: [
+            "func Code(err error, fallback string) string",
+            "func WithResetReport(",
+            "func ResetReportFromError(",
+            "runtimev2.OperationBusyError",
+            "netstack.Error",
         ],
-        DAEMON_UPDATE_CONTROL_WIRING: [
-            "RuntimeError:                  control.RuntimeRPCError",
+        CONTROL_RUNTIME_HANDLERS: [
+            "RuntimeRPCError(err)",
+            "DesiredStateApplyRPCError(err)",
+        ],
+        CONTROL_UPDATE_HANDLERS: [
+            "RuntimeRPCError(err)",
+            "RuntimeRPCError(runtimev2.NewRuntimeBusyError(*status.ActiveOperation))",
         ],
         DAEMON_RUNTIME_DESIRED: [
             "control.DesiredStateApplyError{",
@@ -495,6 +526,9 @@ def check_runtime_error_surface() -> list[str]:
     }
     sources = {
         CONTROL_RUNTIME_ERRORS: runtime_errors,
+        RUNTIME_ERROR_HELPERS: runtime_error_helpers,
+        CONTROL_RUNTIME_HANDLERS: CONTROL_RUNTIME_HANDLERS.read_text(encoding="utf-8") if CONTROL_RUNTIME_HANDLERS.exists() else "",
+        CONTROL_UPDATE_HANDLERS: CONTROL_UPDATE_HANDLERS.read_text(encoding="utf-8") if CONTROL_UPDATE_HANDLERS.exists() else "",
         DAEMON_RUNTIME_CONTROL_WIRING: runtime_wiring,
         DAEMON_RUNTIME_DESIRED: runtime_desired,
         DAEMON_UPDATE_CONTROL_WIRING: update_wiring,
@@ -507,17 +541,77 @@ def check_runtime_error_surface() -> list[str]:
     if "func (d *daemon) rpcErrorFromRuntimeError(" in runtime_wiring:
         errors.append("daemon runtime control wiring must not own generic runtime RPC error mapping")
     forbidden_sources = {
+        CONTROL_RUNTIME_HANDLERS: CONTROL_RUNTIME_HANDLERS.read_text(encoding="utf-8") if CONTROL_RUNTIME_HANDLERS.exists() else "",
+        CONTROL_UPDATE_HANDLERS: CONTROL_UPDATE_HANDLERS.read_text(encoding="utf-8") if CONTROL_UPDATE_HANDLERS.exists() else "",
         DAEMON_RUNTIME_CONTROL_WIRING: runtime_wiring,
         DAEMON_RUNTIME_DESIRED: runtime_desired,
+        DAEMON_UPDATE_CONTROL_WIRING: update_wiring,
     }
     for path, source in forbidden_sources.items():
         for snippet in [
+            "RuntimeError ",
+            "RuntimeError:",
+            "h.runtimeError(",
+            "func (h RuntimeHandlers) runtimeError(",
+            "func (h UpdateHandlers) runtimeError(",
+            "RuntimeErrorCode              func(",
             "DesiredStateApplyError:",
             "func (d *daemon) rpcErrorFromDesiredStateApplyError(",
             "type desiredStateApplyError struct",
         ]:
             if snippet in source:
                 errors.append(f"{path.relative_to(REPO_ROOT)} must not own desired-state RPC error mapping: found {snippet!r}")
+    if 'github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root' in sources[CONTROL_UPDATE_HANDLERS]:
+        errors.append("control update handlers must not import root runtime; root-specific hooks belong in daemon wiring")
+    if 'github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root' in CONTROL_MUTATION_ENVELOPE.read_text(encoding="utf-8"):
+        errors.append("control mutation envelope must use runtimeerr, not root runtime")
+    if INSTALL_TRANSACTION.exists():
+        install_transaction = INSTALL_TRANSACTION.read_text(encoding="utf-8")
+        if 'github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimeerr' not in install_transaction:
+            errors.append("update install transaction must use runtimeerr for stable stop-runtime error codes")
+        for snippet in ["RuntimeErrorCode              func(", "installRuntimeErrorCode("]:
+            if snippet in install_transaction:
+                errors.append(f"update install transaction must not keep runtime error callback wrapper {snippet!r}")
+    return errors
+
+
+def check_method_not_found_surface(source: dict) -> list[str]:
+    if not IPC_SERVER.exists():
+        return [f"{IPC_SERVER.relative_to(REPO_ROOT)} is missing"]
+    server = IPC_SERVER.read_text(encoding="utf-8")
+    manifest_methods = {item.get("method") for item in source.get("methods", []) if item.get("method")}
+    errors: list[str] = []
+    required_snippets = [
+        "func replacedMethodHint(method string) string",
+        '"requestedMethod":  req.Method',
+        '"supportedMethods": SupportedMethods()',
+        'data["replacement"] = replacement',
+        "CodeMethodNotFound",
+    ]
+    for snippet in required_snippets:
+        if snippet not in server:
+            errors.append(f"IPC method-not-found surface missing {snippet!r} in {IPC_SERVER.relative_to(REPO_ROOT)}")
+    legacy_hints = {
+        "config.import": "config-import",
+        "network.reset": "backend.reset",
+        "node.test": "diagnostics.testNodes",
+        "self.check": "self-check",
+        "status": "backend.status",
+        "start": "backend.start",
+        "stop": "backend.stop",
+        "reload": "backend.restart",
+        "health": "diagnostics.health",
+        "subscription-fetch": "subscription.refresh",
+    }
+    for legacy, canonical in sorted(legacy_hints.items()):
+        if legacy in manifest_methods:
+            errors.append(f"legacy IPC alias {legacy} must not be declared as a contract method")
+        if canonical not in manifest_methods:
+            errors.append(f"legacy IPC hint for {legacy} points at undeclared canonical method {canonical}")
+        if f'case "{legacy}":' not in server:
+            errors.append(f"IPC method-not-found hint missing legacy case {legacy}")
+        if canonical not in server:
+            errors.append(f"IPC method-not-found hint for {legacy} must mention canonical method {canonical}")
     return errors
 
 
@@ -534,6 +628,10 @@ def check_diagnostics_state_surface() -> list[str]:
     required_snippets = {
         CONTROL_DIAGNOSTICS_HANDLERS: [
             "CurrentConfig         CurrentConfigFunc",
+            "RuntimeStatus         RuntimeStatusFunc",
+            "RefreshRuntimeHealth  func() runtimev2.HealthSnapshot",
+            "func (h DiagnosticsHandlers) DiagnosticsHealth(",
+            "func (h DiagnosticsHandlers) DiagnosticsTestNodes(",
             "profiledoc.Path(h.ConfigPath)",
             "ConfigPath:  h.ConfigPath",
             "DataDir:     h.DataDir",
@@ -543,6 +641,7 @@ def check_diagnostics_state_surface() -> list[str]:
             "ProfilePath:           d.profilePath",
             "DataDir:               d.dataDir",
             "CurrentConfig:         d.currentConfig",
+            "RefreshRuntimeHealth:  d.runtimeV2.RefreshHealth",
         ],
     }
     sources = {
@@ -558,6 +657,20 @@ def check_diagnostics_state_surface() -> list[str]:
         for snippet in ["CurrentState", "func() control.DiagnosticsState"]:
             if snippet in source:
                 errors.append(f"{path.relative_to(REPO_ROOT)} must not use diagnostics CurrentState callback wrapper")
+    registry = CONTROL_REGISTRY.read_text(encoding="utf-8") if CONTROL_REGISTRY.exists() else ""
+    for snippet in [
+        '"diagnostics.health":        g.Diagnostics.DiagnosticsHealth',
+        '"diagnostics.testNodes":     g.Diagnostics.DiagnosticsTestNodes',
+    ]:
+        if snippet not in registry:
+            errors.append(f"diagnostics IPC methods must be owned by DiagnosticsHandlers: missing {snippet!r}")
+    runtime_handlers = CONTROL_RUNTIME_HANDLERS.read_text(encoding="utf-8") if CONTROL_RUNTIME_HANDLERS.exists() else ""
+    for snippet in ["DiagnosticsHealth", "DiagnosticsTestNodes", "TestNodes             func("]:
+        if snippet in runtime_handlers:
+            errors.append(f"runtime handlers must not own diagnostics IPC endpoint {snippet!r}")
+    audit_handlers = (REPO_ROOT / "daemon/internal/control/audit_handlers.go").read_text(encoding="utf-8")
+    if "CurrentConfig CurrentConfigFunc" not in audit_handlers:
+        errors.append("audit handlers must use CurrentConfigFunc for shared config callback contract")
     return errors
 
 
@@ -753,8 +866,10 @@ def check_daemon_control_wiring(source: dict) -> list[str]:
     registry = CONTROL_REGISTRY.read_text(encoding="utf-8")
     registered_methods = set(_registered_daemon_control_methods(registry))
     errors: list[str] = []
-    if "RegisterDaemonHandlers(" not in wiring:
-        errors.append(f"{DAEMON_CONTROL_WIRING.relative_to(REPO_ROOT)} must call control.RegisterDaemonHandlers")
+    if "RegisterContractHandlers(" not in wiring or ".ContractHandlers()" not in wiring:
+        errors.append(f"{DAEMON_CONTROL_WIRING.relative_to(REPO_ROOT)} must register HandlerGroups.ContractHandlers through control.RegisterContractHandlers")
+    if "RegisterDaemonHandlers(" in registry:
+        errors.append(f"{CONTROL_REGISTRY.relative_to(REPO_ROOT)} must not keep RegisterDaemonHandlers pass-through wrapper")
     if "map[string]ipc.Handler{" in wiring:
         errors.append(f"{DAEMON_CONTROL_WIRING.relative_to(REPO_ROOT)} must not own IPC method-to-handler mapping")
     for method in sorted(manifest_methods - registered_methods):

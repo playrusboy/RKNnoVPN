@@ -13,7 +13,7 @@ import (
 type AuditHandlers struct {
 	ConfigPath    string
 	DataDir       string
-	CurrentConfig func() *config.Config
+	CurrentConfig CurrentConfigFunc
 	RunHealth     func() *health.HealthResult
 	CoreState     func() string
 	Now           func() time.Time

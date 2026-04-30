@@ -19,7 +19,7 @@ func (d *daemon) registerHandlers() error {
 	profileHandlers := d.profileControlHandlers()
 	runtimeHandlers := d.runtimeControlHandlers()
 	updateHandlers := d.updateControlHandlers()
-	return control.RegisterDaemonHandlers(d.ipcServer, control.HandlerGroups{
+	groups := control.HandlerGroups{
 		App:         appHandlers,
 		Audit:       auditHandlers,
 		Config:      configHandlers,
@@ -29,5 +29,6 @@ func (d *daemon) registerHandlers() error {
 		Profile:     profileHandlers,
 		Runtime:     runtimeHandlers,
 		Update:      updateHandlers,
-	})
+	}
+	return control.RegisterContractHandlers(d.ipcServer, groups.ContractHandlers())
 }

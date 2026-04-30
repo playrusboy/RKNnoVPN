@@ -7,6 +7,7 @@ import (
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimeerr"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -170,7 +171,7 @@ func TestBackendNetworkChangeWrapsReapplyFailureWithResetReport(t *testing.T) {
 	if report == nil || report.Generation != 13 {
 		t.Fatalf("expected reset report for reapply failure, got %#v", report)
 	}
-	if fromErr := ResetReportFromError(err); fromErr == nil || fromErr.Generation != 13 {
+	if fromErr := runtimeerr.ResetReportFromError(err); fromErr == nil || fromErr.Generation != 13 {
 		t.Fatalf("expected wrapped reset report, got %#v", fromErr)
 	}
 }

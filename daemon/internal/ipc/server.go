@@ -183,8 +183,15 @@ func (s *Server) processRequest(data []byte) *Response {
 	s.mu.RUnlock()
 
 	if !ok {
+		data := map[string]interface{}{
+			"requestedMethod":  req.Method,
+			"supportedMethods": SupportedMethods(),
+		}
+		if replacement := replacedMethodHint(req.Method); replacement != "" {
+			data["replacement"] = replacement
+		}
 		return NewErrorResponse(req.ID, CodeMethodNotFound,
-			"method not found: "+req.Method, nil)
+			"method not found: "+req.Method, data)
 	}
 
 	result, rpcErr := handler(req.Params)
@@ -192,4 +199,31 @@ func (s *Server) processRequest(data []byte) *Response {
 		return NewErrorResponse(req.ID, rpcErr.Code, rpcErr.Message, rpcErr.Data)
 	}
 	return NewResponse(req.ID, result)
+}
+
+func replacedMethodHint(method string) string {
+	switch method {
+	case "config.import":
+		return "Use config-import for full daemon config import, or profile.apply for user profile changes."
+	case "network.reset":
+		return "Use backend.reset."
+	case "node.test":
+		return "Use diagnostics.testNodes."
+	case "self.check":
+		return "Use self-check."
+	case "status":
+		return "Use backend.status."
+	case "start":
+		return "Use backend.start."
+	case "stop":
+		return "Use backend.stop."
+	case "reload":
+		return "Use backend.restart."
+	case "health":
+		return "Use diagnostics.health."
+	case "subscription-fetch":
+		return "Use subscription.preview or subscription.refresh."
+	default:
+		return ""
+	}
 }

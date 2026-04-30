@@ -11,6 +11,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimeerr"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/subscription"
 )
 
@@ -94,10 +95,10 @@ func TestRuntimeErrorCodePrefersTypedNetstackCode(t *testing.T) {
 		},
 	}
 
-	if got := rootruntime.RuntimeErrorCode(err, "fallback"); got != "DNS_APPLY_FAILED" {
+	if got := runtimeerr.Code(err, "fallback"); got != "DNS_APPLY_FAILED" {
 		t.Fatalf("expected DNS_APPLY_FAILED, got %q", got)
 	}
-	if got := rootruntime.RuntimeErrorCode(errors.New("plain"), "fallback"); got != "fallback" {
+	if got := runtimeerr.Code(errors.New("plain"), "fallback"); got != "fallback" {
 		t.Fatalf("expected fallback, got %q", got)
 	}
 }

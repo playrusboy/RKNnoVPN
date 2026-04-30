@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimeerr"
 )
 
 type InstallTransaction struct {
@@ -22,7 +23,6 @@ type InstallHooks struct {
 	SetOperationStep              func(name, status, code, detail string)
 	StopRuntimeForModuleInstall   func() error
 	RestoreRuntimeAfterModuleFail func()
-	RuntimeErrorCode              func(error, string) string
 	ScheduleSelfExit              func()
 	Logf                          func(format string, args ...interface{})
 }
@@ -72,7 +72,7 @@ func RunInstallTransaction(tx InstallTransaction) error {
 		markStep("update-stop-runtime", "running", "UPDATE_STOP_RUNTIME", "stopping runtime before module install")
 		if tx.Hooks.StopRuntimeForModuleInstall != nil {
 			if err := tx.Hooks.StopRuntimeForModuleInstall(); err != nil {
-				markStep("update-stop-runtime", "failed", installRuntimeErrorCode(tx, err, "RESET_IN_PROGRESS"), err.Error())
+				markStep("update-stop-runtime", "failed", runtimeerr.Code(err, "RESET_IN_PROGRESS"), err.Error())
 				return err
 			}
 		}
@@ -106,13 +106,6 @@ func RunInstallTransaction(tx InstallTransaction) error {
 	}
 
 	return nil
-}
-
-func installRuntimeErrorCode(tx InstallTransaction, err error, fallback string) string {
-	if tx.Hooks.RuntimeErrorCode == nil {
-		return fallback
-	}
-	return tx.Hooks.RuntimeErrorCode(err, fallback)
 }
 
 func installLogf(tx InstallTransaction, format string, args ...interface{}) {

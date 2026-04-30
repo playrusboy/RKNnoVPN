@@ -24,10 +24,6 @@ type HandlerGroups struct {
 	Update      UpdateHandlers
 }
 
-func RegisterDaemonHandlers(registrar Registrar, groups HandlerGroups) error {
-	return RegisterContractHandlers(registrar, groups.ContractHandlers())
-}
-
 func (g HandlerGroups) ContractHandlers() map[string]ipc.Handler {
 	return map[string]ipc.Handler{
 		"app.list":                  g.App.AppList,
@@ -41,8 +37,8 @@ func (g HandlerGroups) ContractHandlers() map[string]ipc.Handler {
 		"backend.stop":              g.Runtime.BackendStop,
 		"config-import":             g.Config.ConfigImport,
 		"config-list":               g.Config.ConfigList,
-		"diagnostics.health":        g.Runtime.DiagnosticsHealth,
-		"diagnostics.testNodes":     g.Runtime.DiagnosticsTestNodes,
+		"diagnostics.health":        g.Diagnostics.DiagnosticsHealth,
+		"diagnostics.testNodes":     g.Diagnostics.DiagnosticsTestNodes,
 		"diagnostics.report":        g.Diagnostics.DiagnosticsReport,
 		"ipc.contract":              g.Meta.IPCContract,
 		"logs":                      g.Logs.Logs,

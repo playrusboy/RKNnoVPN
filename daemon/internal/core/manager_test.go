@@ -2,15 +2,19 @@ package core
 
 import (
 	"errors"
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 )
 
 func TestIgnorableCleanupScriptError(t *testing.T) {
@@ -191,6 +195,199 @@ func TestStartDoesNotRemoveExternalResetLock(t *testing.T) {
 	}
 	if _, err := os.Stat(resetLock); err != nil {
 		t.Fatalf("start must not remove reset.lock, stat err=%v", err)
+	}
+}
+
+func TestHotSwapCleansNetstackWhenNewCoreExitsBeforeListeners(t *testing.T) {
+	dataDir := t.TempDir()
+	binDir := filepath.Join(dataDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	singBoxPath := filepath.Join(binDir, "sing-box")
+	if err := os.WriteFile(singBoxPath, []byte("#!/bin/sh\nif [ \"$1\" = check ]; then exit 0; fi\necho run failed >&2\nexit 42\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldCmd := exec.Command("/bin/sh", "-c", "trap 'exit 0' TERM; while :; do sleep 1; done")
+	if err := oldCmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = oldCmd.Process.Kill()
+	})
+
+	cfg := config.DefaultConfig()
+	cfg.Node.Address = "example.com"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	manager := NewCoreManager(cfg, dataDir, nil)
+	manager.process = oldCmd.Process
+	manager.pid = oldCmd.Process.Pid
+	manager.exitCh = watchCommand(oldCmd)
+	manager.state = StateRunning
+	manager.activeProfile = "vless://old.example"
+	if err := os.MkdirAll(filepath.Join(dataDir, "run"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(dataDir, "run", "active"), []byte("active\n"), 0640)
+
+	fake := &fakeCoreNetstack{}
+	manager.netstackFactory = func() coreNetstack { return fake }
+
+	err := manager.HotSwap(cfg.ResolveProfile())
+	if err == nil {
+		t.Fatal("expected hot-swap listener failure")
+	}
+	runtimeErr, ok := err.(*RuntimeError)
+	if !ok {
+		t.Fatalf("expected RuntimeError, got %T: %v", err, err)
+	}
+	if !runtimeErr.RuntimeRollbackApplied() {
+		t.Fatalf("hot-swap listener failure must be reported as rollback-applied: %#v", runtimeErr)
+	}
+	if fake.cleanupCalls != 1 {
+		t.Fatalf("hot-swap failure must cleanup netstack exactly once, got %d", fake.cleanupCalls)
+	}
+	if manager.GetState() != StateDegraded {
+		t.Fatalf("hot-swap failure should leave degraded after cleanup, got %s", manager.GetState())
+	}
+	if manager.pid != 0 || manager.process != nil || manager.activeProfile != "" {
+		t.Fatalf("hot-swap cleanup left stale process state: pid=%d process=%v profile=%q", manager.pid, manager.process, manager.activeProfile)
+	}
+}
+
+func TestStartCleansNetstackWhenVerifyFailsAfterApply(t *testing.T) {
+	dataDir := t.TempDir()
+	binDir := filepath.Join(dataDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	tproxyPort := freeTCPPort(t)
+	dnsPort := freeTCPPort(t)
+	singBoxPath := filepath.Join(binDir, "sing-box")
+	script := fmt.Sprintf("#!/bin/sh\nGO_WANT_SINGBOX_HELPER=1 FAKE_TPROXY_PORT=%d FAKE_DNS_PORT=%d exec %s -test.run=TestSingBoxHelperProcess -- \"$@\"\n", tproxyPort, dnsPort, strconv.Quote(os.Args[0]))
+	if err := os.WriteFile(singBoxPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Node.Address = "example.com"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	cfg.Proxy.TProxyPort = tproxyPort
+	cfg.Proxy.DNSPort = dnsPort
+	cfg.Proxy.APIPort = 0
+	cfg.Proxy.GID = os.Getegid()
+	manager := NewCoreManager(cfg, dataDir, nil)
+	manager.disableCoreCredentialForTest = true
+	fake := &fakeCoreNetstack{verifyReport: netstack.Report{
+		Operation: "verify",
+		Status:    "failed",
+		Steps: []netstack.Step{{
+			Name:   "iptables-status",
+			Status: "failed",
+			Detail: "missing IPv4 hook",
+		}},
+		Errors: []string{"iptables-status: missing IPv4 hook"},
+	}}
+	manager.netstackFactory = func() coreNetstack { return fake }
+
+	err := manager.Start(cfg.ResolveProfile())
+	if err == nil {
+		t.Fatal("expected netstack verify failure")
+	}
+	runtimeErr, ok := err.(*RuntimeError)
+	if !ok {
+		t.Fatalf("expected RuntimeError, got %T: %v", err, err)
+	}
+	if runtimeErr.RuntimeCode() != "NETSTACK_VERIFY_FAILED" {
+		t.Fatalf("expected NETSTACK_VERIFY_FAILED, got %#v", runtimeErr)
+	}
+	if !runtimeErr.RuntimeRollbackApplied() {
+		t.Fatalf("verify failure must be reported as rollback-applied: %#v", runtimeErr)
+	}
+	if fake.applyCalls != 1 || fake.verifyCalls != 1 || fake.cleanupCalls != 1 {
+		t.Fatalf("unexpected netstack calls: apply=%d verify=%d cleanup=%d", fake.applyCalls, fake.verifyCalls, fake.cleanupCalls)
+	}
+	if manager.GetState() != StateStopped {
+		t.Fatalf("verify rollback should leave stopped, got %s", manager.GetState())
+	}
+	if manager.pid != 0 || manager.process != nil || manager.activeProfile != "" {
+		t.Fatalf("verify rollback left stale process state: pid=%d process=%v profile=%q", manager.pid, manager.process, manager.activeProfile)
+	}
+}
+
+type fakeCoreNetstack struct {
+	cleanupCalls int
+	applyCalls   int
+	verifyCalls  int
+	applyReport  netstack.Report
+	verifyReport netstack.Report
+}
+
+func (f *fakeCoreNetstack) Apply() netstack.Report {
+	f.applyCalls++
+	if f.applyReport.Operation != "" || len(f.applyReport.Errors) > 0 {
+		return f.applyReport
+	}
+	return netstack.Report{Operation: "apply", Status: "ok"}
+}
+
+func (f *fakeCoreNetstack) Cleanup() netstack.Report {
+	f.cleanupCalls++
+	return netstack.Report{Operation: "cleanup", Status: "ok"}
+}
+
+func (f *fakeCoreNetstack) Verify() netstack.Report {
+	f.verifyCalls++
+	if f.verifyReport.Operation != "" || len(f.verifyReport.Errors) > 0 {
+		return f.verifyReport
+	}
+	return netstack.Report{Operation: "verify", Status: "ok"}
+}
+
+func freeTCPPort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	return listener.Addr().(*net.TCPAddr).Port
+}
+
+func TestSingBoxHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_SINGBOX_HELPER") != "1" {
+		return
+	}
+	args := os.Args
+	for len(args) > 0 && args[0] != "--" {
+		args = args[1:]
+	}
+	if len(args) > 0 {
+		args = args[1:]
+	}
+	if len(args) == 0 {
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "check":
+		os.Exit(0)
+	case "run":
+		tproxyListener, err := net.Listen("tcp", "127.0.0.1:"+os.Getenv("FAKE_TPROXY_PORT"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		defer tproxyListener.Close()
+		dnsListener, err := net.Listen("tcp", "127.0.0.1:"+os.Getenv("FAKE_DNS_PORT"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		defer dnsListener.Close()
+		select {}
+	default:
+		os.Exit(2)
 	}
 }
 

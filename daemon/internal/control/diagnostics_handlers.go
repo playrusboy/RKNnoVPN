@@ -14,6 +14,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/updater"
 )
 
 type DiagnosticsState struct {
@@ -31,7 +32,8 @@ type DiagnosticsHandlers struct {
 	CurrentConfig         CurrentConfigFunc
 	RunHealth             func() *health.HealthResult
 	HealthSnapshot        func(*health.HealthResult, bool) runtimev2.HealthSnapshot
-	RuntimeStatus         func() (runtimev2.Status, bool)
+	RefreshRuntimeHealth  func() runtimev2.HealthSnapshot
+	RuntimeStatus         RuntimeStatusFunc
 	NetstackReport        func(*config.Config) netstack.Report
 	NetstackRuntimeReport func(*config.Config) netstack.Report
 	TestNodes             func(url string, timeoutMS int, nodeIDs []string) []runtimev2.NodeProbeResult
@@ -59,6 +61,35 @@ func (h DiagnosticsHandlers) SelfCheck(params *json.RawMessage) (interface{}, *i
 		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
 	}
 	return summary, nil
+}
+
+func (h DiagnosticsHandlers) DiagnosticsHealth(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	return h.refreshRuntimeHealth(), nil
+}
+
+func (h DiagnosticsHandlers) DiagnosticsTestNodes(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	var p struct {
+		NodeIDs   []string `json:"node_ids"`
+		URL       string   `json:"url"`
+		TimeoutMS int      `json:"timeout_ms"`
+	}
+	if params != nil {
+		if err := json.Unmarshal(*params, &p); err != nil {
+			return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: "invalid params: " + err.Error()}
+		}
+	}
+	if p.TimeoutMS <= 0 {
+		p.TimeoutMS = 5000
+	}
+	if h.TestNodes == nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "node probe callback is not configured"}
+	}
+
+	results := h.TestNodes(p.URL, p.TimeoutMS, p.NodeIDs)
+	return map[string]interface{}{
+		"url":     p.URL,
+		"results": results,
+	}, nil
 }
 
 func (h DiagnosticsHandlers) buildReport(lines int) map[string]interface{} {
@@ -93,6 +124,7 @@ func (h DiagnosticsHandlers) buildReport(lines int) map[string]interface{} {
 	privacy := diagnostics.Privacy(cfg, lines, exec)
 	singBoxCheck := diagnostics.SingBoxCheck(singBoxPath, renderedConfigPath, lines, exec)
 	releaseIntegrity := diagnostics.ReleaseIntegrityReport(dataDir)
+	runtimePreflight := diagnostics.RuntimePreflightReport(dataDir)
 	routingSummary := diagnostics.RoutingSummaryFromConfig(cfg)
 	profileSummary := diagnostics.ProfileSummaryFromConfig(cfg, runtimeStatus)
 	packageResolution := diagnostics.PackageResolutionFromConfig(cfg)
@@ -100,7 +132,7 @@ func (h DiagnosticsHandlers) buildReport(lines int) map[string]interface{} {
 		diagnostics.BuildSummaryWithCanonical(h.Version, ProtocolVersion, runtimeStatus.Canonical, healthSnapshot, leftovers, netstackRuntimeReport, nodeResults, ports, privacy, moduleVersion, singBoxCheck, releaseIntegrity, profileSummary, routingSummary, packageResolution),
 		ipc.ContractVersion(),
 		ipc.APKRequiredMethods(),
-	)
+	).WithRuntimePreflight(runtimePreflight)
 	versions := addIPCContractFields(map[string]interface{}{
 		"daemon":             h.Version,
 		"core":               h.Version,
@@ -108,6 +140,7 @@ func (h DiagnosticsHandlers) buildReport(lines int) map[string]interface{} {
 		"panel_min_version":  h.Version,
 		"sing_box":           diagnostics.SingBoxVersion(singBoxPath, lines, exec),
 		"module":             moduleVersion,
+		"runtime_preflight":  runtimePreflight,
 	})
 
 	report := map[string]interface{}{
@@ -128,6 +161,8 @@ func (h DiagnosticsHandlers) buildReport(lines int) map[string]interface{} {
 			"sing_box_log":      diagnostics.StatFile(filepath.Join(modulePaths.LogDir(), "sing-box.log"), false),
 			"daemon_socket":     diagnostics.StatFile(modulePaths.DaemonSocket(), false),
 			"sing_box_pid_file": diagnostics.StatFile(modulePaths.SingBoxPIDFile(), false),
+			"runtime_state":     diagnostics.StatFile(runtimev2.RuntimeStatePath(dataDir), false),
+			"install_state":     diagnostics.StatFile(updater.InstallStatePath(dataDir), false),
 		},
 		"health": map[string]interface{}{
 			"snapshot": healthSnapshot,
@@ -145,6 +180,7 @@ func (h DiagnosticsHandlers) buildReport(lines int) map[string]interface{} {
 		"package_resolution":  packageResolution,
 		"netstack":            netstackReport,
 		"netstack_runtime":    netstackRuntimeReport,
+		"runtime_preflight":   runtimePreflight,
 		"leftovers":           leftovers,
 		"node_tests":          diagnostics.RedactNodeProbeResults(nodeResults),
 		"logs":                diagnostics.ReadLogSections(diagnostics.DefaultLogFileSpecs(dataDir), lines, 512*1024, diagnostics.RedactText),
@@ -184,6 +220,7 @@ func (h DiagnosticsHandlers) BuildSelfCheckSummary(lines int) (diagnostics.Summa
 	}
 	runtimeStatus, _ := h.runtimeStatus()
 	exec := h.exec()
+	runtimePreflight := diagnostics.RuntimePreflightReport(dataDir)
 	return diagnostics.WithIPCContractFacts(
 		diagnostics.BuildSummaryWithCanonical(
 			h.Version,
@@ -204,7 +241,7 @@ func (h DiagnosticsHandlers) BuildSelfCheckSummary(lines int) (diagnostics.Summa
 		),
 		ipc.ContractVersion(),
 		ipc.APKRequiredMethods(),
-	), nil
+	).WithRuntimePreflight(runtimePreflight), nil
 }
 
 func (h DiagnosticsHandlers) state() DiagnosticsState {
@@ -234,6 +271,13 @@ func (h DiagnosticsHandlers) runHealth() *health.HealthResult {
 func (h DiagnosticsHandlers) healthSnapshot(result *health.HealthResult, allowEgressProbe bool) runtimev2.HealthSnapshot {
 	if h.HealthSnapshot != nil {
 		return h.HealthSnapshot(result, allowEgressProbe)
+	}
+	return runtimev2.HealthSnapshot{}
+}
+
+func (h DiagnosticsHandlers) refreshRuntimeHealth() runtimev2.HealthSnapshot {
+	if h.RefreshRuntimeHealth != nil {
+		return h.RefreshRuntimeHealth()
 	}
 	return runtimev2.HealthSnapshot{}
 }

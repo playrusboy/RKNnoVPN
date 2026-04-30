@@ -256,6 +256,12 @@ type listenerWaitSpec struct {
 
 const singBoxCheckTimeout = 20 * time.Second
 
+type coreNetstack interface {
+	Apply() netstack.Report
+	Cleanup() netstack.Report
+	Verify() netstack.Report
+}
+
 // CoreManager owns the sing-box child process and the iptables / DNS
 // rules that make transparent proxying work.
 type CoreManager struct {
@@ -271,6 +277,9 @@ type CoreManager struct {
 	startedAt         time.Time
 	lastStartReport   RuntimeStageReport
 	lastRuntimeReport RuntimeStageReport
+	netstackFactory   func() coreNetstack
+
+	disableCoreCredentialForTest bool
 
 	mu sync.Mutex
 }
@@ -281,12 +290,16 @@ func NewCoreManager(cfg *config.Config, dataDir string, logger *log.Logger) *Cor
 	if logger == nil {
 		logger = log.New(os.Stderr, "[core] ", log.LstdFlags)
 	}
-	return &CoreManager{
+	manager := &CoreManager{
 		config:  cfg,
 		dataDir: dataDir,
 		logger:  logger,
 		state:   StateStopped,
 	}
+	manager.netstackFactory = func() coreNetstack {
+		return netstack.New(manager.dataDir, manager.scriptEnv(), ExecScript)
+	}
+	return manager
 }
 
 // SetConfig replaces the live configuration. This does NOT restart
@@ -388,11 +401,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	recordStage("open-core-log", "ok", "", logPath, false)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{
-			Gid: m.coreGID(),
-		},
-	}
+	cmd.SysProcAttr = m.singBoxSysProcAttr()
 
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
@@ -408,7 +417,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 
 	// Write PID file.
 	pidPath := paths.SingBoxPIDFile()
-	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(m.pid)), 0640)
+	_ = writeSingBoxPIDFile(pidPath, m.pid)
 	netstackApplied := false
 	rollbackStarted := func(signal syscall.Signal, cleanupNetstack bool) {
 		if cleanupNetstack || netstackApplied {
@@ -605,8 +614,6 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	recordStage("config-check", "ok", "", newConfigPath, false)
 
 	pidPath := paths.SingBoxPIDFile()
-	oldActiveProfile := m.activeProfile
-	oldStartedAt := m.startedAt
 	cleanupAndDegrade := func() {
 		_ = m.netstack().Cleanup().Err()
 		if m.process != nil {
@@ -624,42 +631,6 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 		m.state = StateDegraded
 		_ = os.Remove(pidPath)
 		_ = os.Remove(paths.ActiveFile())
-	}
-	restartOldCore := func(reason error) error {
-		if _, err := os.Stat(configPath); err != nil {
-			cleanupAndDegrade()
-			return fmt.Errorf("new core failed: %v; old config unavailable: %w", reason, err)
-		}
-
-		process, fallbackExitCh, pid, logPath, err := m.spawnSingBox(configPath)
-		if err != nil {
-			cleanupAndDegrade()
-			return fmt.Errorf("new core failed: %v; old core restart failed: %w", reason, err)
-		}
-		m.process = process
-		m.exitCh = fallbackExitCh
-		m.pid = pid
-		_ = os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0640)
-		recordStage("fallback-spawn-old-core", "ok", "", fmt.Sprintf("pid=%d", pid), true)
-
-		fallbackRecord := func(name string, status string, code string, detail string, rollbackApplied bool) {
-			recordStage("fallback-"+name, status, code, detail, rollbackApplied)
-		}
-		if spec, err := m.waitRuntimeListeners(fallbackExitCh, logPath, fallbackRecord); err != nil {
-			_ = process.Signal(syscall.SIGKILL)
-			select {
-			case <-fallbackExitCh:
-			case <-time.After(2 * time.Second):
-			}
-			cleanupAndDegrade()
-			return fmt.Errorf("new core failed: %v; old core restart %s port %d failed: %w", reason, spec.Label, spec.Port, err)
-		}
-		m.activeProfile = oldActiveProfile
-		m.startedAt = oldStartedAt
-		m.state = StateRunning
-		m.markActive()
-		recordStage("fallback-old-core", "ok", "", oldActiveProfile, true)
-		return nil
 	}
 
 	// 2. Stop sing-box (SIGTERM only, no iptables teardown).
@@ -687,49 +658,23 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 			layer = "hot-swap open sing-box log"
 			code = "CORE_LOG_OPEN_FAILED"
 		}
-		if fallbackErr := restartOldCore(err); fallbackErr != nil {
-			return failStage(stage, layer, code, fallbackErr, true)
-		}
+		cleanupAndDegrade()
 		return failStage(stage, layer, code, err, true)
 	}
 	m.process = process
 	m.pid = pid
 	m.exitCh = exitCh
 	recordStage("spawn-core", "ok", "", fmt.Sprintf("pid=%d", m.pid), false)
-	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(m.pid)), 0640)
+	_ = writeSingBoxPIDFile(pidPath, m.pid)
 
 	// 4. Wait for runtime listeners.
 	if spec, err := m.waitRuntimeListeners(exitCh, logPath, recordStage); err != nil {
-		_ = m.process.Signal(syscall.SIGKILL)
-		select {
-		case <-exitCh:
-		case <-time.After(2 * time.Second):
-		}
-		m.process = nil
-		m.exitCh = nil
-		m.pid = 0
-		m.activeProfile = ""
-		m.startedAt = time.Time{}
-		_ = os.Remove(pidPath)
-		if fallbackErr := restartOldCore(err); fallbackErr != nil {
-			return failStage(spec.Stage, "hot-swap "+spec.Layer, spec.Code, fallbackErr, true)
-		}
+		cleanupAndDegrade()
 		return failStage(spec.Stage, "hot-swap "+spec.Layer, spec.Code, fmt.Errorf("%s port %d not ready: %w", spec.Label, spec.Port, err), true)
 	}
 
 	if err := os.Rename(newConfigPath, configPath); err != nil {
-		_ = m.process.Signal(syscall.SIGKILL)
-		select {
-		case <-exitCh:
-		case <-time.After(2 * time.Second):
-		}
-		m.process = nil
-		m.exitCh = nil
-		m.pid = 0
-		_ = os.Remove(pidPath)
-		if fallbackErr := restartOldCore(err); fallbackErr != nil {
-			return failStage("commit-config", "hot-swap commit config", "CONFIG_RENDER_FAILED", fallbackErr, true)
-		}
+		cleanupAndDegrade()
 		return failStage("commit-config", "hot-swap commit config", "CONFIG_RENDER_FAILED", err, true)
 	}
 	recordStage("commit-config", "ok", "", configPath, false)
@@ -756,11 +701,7 @@ func (m *CoreManager) spawnSingBox(configPath string) (*os.Process, <-chan error
 	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{
-			Gid: m.coreGID(),
-		},
-	}
+	cmd.SysProcAttr = m.singBoxSysProcAttr()
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		return nil, nil, 0, logPath, err
@@ -1047,23 +988,34 @@ func watchCommand(cmd *exec.Cmd) <-chan error {
 }
 
 func (m *CoreManager) killTrackedSingBox() error {
-	pids := make(map[int]bool)
+	type trackedPID struct {
+		pid       int
+		startTime string
+	}
+	pids := make(map[int]trackedPID)
 	if m.pid > 0 {
-		pids[m.pid] = true
+		pids[m.pid] = trackedPID{pid: m.pid}
 	}
 	if raw, err := os.ReadFile(modulecontract.NewPaths(m.dataDir).SingBoxPIDFile()); err == nil {
-		if pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw))); parseErr == nil && pid > 0 {
-			pids[pid] = true
+		if pid, startTime, parseErr := parseSingBoxPIDFile(raw); parseErr == nil && pid > 0 {
+			pids[pid] = trackedPID{pid: pid, startTime: startTime}
 		}
 	}
 
 	var errs []string
-	for pid := range pids {
+	for pid, tracked := range pids {
 		if pid == os.Getpid() {
 			continue
 		}
-		if !m.pidLooksLikeSingBox(pid) {
-			m.logger.Printf("skipping stale sing-box pid %d: cmdline does not match", pid)
+		if tracked.startTime != "" {
+			currentStartTime, err := procStartTime(pid)
+			if err != nil || currentStartTime != tracked.startTime {
+				m.logger.Printf("skipping stale sing-box pid %d: starttime mismatch", pid)
+				continue
+			}
+		}
+		if !m.pidLooksLikeOwnedSingBox(pid) {
+			m.logger.Printf("skipping stale sing-box pid %d: ownership does not match", pid)
 			continue
 		}
 		proc, err := os.FindProcess(pid)
@@ -1086,13 +1038,83 @@ func (m *CoreManager) killTrackedSingBox() error {
 	return nil
 }
 
-func (m *CoreManager) pidLooksLikeSingBox(pid int) bool {
+func (m *CoreManager) pidLooksLikeOwnedSingBox(pid int) bool {
+	paths := modulecontract.NewPaths(m.dataDir)
+	expectedBin := filepath.Clean(filepath.Join(paths.BinDir(), "sing-box"))
+	expectedConfig := filepath.Clean(filepath.Join(paths.RenderedConfigDir(), "singbox.json"))
+	hotSwapConfig := filepath.Clean(filepath.Join(paths.RenderedConfigDir(), "singbox.hotswap.json"))
+
+	exe := ""
+	if target, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "exe")); err == nil {
+		exe = filepath.Clean(target)
+	}
 	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cmdline"))
 	if err != nil {
 		return false
 	}
-	cmdline := strings.ReplaceAll(string(data), "\x00", " ")
-	return strings.Contains(cmdline, "sing-box")
+	cmdTokens := cleanedCmdlinePathTokens(string(data))
+	binOK := exe == expectedBin || stringSliceContains(cmdTokens, expectedBin)
+	configOK := stringSliceContains(cmdTokens, expectedConfig) || stringSliceContains(cmdTokens, hotSwapConfig)
+	return binOK && configOK
+}
+
+func writeSingBoxPIDFile(path string, pid int) error {
+	startTime, err := procStartTime(pid)
+	if err != nil {
+		return os.WriteFile(path, []byte(strconv.Itoa(pid)), 0640)
+	}
+	return os.WriteFile(path, []byte(fmt.Sprintf("%d %s\n", pid, startTime)), 0640)
+}
+
+func parseSingBoxPIDFile(raw []byte) (int, string, error) {
+	fields := strings.Fields(string(raw))
+	if len(fields) == 0 {
+		return 0, "", fmt.Errorf("empty sing-box pid file")
+	}
+	pid, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return 0, "", err
+	}
+	startTime := ""
+	if len(fields) > 1 {
+		startTime = fields[1]
+	}
+	return pid, startTime, nil
+}
+
+func procStartTime(pid int) (string, error) {
+	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return "", err
+	}
+	text := string(data)
+	idx := strings.LastIndex(text, ")")
+	if idx < 0 || idx+2 >= len(text) {
+		return "", fmt.Errorf("invalid proc stat for pid %d", pid)
+	}
+	fields := strings.Fields(text[idx+2:])
+	if len(fields) < 20 {
+		return "", fmt.Errorf("short proc stat for pid %d", pid)
+	}
+	return fields[19], nil
+}
+
+func cleanedCmdlinePathTokens(cmdline string) []string {
+	raw := strings.Fields(strings.ReplaceAll(cmdline, "\x00", " "))
+	tokens := make([]string, 0, len(raw))
+	for _, token := range raw {
+		tokens = append(tokens, filepath.Clean(token))
+	}
+	return tokens
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *CoreManager) coreGID() uint32 {
@@ -1101,6 +1123,17 @@ func (m *CoreManager) coreGID() uint32 {
 		gid = 23333
 	}
 	return uint32(gid)
+}
+
+func (m *CoreManager) singBoxSysProcAttr() *syscall.SysProcAttr {
+	if m.disableCoreCredentialForTest {
+		return nil
+	}
+	return &syscall.SysProcAttr{
+		Credential: &syscall.Credential{
+			Gid: m.coreGID(),
+		},
+	}
 }
 
 // scriptEnv returns the environment variables that shell scripts expect.
@@ -1159,7 +1192,10 @@ func (m *CoreManager) scriptEnv() map[string]string {
 	}
 }
 
-func (m *CoreManager) netstack() netstack.Manager {
+func (m *CoreManager) netstack() coreNetstack {
+	if m.netstackFactory != nil {
+		return m.netstackFactory()
+	}
 	return netstack.New(m.dataDir, m.scriptEnv(), ExecScript)
 }
 

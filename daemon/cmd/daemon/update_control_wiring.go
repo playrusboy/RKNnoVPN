@@ -30,7 +30,6 @@ func (d *daemon) updateControlHandlers() control.UpdateHandlers {
 			return nil
 		},
 		RestoreRuntimeAfterModuleFail: d.restoreCurrentRuntimeAfterFailedUpdate,
-		RuntimeError:                  control.RuntimeRPCError,
 		Logf: func(format string, args ...interface{}) {
 			log.Printf("[updater] "+format, args...)
 		},

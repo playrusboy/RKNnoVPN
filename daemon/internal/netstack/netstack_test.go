@@ -99,8 +99,11 @@ func TestVerifyCleanupReportsRKNnoVPNRulesAndRoutes(t *testing.T) {
 	})
 
 	report := manager.VerifyCleanup()
-	if report.Status != "partial" {
-		t.Fatalf("expected partial verify report, got %#v", report)
+	if report.Status != "failed" {
+		t.Fatalf("expected failed verify report, got %#v", report)
+	}
+	if err := report.Err(); err == nil {
+		t.Fatalf("verify-cleanup leftovers must produce an error: %#v", report)
 	}
 	text := strings.Join(report.Leftovers, "\n")
 	for _, want := range []string{
@@ -121,8 +124,64 @@ func TestRuleLineMatchesExactFwmarkAndTable(t *testing.T) {
 	if RuleLineMatches("100: from all fwmark 0x20230 lookup 20230", "0x2023", "2023") {
 		t.Fatal("substring fwmark/table must not match")
 	}
+	if RuleLineMatches("100: from all fwmark 0x2023 lookup 9999", "0x2023", "2023") {
+		t.Fatal("matching fwmark with wrong table must not match")
+	}
+	if RuleLineMatches("100: from all fwmark 0x9999 lookup 2023", "0x2023", "2023") {
+		t.Fatal("matching table with wrong fwmark must not match")
+	}
 	if !RuleLineMatches("100: from all fwmark 0x2023/0xffffffff lookup 2023", "0x2023", "2023") {
 		t.Fatal("expected masked fwmark to match")
+	}
+}
+
+func TestVerifyCleanupReportsUDPAndWildcardLocalListeners(t *testing.T) {
+	manager := New("/data/adb/modules/rknnovpn", map[string]string{
+		"TPROXY_PORT": "10853",
+		"DNS_PORT":    "10856",
+	}, nil).WithExecCommand(func(name string, args ...string) (string, error) {
+		key := name + " " + strings.Join(args, " ")
+		switch key {
+		case "ss -H -lntup", "ss -lntup":
+			return "", errors.New("ss unavailable")
+		case "cat /proc/net/udp":
+			return "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   1: 00000000:2A68 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 1 2 0000000000000000 0\n", nil
+		default:
+			return "", nil
+		}
+	})
+
+	report := manager.VerifyCleanup()
+	if err := report.Err(); err == nil {
+		t.Fatalf("UDP wildcard listener must fail cleanup verification: %#v", report)
+	}
+	text := strings.Join(report.Leftovers, "\n")
+	if !strings.Contains(text, "udp port 10856 still listening on 0.0.0.0") {
+		t.Fatalf("expected UDP wildcard leftover, got %s", text)
+	}
+}
+
+func TestVerifyCleanupWarnsForForeignSingBox(t *testing.T) {
+	manager := New("/data/adb/modules/rknnovpn", nil, nil).WithExecCommand(func(name string, args ...string) (string, error) {
+		key := name + " " + strings.Join(args, " ")
+		switch key {
+		case "pidof sing-box":
+			return "1234", nil
+		case "readlink /proc/1234/exe":
+			return "/data/adb/modules/other/bin/sing-box\n", nil
+		case "cat /proc/1234/cmdline":
+			return "/data/adb/modules/other/bin/sing-box\x00run\x00-c\x00/data/adb/modules/other/config.json", nil
+		default:
+			return "", nil
+		}
+	})
+
+	report := manager.VerifyCleanup()
+	if err := report.Err(); err != nil {
+		t.Fatalf("foreign sing-box must not be a hard cleanup failure: %v %#v", err, report)
+	}
+	if len(report.Warnings) != 1 || !strings.Contains(report.Warnings[0], "other sing-box process") {
+		t.Fatalf("expected foreign sing-box warning, got %#v", report)
 	}
 }
 

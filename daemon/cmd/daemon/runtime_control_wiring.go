@@ -24,8 +24,6 @@ func (d *daemon) runtimeControlHandlers() control.RuntimeHandlers {
 		Stop:                  d.runtimeV2.Stop,
 		Restart:               d.runtimeV2.Restart,
 		Reset:                 d.runtimeV2.Reset,
-		TestNodes:             d.runtimeV2.TestNodes,
-		RuntimeError:          control.RuntimeRPCError,
 	}
 }
 

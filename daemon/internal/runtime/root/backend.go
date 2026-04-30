@@ -5,6 +5,7 @@ import (
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimeerr"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -102,7 +103,7 @@ func (b *Backend) Start(desired runtimev2.DesiredState, generation int64) (*runt
 	if !snapshot.Healthy() {
 		report := b.resetNetworkState(generation)
 		b.deps.Lifecycle.MarkRuntimeStartFailed(epoch)
-		return &report, RuntimeErrorWithResetReport(
+		return &report, runtimeerr.WithResetReport(
 			fmt.Errorf("readiness gates failed after start: %s", snapshot.LastError),
 			report,
 		)
@@ -131,7 +132,7 @@ func (b *Backend) Restart(desired runtimev2.DesiredState, generation int64) (*ru
 	if recoveryReport != nil {
 		return recoveryReport, err
 	}
-	return ResetReportFromError(err), err
+	return runtimeerr.ResetReportFromError(err), err
 }
 
 func (b *Backend) RestartAfterConfigChange(generation int64) error {
@@ -147,7 +148,7 @@ func (b *Backend) HandleNetworkChange(generation int64) (*runtimev2.ResetReport,
 	if recoveryReport != nil {
 		return recoveryReport, err
 	}
-	return ResetReportFromError(err), err
+	return runtimeerr.ResetReportFromError(err), err
 }
 
 func (b *Backend) CurrentHealth() runtimev2.HealthSnapshot {
@@ -167,7 +168,7 @@ func (b *Backend) restart(generation int64) error {
 	if b.deps.Core.GetState() != core.StateStopped {
 		if err := b.deps.Core.Stop(); err != nil {
 			report := b.resetNetworkState(generation)
-			return RuntimeErrorWithResetReport(fmt.Errorf("restart stop failed: %w", err), report)
+			return runtimeerr.WithResetReport(fmt.Errorf("restart stop failed: %w", err), report)
 		}
 	}
 
@@ -180,7 +181,7 @@ func (b *Backend) restart(generation int64) error {
 	}
 	if err := b.deps.Core.Start(profile); err != nil {
 		report := b.resetNetworkState(generation)
-		return RuntimeErrorWithResetReport(fmt.Errorf("restart start failed: %w", err), report)
+		return runtimeerr.WithResetReport(fmt.Errorf("restart start failed: %w", err), report)
 	}
 	b.deps.Lifecycle.ResetRescueState()
 	b.deps.Lifecycle.StartSubsystems()
@@ -188,7 +189,7 @@ func (b *Backend) restart(generation int64) error {
 	snapshot := b.deps.Health.RefreshRuntimeHealth(false)
 	if !snapshot.Healthy() {
 		report := b.resetNetworkState(generation)
-		return RuntimeErrorWithResetReport(
+		return runtimeerr.WithResetReport(
 			fmt.Errorf("restart readiness gates failed: %s", snapshot.LastError),
 			report,
 		)
@@ -207,7 +208,7 @@ func (b *Backend) reconcile(reason string, generation int64) error {
 
 	if err := b.deps.Netstack.ReapplyRuntimeRules(); err != nil {
 		report := b.resetNetworkState(generation)
-		return RuntimeErrorWithResetReport(fmt.Errorf("%s reapply failed: %w", reason, err), report)
+		return runtimeerr.WithResetReport(fmt.Errorf("%s reapply failed: %w", reason, err), report)
 	}
 
 	snapshot := b.deps.Health.RefreshRuntimeHealth(false)
@@ -216,7 +217,7 @@ func (b *Backend) reconcile(reason string, generation int64) error {
 	}
 
 	report := b.resetNetworkState(generation)
-	return RuntimeErrorWithResetReport(
+	return runtimeerr.WithResetReport(
 		fmt.Errorf("%s readiness gates failed: %s", reason, snapshot.LastError),
 		report,
 	)

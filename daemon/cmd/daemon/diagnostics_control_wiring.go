@@ -16,6 +16,7 @@ func (d *daemon) diagnosticsControlHandlers() control.DiagnosticsHandlers {
 		CurrentConfig:         d.currentConfig,
 		RunHealth:             d.healthMon.RunOnce,
 		HealthSnapshot:        d.buildRuntimeV2HealthSnapshot,
+		RefreshRuntimeHealth:  d.runtimeV2.RefreshHealth,
 		RuntimeStatus:         d.controlRuntimeStatus,
 		NetstackReport:        d.diagnosticNetstackReport,
 		NetstackRuntimeReport: d.diagnosticNetstackRuntimeReport,

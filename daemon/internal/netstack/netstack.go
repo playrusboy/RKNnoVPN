@@ -2,11 +2,9 @@ package netstack
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 )
@@ -25,6 +23,7 @@ type Report struct {
 	Status          string   `json:"status"`
 	Steps           []Step   `json:"steps"`
 	Errors          []string `json:"errors,omitempty"`
+	Warnings        []string `json:"warnings,omitempty"`
 	Leftovers       []string `json:"leftovers,omitempty"`
 	RollbackApplied bool     `json:"rollbackApplied,omitempty"`
 }
@@ -115,29 +114,48 @@ func (m Manager) Verify() Report {
 
 func (m Manager) VerifyCleanup() Report {
 	report := Report{Operation: "verify-cleanup", Status: "ok"}
-	leftovers := m.CollectLeftovers()
+	findings := m.collectCleanupFindings()
+	leftovers := findings.leftovers
 	report.Leftovers = leftovers
+	report.Warnings = findings.warnings
 	if len(leftovers) == 0 {
 		report.addOK("verify-cleanup", "")
 		return report
 	}
-	report.Status = "partial"
+	detail := strings.Join(leftovers, "; ")
+	report.Status = "failed"
 	report.Steps = append(report.Steps, Step{
 		Name:   "verify-cleanup",
 		Status: "failed",
-		Detail: strings.Join(leftovers, "; "),
+		Detail: detail,
 	})
+	report.Errors = append(report.Errors, detail)
 	return report
 }
 
 func (m Manager) CollectLeftovers() []string {
+	return m.collectCleanupFindings().leftovers
+}
+
+type cleanupFindings struct {
+	leftovers []string
+	warnings  []string
+}
+
+func (m Manager) collectCleanupFindings() cleanupFindings {
 	if m.execCommand == nil {
-		return []string{"exec command function is nil"}
+		return cleanupFindings{leftovers: []string{"exec command function is nil"}}
 	}
 
-	leftovers := make([]string, 0)
+	findings := cleanupFindings{
+		leftovers: make([]string, 0),
+		warnings:  make([]string, 0),
+	}
 	add := func(format string, args ...interface{}) {
-		leftovers = append(leftovers, fmt.Sprintf(format, args...))
+		findings.leftovers = append(findings.leftovers, fmt.Sprintf(format, args...))
+	}
+	warn := func(format string, args ...interface{}) {
+		findings.warnings = append(findings.warnings, fmt.Sprintf(format, args...))
 	}
 
 	for _, spec := range []struct {
@@ -235,12 +253,32 @@ func (m Manager) CollectLeftovers() []string {
 	}
 
 	if out, _ := m.execCommand("pidof", "sing-box"); strings.TrimSpace(out) != "" {
-		add("sing-box process still running: %s", strings.TrimSpace(out))
+		for _, rawPID := range strings.Fields(out) {
+			pid, err := strconv.Atoi(rawPID)
+			if err != nil || pid <= 0 {
+				continue
+			}
+			owned, ownerDetail := m.processIsOwnedSingBox(pid)
+			if owned {
+				add("RKNnoVPN sing-box process still running: pid=%d %s", pid, ownerDetail)
+			} else {
+				warn("other sing-box process detected during cleanup verification: pid=%d %s", pid, ownerDetail)
+			}
+		}
 	}
 
 	for _, port := range m.effectiveLocalPorts() {
-		if isTCPPortListening("127.0.0.1", port, 150*time.Millisecond) {
-			add("localhost TCP port %d still listening", port)
+		for _, listener := range m.findLocalListeners(port) {
+			if listener.PID > 0 {
+				owned, ownerDetail := m.processIsOwnedSingBox(listener.PID)
+				if owned {
+					add("RKNnoVPN %s port %d still listening on %s: pid=%d %s", listener.Proto, port, listener.Address, listener.PID, ownerDetail)
+				} else {
+					warn("other process owns %s port %d on %s: pid=%d %s", listener.Proto, port, listener.Address, listener.PID, ownerDetail)
+				}
+				continue
+			}
+			add("%s port %d still listening on %s (owner unknown)", listener.Proto, port, listener.Address)
 		}
 	}
 
@@ -250,7 +288,7 @@ func (m Manager) CollectLeftovers() []string {
 		}
 	}
 
-	return leftovers
+	return findings
 }
 
 func (r Report) Err() error {
@@ -364,20 +402,22 @@ func RuleLineMatches(line string, mark string, table string) bool {
 	fields := strings.Fields(strings.ToLower(line))
 	wantMark := strings.ToLower(strings.TrimSpace(mark))
 	wantTable := strings.TrimSpace(table)
+	markOK := false
+	tableOK := false
 	for i, field := range fields {
 		if field == "fwmark" && wantMark != "" && i+1 < len(fields) {
 			got := fields[i+1]
 			if got == wantMark || strings.HasPrefix(got, wantMark+"/") {
-				return true
+				markOK = true
 			}
 		}
 		if (field == "lookup" || field == "table") && wantTable != "" && i+1 < len(fields) {
 			if fields[i+1] == wantTable {
-				return true
+				tableOK = true
 			}
 		}
 	}
-	return false
+	return markOK && tableOK
 }
 
 func (m Manager) effectiveLocalPorts() []int {
@@ -425,13 +465,239 @@ func valueOrDefaultInt(value int, fallback int) int {
 	return value
 }
 
-func isTCPPortListening(host string, port int, timeout time.Duration) bool {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), timeout)
+type localListener struct {
+	Proto   string
+	Address string
+	Port    int
+	PID     int
+}
+
+func (m Manager) findLocalListeners(port int) []localListener {
+	listeners := m.findSSLocalListeners(port)
+	if len(listeners) > 0 {
+		return listeners
+	}
+	return m.findProcNetLocalListeners(port)
+}
+
+func (m Manager) findSSLocalListeners(port int) []localListener {
+	out, err := m.execCommand("ss", "-H", "-lntup")
 	if err != nil {
+		out, err = m.execCommand("ss", "-lntup")
+	}
+	if err != nil {
+		return nil
+	}
+	var listeners []localListener
+	for _, line := range splitLines(out) {
+		listener, ok := parseSSListenerLine(line, port)
+		if ok {
+			listeners = append(listeners, listener)
+		}
+	}
+	return listeners
+}
+
+func parseSSListenerLine(line string, port int) (localListener, bool) {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return localListener{}, false
+	}
+	proto := strings.ToLower(fields[0])
+	if !strings.HasPrefix(proto, "tcp") && !strings.HasPrefix(proto, "udp") {
+		return localListener{}, false
+	}
+	for _, field := range fields[1:] {
+		address, gotPort, ok := parseAddressPortToken(field)
+		if !ok || gotPort != port || !isLocalListenerAddress(address) {
+			continue
+		}
+		return localListener{
+			Proto:   proto,
+			Address: address,
+			Port:    gotPort,
+			PID:     parseSSPID(line),
+		}, true
+	}
+	return localListener{}, false
+}
+
+func parseAddressPortToken(token string) (string, int, bool) {
+	token = strings.TrimSpace(token)
+	token = strings.Trim(token, "[]")
+	if token == "" || strings.HasSuffix(token, ":*") {
+		return "", 0, false
+	}
+	idx := strings.LastIndex(token, ":")
+	if idx < 0 || idx == len(token)-1 {
+		return "", 0, false
+	}
+	port, err := strconv.Atoi(token[idx+1:])
+	if err != nil {
+		return "", 0, false
+	}
+	address := strings.Trim(token[:idx], "[]")
+	if address == "" {
+		address = "*"
+	}
+	return address, port, true
+}
+
+func parseSSPID(line string) int {
+	const marker = "pid="
+	idx := strings.Index(line, marker)
+	if idx < 0 {
+		return 0
+	}
+	start := idx + len(marker)
+	end := start
+	for end < len(line) && line[end] >= '0' && line[end] <= '9' {
+		end++
+	}
+	pid, _ := strconv.Atoi(line[start:end])
+	return pid
+}
+
+func (m Manager) findProcNetLocalListeners(port int) []localListener {
+	var listeners []localListener
+	for _, spec := range []struct {
+		path  string
+		proto string
+		ipv6  bool
+	}{
+		{path: "/proc/net/tcp", proto: "tcp", ipv6: false},
+		{path: "/proc/net/tcp6", proto: "tcp6", ipv6: true},
+		{path: "/proc/net/udp", proto: "udp", ipv6: false},
+		{path: "/proc/net/udp6", proto: "udp6", ipv6: true},
+	} {
+		out, err := m.execCommand("cat", spec.path)
+		if err != nil {
+			continue
+		}
+		for _, line := range splitLines(out) {
+			listener, ok := parseProcNetListenerLine(line, spec.proto, spec.ipv6, port)
+			if ok {
+				listeners = append(listeners, listener)
+			}
+		}
+	}
+	return listeners
+}
+
+func parseProcNetListenerLine(line string, proto string, ipv6 bool, port int) (localListener, bool) {
+	fields := strings.Fields(line)
+	if len(fields) < 4 || fields[0] == "sl" {
+		return localListener{}, false
+	}
+	local := fields[1]
+	idx := strings.LastIndex(local, ":")
+	if idx < 0 || idx == len(local)-1 {
+		return localListener{}, false
+	}
+	gotPort64, err := strconv.ParseInt(local[idx+1:], 16, 32)
+	if err != nil || int(gotPort64) != port {
+		return localListener{}, false
+	}
+	state := strings.ToUpper(fields[3])
+	if strings.HasPrefix(proto, "tcp") && state != "0A" {
+		return localListener{}, false
+	}
+	addressHex := strings.ToUpper(local[:idx])
+	address, ok := procNetLocalAddress(addressHex, ipv6)
+	if !ok {
+		return localListener{}, false
+	}
+	return localListener{Proto: proto, Address: address, Port: port}, true
+}
+
+func procNetLocalAddress(hexAddress string, ipv6 bool) (string, bool) {
+	if !ipv6 {
+		switch hexAddress {
+		case "00000000":
+			return "0.0.0.0", true
+		case "0100007F":
+			return "127.0.0.1", true
+		default:
+			return "", false
+		}
+	}
+	switch hexAddress {
+	case "00000000000000000000000000000000":
+		return "::", true
+	case "00000000000000000000000001000000":
+		return "::1", true
+	default:
+		return "", false
+	}
+}
+
+func isLocalListenerAddress(address string) bool {
+	switch strings.ToLower(strings.Trim(address, "[]")) {
+	case "*", "0.0.0.0", "::", ":::", "[::]", "127.0.0.1", "::1", "localhost":
+		return true
+	default:
 		return false
 	}
-	_ = conn.Close()
-	return true
+}
+
+func (m Manager) processIsOwnedSingBox(pid int) (bool, string) {
+	paths := modulecontract.NewPaths(m.dataDir)
+	expectedBin := filepathClean(paths.BinDir() + "/sing-box")
+	expectedConfig := filepathClean(paths.RenderedConfigDir() + "/singbox.json")
+	hotSwapConfig := filepathClean(paths.RenderedConfigDir() + "/singbox.hotswap.json")
+
+	exeOut, exeErr := m.execCommand("readlink", fmt.Sprintf("/proc/%d/exe", pid))
+	cmdOut, cmdErr := m.execCommand("cat", fmt.Sprintf("/proc/%d/cmdline", pid))
+	exe := filepathClean(strings.TrimSpace(exeOut))
+	cmdline := filepathClean(strings.ReplaceAll(cmdOut, "\x00", " "))
+	cmdTokens := cleanedCmdlineTokens(cmdOut)
+
+	binOK := exe == expectedBin || stringSliceContains(cmdTokens, expectedBin)
+	configOK := stringSliceContains(cmdTokens, expectedConfig) || stringSliceContains(cmdTokens, hotSwapConfig)
+	if binOK && configOK {
+		return true, fmt.Sprintf("exe=%s config=%s", nonEmpty(exe, "<unknown>"), expectedConfig)
+	}
+
+	detailParts := make([]string, 0, 2)
+	if exeErr == nil && exe != "" {
+		detailParts = append(detailParts, "exe="+exe)
+	}
+	if cmdErr == nil && cmdline != "" {
+		detailParts = append(detailParts, "cmdline="+cmdline)
+	}
+	if len(detailParts) == 0 {
+		return false, "owner unavailable"
+	}
+	return false, strings.Join(detailParts, " ")
+}
+
+func filepathClean(path string) string {
+	return strings.TrimRight(strings.TrimSpace(path), "/")
+}
+
+func cleanedCmdlineTokens(cmdline string) []string {
+	raw := strings.Fields(strings.ReplaceAll(cmdline, "\x00", " "))
+	tokens := make([]string, 0, len(raw))
+	for _, token := range raw {
+		tokens = append(tokens, filepathClean(token))
+	}
+	return tokens
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func nonEmpty(value string, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func firstLineContaining(text string, needle string) string {

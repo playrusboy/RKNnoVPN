@@ -347,22 +347,30 @@ setup_policy_routing() {
 
     IPV6_ROUTE_APPLIED=0
 
-    if ! ip rule add fwmark ${FWMARK} table ${ROUTE_TABLE} 2>/dev/null && ! ip_rule_present 4 "$ROUTE_TABLE"; then
-        log_error "Failed to add IPv4 policy rule fwmark ${FWMARK} table ${ROUTE_TABLE}"
+    mkdir -p "${SNAPSHOT_DIR}"
+    _ip_rule_err="${SNAPSHOT_DIR}/ip_rule.err"
+    _ip_route_err="${SNAPSHOT_DIR}/ip_route.err"
+    : > "${_ip_rule_err}"
+    : > "${_ip_route_err}"
+
+    if ! ip rule add fwmark "${FWMARK}" table "${ROUTE_TABLE}" 2>"${_ip_rule_err}" && ! ip_rule_present 4 "$ROUTE_TABLE"; then
+        _detail="$(cat "${_ip_rule_err}" 2>/dev/null || true)"
+        log_error "Failed to add IPv4 policy rule fwmark ${FWMARK} table ${ROUTE_TABLE}: ${_detail:-unknown error}"
         return 1
     fi
-    if ! ip route add local default dev lo table ${ROUTE_TABLE} 2>/dev/null && ! local_route_present 4 "$ROUTE_TABLE"; then
-        log_error "Failed to add IPv4 local route table ${ROUTE_TABLE}"
+    if ! ip route add local default dev lo table "${ROUTE_TABLE}" 2>"${_ip_route_err}" && ! local_route_present 4 "$ROUTE_TABLE"; then
+        _detail="$(cat "${_ip_route_err}" 2>/dev/null || true)"
+        log_error "Failed to add IPv4 local route table ${ROUTE_TABLE}: ${_detail:-unknown error}"
         return 1
     fi
 
-    if ip -6 rule add fwmark ${FWMARK} table ${ROUTE_TABLE_V6} 2>/dev/null || ip_rule_present 6 "$ROUTE_TABLE_V6"; then
-        if ip -6 route add local default dev lo table ${ROUTE_TABLE_V6} 2>/dev/null || local_route_present 6 "$ROUTE_TABLE_V6"; then
+    if ip -6 rule add fwmark "${FWMARK}" table "${ROUTE_TABLE_V6}" 2>/dev/null || ip_rule_present 6 "$ROUTE_TABLE_V6"; then
+        if ip -6 route add local default dev lo table "${ROUTE_TABLE_V6}" 2>/dev/null || local_route_present 6 "$ROUTE_TABLE_V6"; then
             IPV6_ROUTE_APPLIED=1
         else
             log_warn "IPv6 local route unavailable; continuing with IPv4-only routing"
-            while ip -6 rule del fwmark ${FWMARK} table ${ROUTE_TABLE_V6} 2>/dev/null; do :; done
-            ip -6 route del local default dev lo table ${ROUTE_TABLE_V6} 2>/dev/null || true
+            while ip -6 rule del fwmark "${FWMARK}" table "${ROUTE_TABLE_V6}" 2>/dev/null; do :; done
+            ip -6 route del local default dev lo table "${ROUTE_TABLE_V6}" 2>/dev/null || true
         fi
     else
         log_warn "IPv6 policy routing unavailable; continuing with IPv4-only routing"
@@ -500,6 +508,8 @@ do_stop() {
         rm -f "${SNAPSHOT_DIR}/ip6tables.rules"
         rm -f "${SNAPSHOT_DIR}/iptables_backup.rules"
         rm -f "${SNAPSHOT_DIR}/ip6tables_backup.rules"
+        rm -f "${SNAPSHOT_DIR}/ip_rule.err"
+        rm -f "${SNAPSHOT_DIR}/ip_route.err"
         rm -f "${SNAPSHOT_DIR}/env.sh"
         log_info "Snapshot files cleaned up"
     fi

@@ -9,6 +9,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/resetcontroller"
 	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimeerr"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -35,7 +36,7 @@ func (d *daemon) recoverStaleResetLock(generation int64) (*runtimev2.ResetReport
 			message = "stale reset lock recovery failed"
 		}
 		err := fmt.Errorf("%s: %s", decision.Detail, message)
-		return &report, rootruntime.RuntimeErrorWithResetReport(err, report)
+		return &report, runtimeerr.WithResetReport(err, report)
 	}
 	return &report, nil
 }

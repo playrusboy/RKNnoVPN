@@ -1,4 +1,4 @@
-package root
+package runtimeerr
 
 import (
 	"errors"
@@ -13,7 +13,7 @@ type resetReportError struct {
 	report runtimev2.ResetReport
 }
 
-func RuntimeErrorWithResetReport(err error, report runtimev2.ResetReport) error {
+func WithResetReport(err error, report runtimev2.ResetReport) error {
 	if err == nil {
 		return nil
 	}
@@ -50,7 +50,7 @@ type runtimeCodeError interface {
 	RuntimeCode() string
 }
 
-func RuntimeErrorCode(err error, fallback string) string {
+func Code(err error, fallback string) string {
 	var coded runtimeCodeError
 	if errors.As(err, &coded) {
 		if code := strings.TrimSpace(coded.RuntimeCode()); code != "" {

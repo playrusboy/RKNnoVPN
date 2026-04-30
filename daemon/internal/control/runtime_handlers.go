@@ -25,8 +25,6 @@ type RuntimeHandlers struct {
 	Stop                  func() (runtimev2.Status, error)
 	Restart               func() (runtimev2.Status, error)
 	Reset                 func() (runtimev2.Status, error)
-	TestNodes             func(url string, timeoutMS int, nodeIDs []string) ([]runtimev2.NodeProbeResult, error)
-	RuntimeError          func(error) *ipc.RPCError
 }
 
 func (h RuntimeHandlers) BackendStatus(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -73,7 +71,7 @@ func (h RuntimeHandlers) BackendApplyDesiredState(params *json.RawMessage) (inte
 func (h RuntimeHandlers) BackendStart(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	if h.SyncDesiredState != nil {
 		if err := h.SyncDesiredState(); err != nil {
-			return nil, h.runtimeError(err)
+			return nil, RuntimeRPCError(err)
 		}
 	}
 	if h.Start == nil {
@@ -81,7 +79,7 @@ func (h RuntimeHandlers) BackendStart(params *json.RawMessage) (interface{}, *ip
 	}
 	status, err := h.Start()
 	if err != nil {
-		return nil, h.runtimeError(err)
+		return nil, RuntimeRPCError(err)
 	}
 	return status, nil
 }
@@ -92,7 +90,7 @@ func (h RuntimeHandlers) BackendStop(params *json.RawMessage) (interface{}, *ipc
 	}
 	status, err := h.Stop()
 	if err != nil {
-		return nil, h.runtimeError(err)
+		return nil, RuntimeRPCError(err)
 	}
 	return status, nil
 }
@@ -100,7 +98,7 @@ func (h RuntimeHandlers) BackendStop(params *json.RawMessage) (interface{}, *ipc
 func (h RuntimeHandlers) BackendRestart(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	if h.SyncDesiredState != nil {
 		if err := h.SyncDesiredState(); err != nil {
-			return nil, h.runtimeError(err)
+			return nil, RuntimeRPCError(err)
 		}
 	}
 	if h.Restart == nil {
@@ -108,7 +106,7 @@ func (h RuntimeHandlers) BackendRestart(params *json.RawMessage) (interface{}, *
 	}
 	status, err := h.Restart()
 	if err != nil {
-		return nil, h.runtimeError(err)
+		return nil, RuntimeRPCError(err)
 	}
 	return status, nil
 }
@@ -119,41 +117,9 @@ func (h RuntimeHandlers) BackendReset(params *json.RawMessage) (interface{}, *ip
 	}
 	status, err := h.Reset()
 	if err != nil {
-		return nil, h.runtimeError(err)
+		return nil, RuntimeRPCError(err)
 	}
 	return status, nil
-}
-
-func (h RuntimeHandlers) DiagnosticsHealth(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	return h.refreshHealth(), nil
-}
-
-func (h RuntimeHandlers) DiagnosticsTestNodes(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	var p struct {
-		NodeIDs   []string `json:"node_ids"`
-		URL       string   `json:"url"`
-		TimeoutMS int      `json:"timeout_ms"`
-	}
-	if params != nil {
-		if err := json.Unmarshal(*params, &p); err != nil {
-			return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: "invalid params: " + err.Error()}
-		}
-	}
-	if p.TimeoutMS <= 0 {
-		p.TimeoutMS = 5000
-	}
-	if h.TestNodes == nil {
-		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "node probe callback is not configured"}
-	}
-
-	results, err := h.TestNodes(p.URL, p.TimeoutMS, p.NodeIDs)
-	if err != nil {
-		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
-	}
-	return map[string]interface{}{
-		"url":     p.URL,
-		"results": results,
-	}, nil
 }
 
 func (h RuntimeHandlers) statusWithUpdateInstallState(status runtimev2.Status) runtimev2.Status {
@@ -219,11 +185,4 @@ func (h RuntimeHandlers) refreshHealth() runtimev2.HealthSnapshot {
 		return h.RefreshHealth()
 	}
 	return runtimev2.HealthSnapshot{}
-}
-
-func (h RuntimeHandlers) runtimeError(err error) *ipc.RPCError {
-	if h.RuntimeError != nil {
-		return h.RuntimeError(err)
-	}
-	return &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
 }

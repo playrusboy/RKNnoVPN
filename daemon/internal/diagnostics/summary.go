@@ -57,6 +57,7 @@ type CompatSummary struct {
 	CurrentReleaseVersion  string `json:"currentReleaseVersion,omitempty"`
 	CurrentReleaseOK       bool   `json:"currentReleaseOk"`
 	SingBoxCheckOK         bool   `json:"singBoxCheckOk"`
+	RuntimePreflightOK     bool   `json:"runtimePreflightOk"`
 }
 
 type RuntimeSummary struct {
@@ -176,6 +177,7 @@ func BuildSummaryWithCanonical(
 			CurrentReleaseVersion:  releaseIntegrity.Version,
 			CurrentReleaseOK:       releaseIntegrity.OK,
 			SingBoxCheckOK:         singBoxCheck.Error == "",
+			RuntimePreflightOK:     true,
 		},
 		Runtime:           runtimeSummaryFromCanonical(canonical, healthSnapshot),
 		Profile:           profileSummary,
@@ -263,6 +265,32 @@ func BuildSummaryWithCanonical(
 func WithIPCContractFacts(summary Summary, contractVersion int, apkRequiredMethods []string) Summary {
 	summary.Compatibility.IPCContractVersion = contractVersion
 	summary.Compatibility.APKRequiredMethodCount = len(apkRequiredMethods)
+	summary.Graph = BuildGraphFromSummary(summary)
+	return summary
+}
+
+func (summary Summary) WithRuntimePreflight(preflight RuntimePreflight) Summary {
+	summary.Compatibility.RuntimePreflightOK = preflight.OK
+	addIssue := func(issue string) {
+		if strings.TrimSpace(issue) == "" {
+			return
+		}
+		summary.CompatibilityIssues = append(summary.CompatibilityIssues, issue)
+		summary.Issues = append(summary.Issues, "compatibility: "+issue)
+	}
+	for _, issue := range preflight.Issues {
+		addIssue(issue)
+	}
+	for _, warning := range preflight.Warnings {
+		addIssue(warning)
+	}
+	summary.IssueCount = len(summary.Issues)
+	if summary.Status == "ok" && summary.IssueCount > 0 {
+		summary.Status = "degraded"
+	}
+	if !preflight.OK {
+		summary.Status = "failed"
+	}
 	summary.Graph = BuildGraphFromSummary(summary)
 	return summary
 }

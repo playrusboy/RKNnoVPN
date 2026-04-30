@@ -3,6 +3,7 @@ package com.rknnovpn.panel.ipc
 import kotlinx.serialization.json.JsonElement
 
 internal object DaemonClientErrorCodes {
+    const val METHOD_NOT_FOUND = -32601
     const val CONFIG_ERROR = -32003
     const val RUNTIME_BUSY = -32004
     const val COMPATIBILITY = -32090

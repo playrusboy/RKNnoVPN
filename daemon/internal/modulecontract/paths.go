@@ -29,6 +29,8 @@ const (
 	IP6TablesRulesName  = "ip6tables.rules"
 	IPTablesBackupName  = "iptables_backup.rules"
 	IP6TablesBackupName = "ip6tables_backup.rules"
+	IPRuleErrorName     = "ip_rule.err"
+	IPRouteErrorName    = "ip_route.err"
 
 	RescueResetScriptName = "rescue_reset.sh"
 	DNSScriptName         = "dns.sh"
@@ -96,6 +98,8 @@ func (p Paths) RuntimeSnapshotFiles() []string {
 		filepath.Join(p.RunDir(), IP6TablesRulesName),
 		filepath.Join(p.RunDir(), IPTablesBackupName),
 		filepath.Join(p.RunDir(), IP6TablesBackupName),
+		filepath.Join(p.RunDir(), IPRuleErrorName),
+		filepath.Join(p.RunDir(), IPRouteErrorName),
 		filepath.Join(p.RunDir(), EnvSnapshotName),
 	}
 }

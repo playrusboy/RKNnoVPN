@@ -7,7 +7,7 @@ import (
 	applytx "github.com/youtubediscord/RKNnoVPN/daemon/internal/apply"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
-	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimeerr"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -54,8 +54,8 @@ func MutationRPCErrorSaved(action string, err error, saved bool, runtimeStatus R
 }
 
 func MutationErrorData(action string, err error, saved bool, runtimeStatus RuntimeStatusFunc) map[string]interface{} {
-	code := rootruntime.RuntimeErrorCode(err, "CONFIG_APPLY_FAILED")
-	resetReport := rootruntime.ResetReportFromError(err)
+	code := runtimeerr.Code(err, "CONFIG_APPLY_FAILED")
+	resetReport := runtimeerr.ResetReportFromError(err)
 	data := mutationErrorData(action, saved, code, err.Error(), resetReport)
 	if runtimeStatus != nil {
 		status, ok := runtimeStatus()
@@ -277,9 +277,9 @@ func ProfileRPCErrorSaved(action string, err error, saved bool, status runtimev2
 		runtimeApply,
 		ProfileDesiredGeneration(status, before),
 		status.AppliedState.Generation,
-		rootruntime.RuntimeErrorCode(err, "PROFILE_APPLY_FAILED"),
+		runtimeerr.Code(err, "PROFILE_APPLY_FAILED"),
 		err.Error(),
-		rootruntime.ResetReportFromError(err),
+		runtimeerr.ResetReportFromError(err),
 		warnings,
 		updated,
 	)

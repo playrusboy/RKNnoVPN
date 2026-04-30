@@ -80,7 +80,6 @@ func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context stri
 			ResetRescueState:    d.rescueMgr.Reset,
 			StartSubsystems:     d.startSubsystems,
 			RefreshHealth:       d.runtimeV2.RefreshHealth,
-			RuntimeErrorCode:    rootruntime.RuntimeErrorCode,
 			ObserveReloadReport: d.setLastReloadReport,
 		},
 	)

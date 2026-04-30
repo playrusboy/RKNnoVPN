@@ -35,6 +35,7 @@ class UserMessageFormatter @Inject constructor(
         is DaemonClientResult.DaemonError ->
             when (result.code) {
                 DaemonClientErrorCodes.COMPATIBILITY -> result.message
+                DaemonClientErrorCodes.METHOD_NOT_FOUND -> formatMethodNotFound(result)
                 else -> formatSubscriptionRejection(result) ?: if (result.configWasSaved()) {
                     get(R.string.error_config_saved_not_applied, result.message)
                 } else if (result.code == DaemonClientErrorCodes.RUNTIME_BUSY) {
@@ -196,6 +197,47 @@ class UserMessageFormatter @Inject constructor(
             "restart", "reload" -> get(R.string.error_operation_busy_named, get(R.string.operation_reload))
             else -> get(R.string.error_runtime_busy)
         }
+    }
+
+    private fun formatMethodNotFound(result: DaemonClientResult.DaemonError): String {
+        val details = result.detailObject()
+        val requested = details
+            ?.get("requestedMethod")
+            ?.jsonPrimitive
+            ?.contentOrNull
+            ?.trim()
+            .orEmpty()
+            .ifBlank { result.message.substringAfter("method not found:", "").trim() }
+            .ifBlank { get(R.string.daemon_status_unknown_text) }
+        val replacement = details
+            ?.get("replacement")
+            ?.jsonPrimitive
+            ?.contentOrNull
+            ?.trim()
+            .orEmpty()
+        val hint = localizedMethodReplacement(requested, replacement)
+        return if (hint.isNotBlank()) {
+            get(R.string.error_method_not_found_with_replacement, requested, hint)
+        } else {
+            get(R.string.error_method_not_found, requested)
+        }
+    }
+
+    private fun localizedMethodReplacement(requested: String, fallback: String): String {
+        val resId = when (requested) {
+            "config.import" -> R.string.error_method_not_found_hint_config_import
+            "network.reset" -> R.string.error_method_not_found_hint_network_reset
+            "node.test" -> R.string.error_method_not_found_hint_node_test
+            "self.check" -> R.string.error_method_not_found_hint_self_check
+            "status" -> R.string.error_method_not_found_hint_status
+            "start" -> R.string.error_method_not_found_hint_start
+            "stop" -> R.string.error_method_not_found_hint_stop
+            "reload" -> R.string.error_method_not_found_hint_reload
+            "health" -> R.string.error_method_not_found_hint_health
+            "subscription-fetch" -> R.string.error_method_not_found_hint_subscription_fetch
+            else -> null
+        }
+        return resId?.let { get(it) } ?: fallback
     }
 
     private fun DaemonClientResult.DaemonError.configWasSaved(): Boolean {

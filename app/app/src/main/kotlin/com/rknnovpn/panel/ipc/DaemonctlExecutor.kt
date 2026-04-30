@@ -220,8 +220,9 @@ class DaemonctlExecutor @Inject constructor() {
             stderr.contains("unknown command", ignoreCase = true)
         ) {
             return DaemonctlResult.Error(
-                code = -32601, // MethodNotFound (JSON-RPC standard)
-                message = "method not found: $method (daemonctl does not support this command)"
+                code = DaemonClientErrorCodes.METHOD_NOT_FOUND,
+                message = "method not found: $method",
+                details = methodNotFoundDetails(method),
             )
         }
 
@@ -322,6 +323,25 @@ class DaemonctlExecutor @Inject constructor() {
     private fun shellQuote(value: String): String {
         if (value.isEmpty()) return "''"
         return "'" + value.replace("'", "'\"'\"'") + "'"
+    }
+
+    private fun methodNotFoundDetails(method: String): JsonObject = buildJsonObject {
+        put("requestedMethod", method)
+        canonicalReplacement(method)?.let { put("replacement", it) }
+    }
+
+    private fun canonicalReplacement(method: String): String? = when (method) {
+        "config.import" -> "Use config-import for full daemon config import, or profile.apply for user profile changes."
+        "network.reset" -> "Use backend.reset."
+        "node.test" -> "Use diagnostics.testNodes."
+        "self.check" -> "Use self-check."
+        "status" -> "Use backend.status."
+        "start" -> "Use backend.start."
+        "stop" -> "Use backend.stop."
+        "reload" -> "Use backend.restart."
+        "health" -> "Use diagnostics.health."
+        "subscription-fetch" -> "Use subscription.preview or subscription.refresh."
+        else -> null
     }
 
     private fun JsonElement.daemonEnvelopeOrNull(): JsonObject? {
