@@ -37,6 +37,9 @@ jobs:
       - name: Check reset.lock script contract
         run: bash .github/scripts/check_reset_lock_contract.sh
 
+      - name: Check runtime snapshot contract
+        run: python3 .github/scripts/check_runtime_snapshot_contract.py
+
       - name: Check release manifest metadata
         run: bash .github/scripts/check_release_manifest.sh
 

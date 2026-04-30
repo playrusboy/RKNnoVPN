@@ -77,7 +77,8 @@ kill_matching_processes() {
     for p in /proc/[0-9]*; do
         pid="${p##*/}"
         [ "$pid" = "$$" ] && continue
-        cmd="$(tr '\000' ' ' < "$p/cmdline" 2>/dev/null)"
+        [ -r "$p/cmdline" ] || continue
+        cmd="$(cat "$p/cmdline" 2>/dev/null | tr '\000' ' ')"
         [ -z "$cmd" ] && continue
 
         case "$cmd" in
