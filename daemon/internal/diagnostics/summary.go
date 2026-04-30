@@ -486,7 +486,7 @@ func PackageResolutionFromConfig(cfg *config.Config) PackageResolution {
 		return PackageResolution{Mode: "config_unavailable"}
 	}
 	appMode := core.MapAppMode(cfg.Apps.Mode)
-	resolution := core.BuildPackageRoutingResolution(cfg.Apps.Packages, cfg.Routing.AlwaysDirectApps)
+	resolution := core.BuildPackageRoutingResolution(cfg.Apps.Packages, cfg.Routing.AlwaysDirectApps, cfg.Routing.AlwaysDirectSystemApps)
 	report := PackageResolution{
 		Mode:                         appMode,
 		RequestedPackages:            append([]string(nil), resolution.Selected.RequestedPackages...),

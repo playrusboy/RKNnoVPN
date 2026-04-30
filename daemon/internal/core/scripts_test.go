@@ -126,22 +126,22 @@ func TestBuildAppRoutingEnvModes(t *testing.T) {
 		return "", errors.New("fallback should not be needed")
 	})
 
-	whitelist := BuildAppRoutingEnv("whitelist", []string{"com.example.app"}, nil)
+	whitelist := BuildAppRoutingEnv("whitelist", []string{"com.example.app"}, nil, false)
 	if whitelist.AppMode != "whitelist" || whitelist.ProxyUIDs != "10123" || whitelist.DirectUIDs != "" || whitelist.DNSScope != "uids" || whitelist.DNSMode != "per_uid" {
 		t.Fatalf("unexpected whitelist env: %#v", whitelist)
 	}
 
-	blacklist := BuildAppRoutingEnv("blacklist", []string{"com.example.app"}, nil)
+	blacklist := BuildAppRoutingEnv("blacklist", []string{"com.example.app"}, nil, false)
 	if blacklist.AppMode != "blacklist" || blacklist.DirectUIDs != "10123" || blacklist.ProxyUIDs != "" || blacklist.DNSScope != "all_except_uids" || blacklist.DNSMode != "per_uid" {
 		t.Fatalf("unexpected blacklist env: %#v", blacklist)
 	}
 
-	all := BuildAppRoutingEnv("all", []string{"com.example.app"}, nil)
+	all := BuildAppRoutingEnv("all", []string{"com.example.app"}, nil, false)
 	if all.AppMode != "all" || all.ProxyUIDs != "" || all.DirectUIDs != "" || all.DNSScope != "all" || all.DNSMode != "all" {
 		t.Fatalf("unexpected all env: %#v", all)
 	}
 
-	off := BuildAppRoutingEnv("off", []string{"com.example.app"}, nil)
+	off := BuildAppRoutingEnv("off", []string{"com.example.app"}, nil, false)
 	if off.AppMode != "off" || off.ProxyUIDs != "" || off.DirectUIDs != "" || off.DNSScope != "off" || off.DNSMode != "off" {
 		t.Fatalf("unexpected off env: %#v", off)
 	}
@@ -193,7 +193,7 @@ ang.hiddify.com 10168 0 /data/user/0/ang.hiddify.com default
 		return "", errors.New("fallback should not be needed")
 	})
 
-	env := BuildAppRoutingEnv("all", nil, nil)
+	env := BuildAppRoutingEnv("all", nil, nil, false)
 	if env.AppMode != "all" || env.ProxyUIDs != "" || env.DirectUIDs != "" || env.DNSScope != "all" || env.DNSMode != "all" {
 		t.Fatalf("unexpected global env: %#v", env)
 	}
@@ -217,6 +217,7 @@ func TestResolveAlwaysDirectPackageNamesIncludesInstalledBuiltInsAndManual(t *te
 	withPackageResolverTestEnv(t, `
 com.example.direct 10123 0 /data/user/0/com.example.direct default
 com.example.other 10124 0 /data/user/0/com.example.other default
+com.yandex.browser 10132 0 /data/user/0/com.yandex.browser default
 com.edadeal.android 10125 0 /data/user/0/com.edadeal.android default
 com.programmisty.emiasapp 10126 0 /data/user/0/com.programmisty.emiasapp default
 com.vkontakte.android 10127 0 /data/user/0/com.vkontakte.android default
@@ -228,9 +229,9 @@ ang.hiddify.com 10131 0 /data/user/0/ang.hiddify.com default
 		return "", errors.New("fallback should not be needed")
 	})
 
-	names := ResolveAlwaysDirectPackageNames([]string{"com.example.direct"})
+	names := ResolveAlwaysDirectPackageNames([]string{"com.example.direct"}, false)
 	got := strings.Join(names, " ")
-	for _, want := range []string{"com.edadeal.android", "com.example.direct", "com.programmisty.emiasapp", "com.vkontakte.android"} {
+	for _, want := range []string{"com.edadeal.android", "com.example.direct", "com.programmisty.emiasapp", "com.vkontakte.android", "com.yandex.browser"} {
 		if !strings.Contains(" "+got+" ", " "+want+" ") {
 			t.Fatalf("expected %s in always-direct package names, got %#v", want, names)
 		}
@@ -245,12 +246,35 @@ ang.hiddify.com 10131 0 /data/user/0/ang.hiddify.com default
 	}
 }
 
+func TestBuildAppRoutingEnvCanHardBypassSystemApps(t *testing.T) {
+	withPackageResolverTestEnv(t, `
+com.example.app 10123 0 /data/user/0/com.example.app default
+com.android.systemui 10100 0 /data/user/0/com.android.systemui platform
+`, func(bool) (string, error) {
+		return "package:com.android.systemui uid:10100", nil
+	})
+
+	env := BuildAppRoutingEnv("all", nil, nil, true)
+	if !strings.Contains(" "+env.BypassUIDs+" ", " 10100 ") {
+		t.Fatalf("system app UID must be hard-bypassed, got %#v", env)
+	}
+	if strings.Contains(" "+env.BypassUIDs+" ", " 10123 ") {
+		t.Fatalf("ordinary app must not be system hard-bypassed, got %#v", env)
+	}
+
+	names := ResolveAlwaysDirectPackageNames(nil, true)
+	got := strings.Join(names, " ")
+	if !strings.Contains(" "+got+" ", " com.android.systemui ") {
+		t.Fatalf("system package must be visible in always-direct package names, got %#v", names)
+	}
+}
+
 func TestBuildRuntimeAppRoutingEnvDirectHardBypass(t *testing.T) {
 	withPackageResolverTestEnv(t, "com.example.app 10123 0 /data/user/0/com.example.app default\n", func(bool) (string, error) {
 		return "", errors.New("fallback should not be needed")
 	})
 
-	env := BuildRuntimeAppRoutingEnv("whitelist", []string{"com.example.app"}, []string{"com.android.vending"}, "direct")
+	env := BuildRuntimeAppRoutingEnv("whitelist", []string{"com.example.app"}, []string{"com.android.vending"}, false, "direct")
 	if env.AppMode != "off" || env.ProxyUIDs != "" || env.DirectUIDs != "" {
 		t.Fatalf("direct routing must disable app interception, got %#v", env)
 	}
@@ -574,10 +598,12 @@ func withPackageResolverTestEnv(t *testing.T, packagesList string, command func(
 	oldPackageListPath := packageListPath
 	oldDataUserPath := dataUserPath
 	oldRunPackageUIDCommand := runPackageUIDCommand
+	oldRunSystemPackageUIDCommand := runSystemPackageUIDCommand
 	t.Cleanup(func() {
 		packageListPath = oldPackageListPath
 		dataUserPath = oldDataUserPath
 		runPackageUIDCommand = oldRunPackageUIDCommand
+		runSystemPackageUIDCommand = oldRunSystemPackageUIDCommand
 	})
 
 	tempDir := t.TempDir()
@@ -592,4 +618,5 @@ func withPackageResolverTestEnv(t *testing.T, packagesList string, command func(
 		t.Fatal(err)
 	}
 	runPackageUIDCommand = command
+	runSystemPackageUIDCommand = command
 }

@@ -29,11 +29,12 @@
     "mode": "all",
     "bypass_lan": true,
     "bypass_china": false,
-    "bypass_russia": false,
+    "bypass_russia": true,
     "custom_direct": [],
     "custom_proxy": [],
     "custom_block": [],
-    "always_direct_apps": []
+    "always_direct_apps": [],
+    "always_direct_system_apps": true
   },
   "apps": {
     "mode": "all",

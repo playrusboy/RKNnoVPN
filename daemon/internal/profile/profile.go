@@ -40,17 +40,19 @@ type RuntimeConfig struct {
 }
 
 type RoutingConfig struct {
-	Mode                string            `json:"mode"`
-	AppProxyList        []string          `json:"appProxyList,omitempty"`
-	AppBypassList       []string          `json:"appBypassList,omitempty"`
-	AppGroupRoutes      map[string]string `json:"appGroupRoutes,omitempty"`
-	DirectDomains       []string          `json:"directDomains,omitempty"`
-	ProxyDomains        []string          `json:"proxyDomains,omitempty"`
-	BlockDomains        []string          `json:"blockDomains,omitempty"`
-	DirectIps           []string          `json:"directIps,omitempty"`
-	ProxyIps            []string          `json:"proxyIps,omitempty"`
-	BlockIps            []string          `json:"blockIps,omitempty"`
-	AlwaysDirectAppList []string          `json:"alwaysDirectAppList,omitempty"`
+	Mode                   string            `json:"mode"`
+	BypassRussia           bool              `json:"bypassRussia"`
+	AppProxyList           []string          `json:"appProxyList,omitempty"`
+	AppBypassList          []string          `json:"appBypassList,omitempty"`
+	AppGroupRoutes         map[string]string `json:"appGroupRoutes,omitempty"`
+	DirectDomains          []string          `json:"directDomains,omitempty"`
+	ProxyDomains           []string          `json:"proxyDomains,omitempty"`
+	BlockDomains           []string          `json:"blockDomains,omitempty"`
+	DirectIps              []string          `json:"directIps,omitempty"`
+	ProxyIps               []string          `json:"proxyIps,omitempty"`
+	BlockIps               []string          `json:"blockIps,omitempty"`
+	AlwaysDirectAppList    []string          `json:"alwaysDirectAppList,omitempty"`
+	AlwaysDirectSystemApps bool              `json:"alwaysDirectSystemApps"`
 }
 
 type DNSConfig struct {
@@ -483,12 +485,20 @@ func panelFromDocument(doc Document) config.ProfileProjectionConfig {
 }
 
 func routingFromConfig(cfg *config.Config) RoutingConfig {
+	directDomains, directIps := splitRoutingRuleInputs(cfg.Routing.CustomDirect)
+	proxyDomains, proxyIps := splitRoutingRuleInputs(cfg.Routing.CustomProxy)
+	blockDomains, blockIps := splitRoutingRuleInputs(cfg.Routing.CustomBlock)
 	routing := RoutingConfig{
-		AppGroupRoutes:      map[string]string{},
-		DirectDomains:       append([]string(nil), cfg.Routing.CustomDirect...),
-		ProxyDomains:        append([]string(nil), cfg.Routing.CustomProxy...),
-		BlockDomains:        append([]string(nil), cfg.Routing.CustomBlock...),
-		AlwaysDirectAppList: append([]string(nil), cfg.Routing.AlwaysDirectApps...),
+		AppGroupRoutes:         map[string]string{},
+		DirectDomains:          directDomains,
+		ProxyDomains:           proxyDomains,
+		BlockDomains:           blockDomains,
+		DirectIps:              directIps,
+		ProxyIps:               proxyIps,
+		BlockIps:               blockIps,
+		AlwaysDirectAppList:    append([]string(nil), cfg.Routing.AlwaysDirectApps...),
+		AlwaysDirectSystemApps: cfg.Routing.AlwaysDirectSystemApps,
+		BypassRussia:           cfg.Routing.BypassRussia,
 	}
 	for key, value := range cfg.Apps.AppGroups {
 		routing.AppGroupRoutes[key] = value
@@ -511,10 +521,12 @@ func routingFromConfig(cfg *config.Config) RoutingConfig {
 }
 
 func applyRoutingToConfig(cfg *config.Config, routing RoutingConfig) {
-	cfg.Routing.CustomDirect = append([]string(nil), routing.DirectDomains...)
-	cfg.Routing.CustomProxy = append([]string(nil), routing.ProxyDomains...)
-	cfg.Routing.CustomBlock = append([]string(nil), routing.BlockDomains...)
+	cfg.Routing.CustomDirect = mergeRoutingRuleInputs(routing.DirectDomains, routing.DirectIps)
+	cfg.Routing.CustomProxy = mergeRoutingRuleInputs(routing.ProxyDomains, routing.ProxyIps)
+	cfg.Routing.CustomBlock = mergeRoutingRuleInputs(routing.BlockDomains, routing.BlockIps)
 	cfg.Routing.AlwaysDirectApps = append([]string(nil), routing.AlwaysDirectAppList...)
+	cfg.Routing.AlwaysDirectSystemApps = routing.AlwaysDirectSystemApps
+	cfg.Routing.BypassRussia = routing.BypassRussia
 	cfg.Apps.AppGroups = map[string]string{}
 	for key, value := range routing.AppGroupRoutes {
 		cfg.Apps.AppGroups[key] = value
@@ -541,6 +553,38 @@ func applyRoutingToConfig(cfg *config.Config, routing RoutingConfig) {
 		cfg.Apps.Mode = "whitelist"
 		cfg.Apps.Packages = append([]string(nil), routing.AppProxyList...)
 	}
+}
+
+func splitRoutingRuleInputs(values []string) (domains []string, ips []string) {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if strings.Contains(value, "/") {
+			ips = append(ips, value)
+		} else {
+			domains = append(domains, value)
+		}
+	}
+	return domains, ips
+}
+
+func mergeRoutingRuleInputs(domains []string, ips []string) []string {
+	result := make([]string, 0, len(domains)+len(ips))
+	result = appendTrimmedRoutingRules(result, domains)
+	result = appendTrimmedRoutingRules(result, ips)
+	return result
+}
+
+func appendTrimmedRoutingRules(dst []string, values []string) []string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			dst = append(dst, value)
+		}
+	}
+	return dst
 }
 
 func dnsFromConfig(cfg *config.Config) DNSConfig {

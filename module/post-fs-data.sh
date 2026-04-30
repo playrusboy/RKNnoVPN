@@ -36,6 +36,16 @@ log_error() {
     /system/bin/log -t "$TAG" -p e "$1" 2>/dev/null
 }
 
+set_sysctl_value() {
+    sysctl_path="$1"
+    sysctl_value="$2"
+    if command -v rknnovpn_set_sysctl >/dev/null 2>&1; then
+        rknnovpn_set_sysctl "$sysctl_path" "$sysctl_value" 2>/dev/null
+    elif [ -f "$sysctl_path" ]; then
+        echo "$sysctl_value" > "$sysctl_path" 2>/dev/null
+    fi
+}
+
 # ============================================================================
 # 1. Create directory skeleton if missing
 # ============================================================================
@@ -113,13 +123,13 @@ log_info "Permissions set"
 
 # IPv4 forwarding — required for tproxy to route packets through the proxy
 if [ -f /proc/sys/net/ipv4/ip_forward ]; then
-    echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null
+    set_sysctl_value /proc/sys/net/ipv4/ip_forward 1
     log_info "IPv4 ip_forward enabled"
 fi
 
 # IPv6 forwarding — required if ipv6.mode != disabled
 if [ -f /proc/sys/net/ipv6/conf/all/forwarding ]; then
-    echo 1 > /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null
+    set_sysctl_value /proc/sys/net/ipv6/conf/all/forwarding 1
     log_info "IPv6 forwarding enabled"
 fi
 
@@ -134,7 +144,7 @@ fi
 for rp_path in /proc/sys/net/ipv4/conf/all/rp_filter \
                /proc/sys/net/ipv4/conf/default/rp_filter; do
     if [ -f "$rp_path" ]; then
-        echo 0 > "$rp_path" 2>/dev/null
+        set_sysctl_value "$rp_path" 0
     fi
 done
 
@@ -142,7 +152,7 @@ done
 for iface in wlan0 rmnet0 rmnet_data0 ccmni0 v4-wlan0; do
     rp_iface="/proc/sys/net/ipv4/conf/${iface}/rp_filter"
     if [ -f "$rp_iface" ]; then
-        echo 0 > "$rp_iface" 2>/dev/null
+        set_sysctl_value "$rp_iface" 0
     fi
 done
 

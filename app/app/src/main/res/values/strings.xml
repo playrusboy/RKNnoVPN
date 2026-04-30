@@ -104,6 +104,7 @@
     <string name="delete_node_confirm">Delete node \"%s\"?</string>
     <string name="cancel">Cancel</string>
     <string name="confirm">Confirm</string>
+    <string name="disable">Disable</string>
     <string name="no_nodes">No nodes yet. Tap + to add one.</string>
     <string name="link_copied">Link copied</string>
     <string name="node_source_subscription">Subscription</string>
@@ -154,6 +155,13 @@
     <string name="routing_whitelist">Whitelist</string>
     <string name="routing_bypass">Bypass</string>
     <string name="routing_direct">Direct</string>
+    <string name="bypass_russia">Russian sites direct</string>
+    <string name="bypass_russia_desc">Keep this enabled: if disabled, Russian sites and services may detect VPN use and see the server IP.</string>
+    <string name="vpn_detection_url">https://rks.global/ru/research/vpn-detection/</string>
+    <string name="bypass_russia_disable_title">Dangerous change</string>
+    <string name="bypass_russia_disable_warning">This protection intentionally routes Russian IPs and .ru, .su, .рф domains direct. If you disable it, Yandex, marketplaces, banks, maps, translators, embedded WebViews, and APIs inside other apps may see VPN traffic, link requests to your server IP, and show a block or warning. See the VPN detection research below. To disable this protection, type \"уверен\".</string>
+    <string name="bypass_russia_disable_input_label">Type \"уверен\"</string>
+    <string name="bypass_russia_disable_phrase">уверен</string>
     <string name="settings_recovery">Recovery</string>
     <string name="backend_fallback_policy">Recovery policy</string>
     <string name="fallback_offer_reset">Offer rooted reset</string>
@@ -185,6 +193,8 @@
     <string name="urltest_url">URL test endpoint</string>
     <string name="always_direct_apps">Always-direct apps</string>
     <string name="always_direct_apps_desc">These apps bypass TPROXY and DNS interception before routing.</string>
+    <string name="always_direct_system_apps">System apps direct</string>
+    <string name="always_direct_system_apps_desc">Route Android system and service apps outside RKNnoVPN.</string>
     <string name="sharing_mode">Hotspot sharing</string>
     <string name="sharing_mode_desc">Route tethered client traffic through RKNnoVPN. Leave off unless you explicitly share the proxy to other devices.</string>
     <string name="sharing_interfaces">Sharing interfaces</string>

@@ -15,10 +15,11 @@ import (
 const networkStackUID = "1073"
 
 var (
-	packageListPath          = "/data/system/packages.list"
-	dataUserPath             = "/data/user"
-	packageUIDCommandTimeout = 2 * time.Second
-	runPackageUIDCommand     = defaultPackageUIDCommand
+	packageListPath            = "/data/system/packages.list"
+	dataUserPath               = "/data/user"
+	packageUIDCommandTimeout   = 2 * time.Second
+	runPackageUIDCommand       = defaultPackageUIDCommand
+	runSystemPackageUIDCommand = defaultSystemPackageUIDCommand
 )
 
 var SelfTestProtectedPackages = []string{
@@ -365,18 +366,22 @@ func ResolvePackageUIDsDetailed(packages []string) PackageUIDResolution {
 
 // ResolveAlwaysDirectUIDsDetailed resolves user-configured and built-in
 // packages that must bypass RKNnoVPN, with structured diagnostics.
-func ResolveAlwaysDirectUIDsDetailed(packages []string) PackageUIDResolution {
+func ResolveAlwaysDirectUIDsDetailed(packages []string, includeSystemApps bool) PackageUIDResolution {
 	userPackages := packageSet(packages)
-	return resolvePackageUIDsFromSources(userPackages.values(), func(pkgName string) bool {
-		return userPackages[pkgName] || IsBuiltInAlwaysDirectPackage(pkgName)
+	systemPackages, systemErrors := loadSystemPackageSet(includeSystemApps)
+	result := resolvePackageUIDsFromSources(joinUniqueStringSlices(userPackages.values(), systemPackages.values()), func(pkgName string) bool {
+		return userPackages[pkgName] || systemPackages[pkgName] || IsBuiltInAlwaysDirectPackage(pkgName)
 	}, false)
+	result.Errors = append(result.Errors, systemErrors...)
+	return result
 }
 
 // ResolveAlwaysDirectPackageNames returns installed packages that should be
 // treated as privacy-sensitive and kept out of RKNnoVPN. The result is used for
 // OS-level privacy guards where package names, not UIDs, are the control plane.
-func ResolveAlwaysDirectPackageNames(packages []string) []string {
+func ResolveAlwaysDirectPackageNames(packages []string, includeSystemApps bool) []string {
 	userPackages := packageSet(packages)
+	systemPackages, _ := loadSystemPackageSet(includeSystemApps)
 	seen := make(map[string]bool)
 	result := make([]string, 0)
 	add := func(pkgName string) {
@@ -396,7 +401,7 @@ func ResolveAlwaysDirectPackageNames(packages []string) []string {
 			continue
 		}
 		for pkgName := range catalog.uids {
-			if userPackages[pkgName] || IsBuiltInAlwaysDirectPackage(pkgName) {
+			if userPackages[pkgName] || systemPackages[pkgName] || IsBuiltInAlwaysDirectPackage(pkgName) {
 				add(pkgName)
 			}
 		}
@@ -408,21 +413,24 @@ func ResolveAlwaysDirectPackageNames(packages []string) []string {
 
 // BuildPackageRoutingResolution resolves both app-routing package sets from a
 // shared source probe for diagnostics report.
-func BuildPackageRoutingResolution(packages []string, alwaysDirectPackages []string) PackageRoutingResolution {
+func BuildPackageRoutingResolution(packages []string, alwaysDirectPackages []string, includeSystemApps bool) PackageRoutingResolution {
 	catalogs := loadPackageUIDCatalogs(true)
 	selectedWanted := packageSet(packages)
 	alwaysWanted := packageSet(alwaysDirectPackages)
+	systemWanted, systemErrors := loadSystemPackageSet(includeSystemApps)
 	selected := resolvePackageUIDsFromCatalogs(catalogs, selectedWanted.values(), func(pkgName string) bool {
 		return selectedWanted[pkgName]
 	})
-	alwaysDirect := resolvePackageUIDsFromCatalogs(catalogs, alwaysWanted.values(), func(pkgName string) bool {
-		return alwaysWanted[pkgName] || IsBuiltInAlwaysDirectPackage(pkgName)
+	alwaysDirect := resolvePackageUIDsFromCatalogs(catalogs, joinUniqueStringSlices(alwaysWanted.values(), systemWanted.values()), func(pkgName string) bool {
+		return alwaysWanted[pkgName] || systemWanted[pkgName] || IsBuiltInAlwaysDirectPackage(pkgName)
 	})
+	errors := sourceErrors(catalogs)
+	errors = append(errors, systemErrors...)
 	return PackageRoutingResolution{
 		Selected:     selected,
 		AlwaysDirect: alwaysDirect,
 		Sources:      sourceStatuses(catalogs),
-		Errors:       sourceErrors(catalogs),
+		Errors:       errors,
 	}
 }
 
@@ -439,9 +447,9 @@ type AppRoutingEnv struct {
 
 // BuildAppRoutingEnv resolves package names into unambiguous UID sets for
 // proxy, direct and hard-bypass traffic.
-func BuildAppRoutingEnv(mode string, packages []string, alwaysDirectPackages []string) AppRoutingEnv {
+func BuildAppRoutingEnv(mode string, packages []string, alwaysDirectPackages []string, includeSystemApps bool) AppRoutingEnv {
 	appMode := MapAppMode(mode)
-	alwaysDirectUIDs := ResolveAlwaysDirectUIDsDetailed(alwaysDirectPackages).UIDString
+	alwaysDirectUIDs := ResolveAlwaysDirectUIDsDetailed(alwaysDirectPackages, includeSystemApps).UIDString
 	env := AppRoutingEnv{
 		AppMode:    appMode,
 		BypassUIDs: joinUniqueFields(networkStackUID, alwaysDirectUIDs),
@@ -472,9 +480,9 @@ func BuildAppRoutingEnv(mode string, packages []string, alwaysDirectPackages []s
 // BuildRuntimeAppRoutingEnv resolves the kernel/DNS interception contract for a
 // full runtime config. Routing "direct" is a hard bypass: no app traffic or DNS
 // should be intercepted even if the persisted split-tunnel app mode is stale.
-func BuildRuntimeAppRoutingEnv(appMode string, packages []string, alwaysDirectPackages []string, routingMode string) AppRoutingEnv {
+func BuildRuntimeAppRoutingEnv(appMode string, packages []string, alwaysDirectPackages []string, includeSystemApps bool, routingMode string) AppRoutingEnv {
 	if strings.EqualFold(strings.TrimSpace(routingMode), "direct") {
-		alwaysDirectUIDs := ResolveAlwaysDirectUIDsDetailed(alwaysDirectPackages).UIDString
+		alwaysDirectUIDs := ResolveAlwaysDirectUIDsDetailed(alwaysDirectPackages, includeSystemApps).UIDString
 		return AppRoutingEnv{
 			AppMode:    "off",
 			BypassUIDs: joinUniqueFields(networkStackUID, alwaysDirectUIDs),
@@ -482,7 +490,7 @@ func BuildRuntimeAppRoutingEnv(appMode string, packages []string, alwaysDirectPa
 			DNSMode:    "off",
 		}
 	}
-	return BuildAppRoutingEnv(appMode, packages, alwaysDirectPackages)
+	return BuildAppRoutingEnv(appMode, packages, alwaysDirectPackages, includeSystemApps)
 }
 
 // IsBuiltInAlwaysDirectPackage reports whether a package is part of the
@@ -532,6 +540,23 @@ func (s normalizedPackageSet) values() []string {
 	}
 	sort.Strings(values)
 	return values
+}
+
+func joinUniqueStringSlices(slices ...[]string) []string {
+	seen := map[string]bool{}
+	result := []string{}
+	for _, values := range slices {
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value == "" || seen[value] {
+				continue
+			}
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func resolvePackageUIDsFromSources(requested []string, match func(string) bool, probeAll bool) PackageUIDResolution {
@@ -717,6 +742,37 @@ func sourceErrors(catalogs []packageUIDCatalogResult) []string {
 	return errors
 }
 
+func loadSystemPackageSet(enabled bool) (normalizedPackageSet, []string) {
+	result := normalizedPackageSet{}
+	if !enabled {
+		return result, nil
+	}
+	out, err := runSystemPackageUIDCommand(false)
+	if err == nil {
+		return packageSetFromCmdPackageOutput(out)
+	}
+	errors := []string{"cmd_package_system: " + err.Error()}
+	out, err = runSystemPackageUIDCommand(true)
+	if err == nil {
+		set, parseErrors := packageSetFromCmdPackageOutput(out)
+		return set, append(errors, parseErrors...)
+	}
+	errors = append(errors, "cmd_package_system_shell: "+err.Error())
+	return result, errors
+}
+
+func packageSetFromCmdPackageOutput(out string) (normalizedPackageSet, []string) {
+	uids, err := parseCmdPackageUIDs(out)
+	if err != nil {
+		return normalizedPackageSet{}, []string{"cmd_package_system_parse: " + err.Error()}
+	}
+	result := normalizedPackageSet{}
+	for pkgName := range uids {
+		result[pkgName] = true
+	}
+	return result, nil
+}
+
 func loadPackagesListCatalog() (map[string]int, error) {
 	data, err := os.ReadFile(packageListPath)
 	if err != nil {
@@ -742,13 +798,21 @@ func loadCmdPackageShellCatalog() (map[string]int, error) {
 }
 
 func defaultPackageUIDCommand(asShell bool) (string, error) {
+	return defaultPackageUIDCommandWithArgs(asShell, "cmd package list packages -U", "package", "list", "packages", "-U")
+}
+
+func defaultSystemPackageUIDCommand(asShell bool) (string, error) {
+	return defaultPackageUIDCommandWithArgs(asShell, "cmd package list packages -s -U", "package", "list", "packages", "-s", "-U")
+}
+
+func defaultPackageUIDCommandWithArgs(asShell bool, shellCommand string, cmdArgs ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), packageUIDCommandTimeout)
 	defer cancel()
 	name := "cmd"
-	args := []string{"package", "list", "packages", "-U"}
+	args := cmdArgs
 	if asShell {
 		name = "su"
-		args = []string{"-lp", "2000", "-c", "cmd package list packages -U"}
+		args = []string{"-lp", "2000", "-c", shellCommand}
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	out, err := cmd.CombinedOutput()

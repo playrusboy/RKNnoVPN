@@ -1161,9 +1161,10 @@ func (m *CoreManager) scriptEnv() map[string]string {
 		m.config.Apps.Mode,
 		m.config.Apps.Packages,
 		m.config.Routing.AlwaysDirectApps,
+		m.config.Routing.AlwaysDirectSystemApps,
 		m.config.Routing.Mode,
 	)
-	privacyGuardPackages := ResolveAlwaysDirectPackageNames(m.config.Routing.AlwaysDirectApps)
+	privacyGuardPackages := ResolveAlwaysDirectPackageNames(m.config.Routing.AlwaysDirectApps, m.config.Routing.AlwaysDirectSystemApps)
 	chainProxyPorts, chainProxyUIDs, chainProxyRules := BuildChainedProxyProtectionEnv(m.config)
 
 	return map[string]string{
@@ -1192,9 +1193,17 @@ func (m *CoreManager) scriptEnv() map[string]string {
 		"PROXY_MODE":             "tproxy",
 		"IPV6_MODE":              m.config.IPv6.Mode,
 		"IPV6_FAIL_CLOSED":       ipv6FailClosedEnv(m.config.IPv6.Mode),
+		"BLOCK_QUIC":             boolEnv(m.config.DNS.BlockQUICDNS),
 		"SHARING_MODE":           m.config.SharingModeEnv(),
 		"SHARING_IFACES":         m.config.SharingInterfacesEnv(),
 	}
+}
+
+func boolEnv(value bool) string {
+	if value {
+		return "1"
+	}
+	return "0"
 }
 
 func ipv6FailClosedEnv(mode string) string {

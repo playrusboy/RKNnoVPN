@@ -48,10 +48,10 @@ if [ -z "$IPT_WAIT_WAS_SET" ]; then
     fi
 fi
 
-LOG_FILE="$RKNNOVPN_DIR/logs/rescue_reset.log"
+LOG_FILE="${LOG_FILE:-${LOG_DIR:-$RKNNOVPN_DIR/logs}/rescue_reset.log}"
 TAG="rknnovpn:reset"
 
-mkdir -p "$RUN_DIR" "$CONFIG_DIR" "$RKNNOVPN_DIR/logs" 2>/dev/null
+mkdir -p "$RUN_DIR" "$CONFIG_DIR" "${LOG_FILE%/*}" 2>/dev/null
 
 log() {
     _ts="$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo '----')"

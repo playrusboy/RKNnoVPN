@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ButtonDefaults
@@ -82,7 +83,11 @@ fun SettingsScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val vpnDetectionUrl = stringResource(R.string.vpn_detection_url)
+    val bypassRussiaDisablePhrase = stringResource(R.string.bypass_russia_disable_phrase)
     var showAlwaysDirectAppPicker by remember { mutableStateOf(false) }
+    var showBypassRussiaDisableDialog by remember { mutableStateOf(false) }
+    var bypassRussiaDisableConfirmation by remember { mutableStateOf("") }
     val alwaysDirectPackages = remember(state.alwaysDirectPackagesText) {
         parsePackageSelection(state.alwaysDirectPackagesText)
     }
@@ -151,6 +156,27 @@ fun SettingsScreen(
             currentMode = state.routingMode,
             onModeChange = viewModel::setRoutingMode,
         )
+
+        SettingsCard {
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.bypass_russia)) },
+                supportingContent = { Text(stringResource(R.string.bypass_russia_desc)) },
+                trailingContent = {
+                    Switch(
+                        checked = state.bypassRussia,
+                        onCheckedChange = { enabled ->
+                            if (enabled) {
+                                viewModel.setBypassRussia(true)
+                            } else {
+                                bypassRussiaDisableConfirmation = ""
+                                showBypassRussiaDisableDialog = true
+                            }
+                        },
+                    )
+                },
+                colors = transparentListItemColors(),
+            )
+        }
 
         Spacer(modifier = Modifier.height(20.dp))
 
@@ -241,6 +267,17 @@ fun SettingsScreen(
                     text = stringResource(R.string.always_direct_apps_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.always_direct_system_apps)) },
+                    supportingContent = { Text(stringResource(R.string.always_direct_system_apps_desc)) },
+                    trailingContent = {
+                        Switch(
+                            checked = state.alwaysDirectSystemApps,
+                            onCheckedChange = viewModel::setAlwaysDirectSystemApps,
+                        )
+                    },
+                    colors = transparentListItemColors(),
                 )
                 if (alwaysDirectPackages.isEmpty()) {
                     Text(
@@ -522,6 +559,65 @@ fun SettingsScreen(
             title = stringResource(R.string.choose_app),
             onDismiss = { showAlwaysDirectAppPicker = false },
             onSelect = viewModel::addAlwaysDirectPackage,
+        )
+    }
+
+    if (showBypassRussiaDisableDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showBypassRussiaDisableDialog = false
+                bypassRussiaDisableConfirmation = ""
+            },
+            title = { Text(stringResource(R.string.bypass_russia_disable_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(stringResource(R.string.bypass_russia_disable_warning))
+                    TextButton(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(vpnDetectionUrl))
+                            if (context !is Activity) {
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            try {
+                                context.startActivity(intent)
+                            } catch (_: ActivityNotFoundException) {
+                                Toast.makeText(context, R.string.link_open_no_app, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                    ) {
+                        Text(vpnDetectionUrl)
+                    }
+                    OutlinedTextField(
+                        value = bypassRussiaDisableConfirmation,
+                        onValueChange = { bypassRussiaDisableConfirmation = it },
+                        label = { Text(stringResource(R.string.bypass_russia_disable_input_label)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = bypassRussiaDisableConfirmation.trim() == bypassRussiaDisablePhrase,
+                    onClick = {
+                        showBypassRussiaDisableDialog = false
+                        bypassRussiaDisableConfirmation = ""
+                        viewModel.setBypassRussia(false)
+                    },
+                ) {
+                    Text(stringResource(R.string.disable))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showBypassRussiaDisableDialog = false
+                        bypassRussiaDisableConfirmation = ""
+                    },
+                ) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
         )
     }
 }

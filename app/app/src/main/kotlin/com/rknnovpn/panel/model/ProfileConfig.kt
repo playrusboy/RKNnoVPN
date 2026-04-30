@@ -54,6 +54,8 @@ data class SubscriptionSource(
 @Serializable
 data class RoutingConfig(
     val mode: RoutingMode = RoutingMode.PROXY_ALL,
+    /** Route Russian GeoIP and .ru/.su/.рф domains directly. */
+    val bypassRussia: Boolean = true,
     /** Package names routed through the proxy (only for PER_APP mode). */
     val appProxyList: List<String> = emptyList(),
     /** Package names bypassing the proxy (only for PER_APP_BYPASS mode). */
@@ -73,7 +75,9 @@ data class RoutingConfig(
     /** IP CIDR rules that should be blocked. */
     val blockIps: List<String> = emptyList(),
     /** Package names that must always bypass RKNnoVPN before TPROXY/DNS interception. */
-    val alwaysDirectAppList: List<String> = emptyList()
+    val alwaysDirectAppList: List<String> = emptyList(),
+    /** Route Android system/service apps directly before TPROXY/DNS interception. */
+    val alwaysDirectSystemApps: Boolean = true
 )
 
 @Serializable

@@ -86,6 +86,7 @@ data class SettingsUiState(
     val fallbackPolicy: FallbackPolicy = FallbackPolicy.OFFER_RESET,
     // Routing
     val routingMode: RoutingMode = RoutingMode.GLOBAL,
+    val bypassRussia: Boolean = true,
     // DNS
     val dnsPreset: DnsPreset = DnsPreset.CLOUDFLARE,
     val remoteDnsUrl: String = DnsPreset.CLOUDFLARE.remoteUrl,
@@ -96,6 +97,7 @@ data class SettingsUiState(
     val fakeDns: Boolean = false,
     val urlTestUrl: String = "https://www.gstatic.com/generate_204",
     val alwaysDirectPackagesText: String = "",
+    val alwaysDirectSystemApps: Boolean = true,
     val sharingEnabled: Boolean = false,
     val sharingInterfacesText: String = "",
     val logLevel: LogLevel = LogLevel.WARNING,
@@ -295,6 +297,42 @@ class SettingsViewModel @Inject constructor(
 
     fun setAlwaysDirectPackagesText(value: String) {
         _uiState.update { it.copy(alwaysDirectPackagesText = value, errorMessage = null) }
+    }
+
+    fun setAlwaysDirectSystemApps(enabled: Boolean) {
+        val previous = _uiState.value.alwaysDirectSystemApps
+        _uiState.update { it.copy(alwaysDirectSystemApps = enabled, errorMessage = null) }
+        viewModelScope.launch {
+            val ok = profileRepository.updateConfig { config ->
+                config.copy(
+                    routing = config.routing.copy(alwaysDirectSystemApps = enabled),
+                )
+            }
+            if (!ok) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Failed to save system always-direct setting: $err")
+                profileRepository.refresh()
+                _uiState.update { it.copy(alwaysDirectSystemApps = previous, errorMessage = err) }
+            }
+        }
+    }
+
+    fun setBypassRussia(enabled: Boolean) {
+        val previous = _uiState.value.bypassRussia
+        _uiState.update { it.copy(bypassRussia = enabled, errorMessage = null) }
+        viewModelScope.launch {
+            val ok = profileRepository.updateConfig { config ->
+                config.copy(
+                    routing = config.routing.copy(bypassRussia = enabled),
+                )
+            }
+            if (!ok) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Failed to save Russian direct routing setting: $err")
+                profileRepository.refresh()
+                _uiState.update { it.copy(bypassRussia = previous, errorMessage = err) }
+            }
+        }
     }
 
     fun addAlwaysDirectPackage(packageName: String) {
@@ -808,6 +846,7 @@ class SettingsViewModel @Inject constructor(
             it.copy(
                 fallbackPolicy = config.runtime.fallbackPolicy,
                 routingMode = routingMode,
+                bypassRussia = config.routing.bypassRussia,
                 dnsPreset = dnsPreset,
                 remoteDnsUrl = config.dns.remoteDns,
                 directDnsUrl = config.dns.directDns,
@@ -817,6 +856,7 @@ class SettingsViewModel @Inject constructor(
                 fakeDns = config.dns.fakeDns,
                 urlTestUrl = config.health.checkUrl,
                 alwaysDirectPackagesText = config.routing.alwaysDirectAppList.joinToString("\n"),
+                alwaysDirectSystemApps = config.routing.alwaysDirectSystemApps,
                 sharingEnabled = config.sharing.enabled,
                 sharingInterfacesText = config.sharing.interfaces.joinToString("\n"),
             )

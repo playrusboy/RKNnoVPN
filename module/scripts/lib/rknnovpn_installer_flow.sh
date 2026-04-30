@@ -248,6 +248,111 @@ install_scripts() {
     done
 }
 
+install_rollback_guard() {
+    ROLLBACK_DIR="${ROLLBACK_DIR:-/data/adb/rknnovpn-rollback}"
+    ROLLBACK_SERVICE_SCRIPT="${ROLLBACK_SERVICE_SCRIPT:-/data/adb/service.d/99-rknnovpn-rollback-guard.sh}"
+
+    ui_print "  [*] Installing rollback guard..."
+    mkdir -p "${ROLLBACK_DIR}/scripts/lib" "/data/adb/service.d" 2>/dev/null || {
+        ui_print "  [!] Failed to create rollback guard directory"
+        return 1
+    }
+
+    for file in rescue_reset.sh; do
+        if [ -f "${RKNNOVPN_DIR}/scripts/${file}" ]; then
+            cp -f "${RKNNOVPN_DIR}/scripts/${file}" "${ROLLBACK_DIR}/scripts/${file}" 2>/dev/null || return 1
+            chmod 0700 "${ROLLBACK_DIR}/scripts/${file}" 2>/dev/null || true
+        fi
+    done
+    for file in rknnovpn_env.sh rknnovpn_netstack.sh; do
+        if [ -f "${RKNNOVPN_DIR}/scripts/lib/${file}" ]; then
+            cp -f "${RKNNOVPN_DIR}/scripts/lib/${file}" "${ROLLBACK_DIR}/scripts/lib/${file}" 2>/dev/null || return 1
+            chmod 0600 "${ROLLBACK_DIR}/scripts/lib/${file}" 2>/dev/null || true
+        fi
+    done
+
+    cat > "$ROLLBACK_SERVICE_SCRIPT" <<'EOF'
+#!/system/bin/sh
+
+MODULE_DIR="/data/adb/modules/rknnovpn"
+ROLLBACK_DIR="/data/adb/rknnovpn-rollback"
+SERVICE_SCRIPT="/data/adb/service.d/99-rknnovpn-rollback-guard.sh"
+LOG_FILE="${ROLLBACK_DIR}/rollback.log"
+
+log_msg() {
+    mkdir -p "$ROLLBACK_DIR" 2>/dev/null || true
+    echo "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo '----') $*" >> "$LOG_FILE" 2>/dev/null || true
+    /system/bin/log -t rknnovpn:rollback -p i "$*" 2>/dev/null || true
+}
+
+module_is_active() {
+    [ -d "$MODULE_DIR" ] || return 1
+    [ -e "${MODULE_DIR}/remove" ] && return 1
+    [ -e "${MODULE_DIR}/disable" ] && return 1
+    return 0
+}
+
+run_cleanup() {
+    if [ -x "${MODULE_DIR}/scripts/rescue_reset.sh" ]; then
+        log_msg "running module rescue cleanup"
+        RKNNOVPN_DIR="$MODULE_DIR" "${MODULE_DIR}/scripts/rescue_reset.sh" uninstall-clean >> "$LOG_FILE" 2>&1
+        return $?
+    fi
+
+    if [ -x "${ROLLBACK_DIR}/scripts/rescue_reset.sh" ]; then
+        log_msg "running bundled rescue cleanup"
+        RKNNOVPN_DIR="$MODULE_DIR" \
+        ROLLBACK_DIR="$ROLLBACK_DIR" \
+        RUN_DIR="${ROLLBACK_DIR}/run" \
+        CONFIG_DIR="${ROLLBACK_DIR}/config" \
+        LOG_DIR="${ROLLBACK_DIR}/logs" \
+        SCRIPTS_DIR="${ROLLBACK_DIR}/scripts" \
+        "${ROLLBACK_DIR}/scripts/rescue_reset.sh" uninstall-clean >> "$LOG_FILE" 2>&1
+        return $?
+    fi
+
+    log_msg "no rescue cleanup script is available"
+    return 1
+}
+
+restore_sysctls() {
+    if [ -f "${ROLLBACK_DIR}/scripts/lib/rknnovpn_env.sh" ]; then
+        ROLLBACK_DIR="$ROLLBACK_DIR" \
+        SYSCTL_SNAPSHOT_DIR="${ROLLBACK_DIR}/sysctl-snapshot" \
+        . "${ROLLBACK_DIR}/scripts/lib/rknnovpn_env.sh"
+        rknnovpn_restore_sysctl_snapshots 2>/dev/null || true
+    fi
+}
+
+collect_leftovers() {
+    if [ -f "${ROLLBACK_DIR}/scripts/lib/rknnovpn_netstack.sh" ]; then
+        . "${ROLLBACK_DIR}/scripts/lib/rknnovpn_netstack.sh"
+        rknnovpn_collect_netstack_leftovers 2>/dev/null
+    fi
+}
+
+sleep 10
+if module_is_active; then
+    exit 0
+fi
+
+run_cleanup || true
+restore_sysctls
+leftovers="$(collect_leftovers)"
+if [ -z "$leftovers" ]; then
+    log_msg "rollback cleanup complete"
+    rm -f "$SERVICE_SCRIPT" 2>/dev/null || true
+    rm -rf "$ROLLBACK_DIR" 2>/dev/null || true
+else
+    log_msg "leftovers remain: $leftovers"
+fi
+
+exit 0
+EOF
+    chmod 0700 "$ROLLBACK_SERVICE_SCRIPT" 2>/dev/null || true
+    ui_print "  [*] Rollback guard installed"
+}
+
 file_sha256() {
     file="$1"
     if command -v rknnovpn_install_file_sha256 >/dev/null 2>&1; then
@@ -500,6 +605,7 @@ rknnovpn_installer_run() {
     mark_manual_start_required
     install_binaries
     install_scripts
+    install_rollback_guard || ui_print "  [!] Rollback guard installation failed"
     set_permissions_and_caps
     install_release_catalog
     set_module_permissions

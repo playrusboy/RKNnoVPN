@@ -37,6 +37,7 @@ func BuildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 		cfg.Apps.Mode,
 		cfg.Apps.Packages,
 		cfg.Routing.AlwaysDirectApps,
+		cfg.Routing.AlwaysDirectSystemApps,
 		cfg.Routing.Mode,
 	)
 	chainProxyPorts, chainProxyUIDs, chainProxyRules := core.BuildChainedProxyProtectionEnv(cfg)

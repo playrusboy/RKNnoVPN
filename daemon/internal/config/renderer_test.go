@@ -208,8 +208,10 @@ func TestRenderOmitsClashAPIByDefault(t *testing.T) {
 	if err := json.Unmarshal(data, &rendered); err != nil {
 		t.Fatalf("unmarshal config: %v", err)
 	}
-	if experimental, ok := rendered["experimental"]; ok {
-		t.Fatalf("clash API must be production-off by default, got experimental=%#v", experimental)
+	if experimental, ok := rendered["experimental"].(map[string]any); ok {
+		if _, hasClashAPI := experimental["clash_api"]; hasClashAPI {
+			t.Fatalf("clash API must be production-off by default, got experimental=%#v", experimental)
+		}
 	}
 }
 
@@ -283,9 +285,19 @@ func TestRenderPreservesDNSIPv6ModeWithFakeIP(t *testing.T) {
 	if rules[0].(map[string]any)["action"] != "predefined" {
 		t.Fatalf("AAAA suppression should run before FakeIP: %#v", rules)
 	}
-	if rules[1].(map[string]any)["server"] != "fakeip" {
+	if !hasDNSRuleServer(rules, "fakeip") {
 		t.Fatalf("FakeIP DNS rule should remain after IPv6 suppression: %#v", rules)
 	}
+}
+
+func hasDNSRuleServer(rules []any, server string) bool {
+	for _, rawRule := range rules {
+		rule := rawRule.(map[string]any)
+		if rule["server"] == server {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRenderAddsClashAPIWhenExplicitlyEnabled(t *testing.T) {

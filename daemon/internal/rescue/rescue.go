@@ -316,9 +316,10 @@ func (r *RescueManager) scriptEnv() map[string]string {
 		r.cfg.Apps.Mode,
 		r.cfg.Apps.Packages,
 		r.cfg.Routing.AlwaysDirectApps,
+		r.cfg.Routing.AlwaysDirectSystemApps,
 		r.cfg.Routing.Mode,
 	)
-	privacyGuardPackages := core.ResolveAlwaysDirectPackageNames(r.cfg.Routing.AlwaysDirectApps)
+	privacyGuardPackages := core.ResolveAlwaysDirectPackageNames(r.cfg.Routing.AlwaysDirectApps, r.cfg.Routing.AlwaysDirectSystemApps)
 	chainProxyPorts, chainProxyUIDs, chainProxyRules := core.BuildChainedProxyProtectionEnv(r.cfg)
 
 	return map[string]string{

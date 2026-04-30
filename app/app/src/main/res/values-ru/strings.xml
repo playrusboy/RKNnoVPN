@@ -104,6 +104,7 @@
     <string name="delete_node_confirm">Удалить сервер \"%s\"?</string>
     <string name="cancel">Отмена</string>
     <string name="confirm">Подтвердить</string>
+    <string name="disable">Выключить</string>
     <string name="no_nodes">Серверов нет. Нажмите + чтобы добавить.</string>
     <string name="link_copied">Ссылка скопирована</string>
     <string name="node_source_subscription">Подписка</string>
@@ -154,6 +155,13 @@
     <string name="routing_whitelist">Белый список</string>
     <string name="routing_bypass">Исключения</string>
     <string name="routing_direct">Напрямую</string>
+    <string name="bypass_russia">Российские сайты напрямую</string>
+    <string name="bypass_russia_desc">Важно держать включенным: если выключить, российские сайты и сервисы могут определить VPN и увидеть IP сервера.</string>
+    <string name="vpn_detection_url">https://rks.global/ru/research/vpn-detection/</string>
+    <string name="bypass_russia_disable_title">Опасное выключение</string>
+    <string name="bypass_russia_disable_warning">Эта защита специально направляет российские IP и домены .ru, .su, .рф напрямую. Если выключить её, Яндекс, маркетплейсы, банки, карты, переводчики, встроенные WebView и API внутри других приложений могут увидеть VPN-трафик, связать запросы с IP вашего сервера и показать блокировку или предупреждение. Подробнее: исследование VPN detection ниже. Чтобы выключить защиту, введите \"уверен\".</string>
+    <string name="bypass_russia_disable_input_label">Введите \"уверен\"</string>
+    <string name="bypass_russia_disable_phrase">уверен</string>
     <string name="settings_recovery">Восстановление</string>
     <string name="backend_fallback_policy">Политика восстановления</string>
     <string name="fallback_offer_reset">Предлагать сброс root-части</string>
@@ -185,6 +193,8 @@
     <string name="urltest_url">URL для проверки</string>
     <string name="always_direct_apps">Всегда напрямую</string>
     <string name="always_direct_apps_desc">Эти приложения обходят TPROXY и DNS-перехват до маршрутизации.</string>
+    <string name="always_direct_system_apps">Служебные приложения напрямую</string>
+    <string name="always_direct_system_apps_desc">Системные и служебные приложения Android обходят RKNnoVPN.</string>
     <string name="sharing_mode">Раздача через RKNnoVPN</string>
     <string name="sharing_mode_desc">Направлять трафик клиентов хотспота через RKNnoVPN. Оставьте выключенным, если не раздаёте прокси другим устройствам.</string>
     <string name="sharing_interfaces">Интерфейсы раздачи</string>

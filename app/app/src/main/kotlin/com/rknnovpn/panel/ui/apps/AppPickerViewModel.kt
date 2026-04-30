@@ -30,6 +30,7 @@ private data class RoutingSelection(
     val routingMode: RoutingMode,
     val selectedPackages: Set<String>,
     val alwaysDirectPackages: Set<String>,
+    val alwaysDirectSystemApps: Boolean,
     val appGroupRoutes: Map<String, String>,
     val nodeGroups: List<String>,
 )
@@ -317,7 +318,11 @@ class AppPickerViewModel @Inject constructor(
 
                 // 3. Merge into UI model
                 val appInfoList = installedApps.map { (pkg, label, isSystem) ->
-                    val isAlwaysDirect = AlwaysDirectApps.matches(pkg, daemonSelection.alwaysDirectPackages)
+                    val isAlwaysDirect = isAlwaysDirectApp(
+                        packageName = pkg,
+                        isSystemApp = isSystem,
+                        selection = daemonSelection,
+                    )
                     AppInfo(
                         packageName = pkg,
                         label = label,
@@ -407,9 +412,10 @@ class AppPickerViewModel @Inject constructor(
                             routingMode = selection.routingMode,
                             nodeGroups = selection.nodeGroups,
                             apps = state.apps.map { app ->
-                                val isAlwaysDirect = AlwaysDirectApps.matches(
-                                    app.packageName,
-                                    selection.alwaysDirectPackages,
+                                val isAlwaysDirect = isAlwaysDirectApp(
+                                    packageName = app.packageName,
+                                    isSystemApp = app.isSystemApp,
+                                    selection = selection,
                                 )
                                 app.copy(
                                     isAlwaysDirect = isAlwaysDirect,
@@ -453,10 +459,19 @@ private fun ProfileConfig.toRoutingSelection(): RoutingSelection {
         routingMode,
         selected,
         routing.alwaysDirectAppList.toSet(),
+        routing.alwaysDirectSystemApps,
         routing.appGroupRoutes,
         nodeGroups,
     )
 }
+
+private fun isAlwaysDirectApp(
+    packageName: String,
+    isSystemApp: Boolean,
+    selection: RoutingSelection,
+): Boolean =
+    (selection.alwaysDirectSystemApps && isSystemApp) ||
+        AlwaysDirectApps.matches(packageName, selection.alwaysDirectPackages)
 
 enum class AppTemplate {
     BROWSERS,

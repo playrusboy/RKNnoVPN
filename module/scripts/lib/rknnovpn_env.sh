@@ -15,6 +15,9 @@ LOG_DIR="${LOG_DIR:-${RKNNOVPN_DIR}/logs}"
 BACKUP_DIR="${BACKUP_DIR:-${RKNNOVPN_DIR}/backup}"
 PROFILES_DIR="${PROFILES_DIR:-${RKNNOVPN_DIR}/profiles}"
 RELEASES_DIR="${RELEASES_DIR:-${RKNNOVPN_DIR}/releases}"
+ROLLBACK_DIR="${ROLLBACK_DIR:-/data/adb/rknnovpn-rollback}"
+ROLLBACK_SYSCTL_SNAPSHOT_DIR="${ROLLBACK_SYSCTL_SNAPSHOT_DIR:-${ROLLBACK_DIR}/sysctl-snapshot}"
+SYSCTL_SNAPSHOT_DIR="${SYSCTL_SNAPSHOT_DIR:-${ROLLBACK_SYSCTL_SNAPSHOT_DIR}}"
 
 RESET_LOCK="${RESET_LOCK:-${RUN_DIR}/reset.lock}"
 ACTIVE_FILE="${ACTIVE_FILE:-${RUN_DIR}/active}"
@@ -86,6 +89,50 @@ rknnovpn_apply_data_permissions() {
     chown -R 0:0 "$DATA_DIR" "$LOG_DIR" "$BACKUP_DIR" "$PROFILES_DIR" "$RELEASES_DIR" 2>/dev/null || true
     chmod 0700 "$DATA_DIR" "$LOG_DIR" "$BACKUP_DIR" "$PROFILES_DIR" "$RELEASES_DIR" 2>/dev/null || true
     find "$LOG_DIR" -type f -exec chmod 0600 {} \; 2>/dev/null || true
+}
+
+rknnovpn_sysctl_snapshot_key() {
+    printf '%s' "$1" | sed 's#^/##; s#[^A-Za-z0-9._-]#_#g'
+}
+
+rknnovpn_snapshot_sysctl_once() {
+    _path="$1"
+    [ -f "$_path" ] || return 0
+    mkdir -p "$SYSCTL_SNAPSHOT_DIR" 2>/dev/null || return 1
+
+    _key="$(rknnovpn_sysctl_snapshot_key "$_path")"
+    _value_file="${SYSCTL_SNAPSHOT_DIR}/${_key}.value"
+    _path_file="${SYSCTL_SNAPSHOT_DIR}/${_key}.path"
+    if [ ! -f "$_value_file" ]; then
+        cat "$_path" > "$_value_file" 2>/dev/null || return 1
+        printf '%s\n' "$_path" > "$_path_file" 2>/dev/null || return 1
+        chmod 0600 "$_value_file" "$_path_file" 2>/dev/null || true
+    fi
+    return 0
+}
+
+rknnovpn_set_sysctl() {
+    _path="$1"
+    _value="$2"
+    [ -f "$_path" ] || return 0
+    rknnovpn_snapshot_sysctl_once "$_path" || true
+    printf '%s\n' "$_value" > "$_path" 2>/dev/null
+}
+
+rknnovpn_restore_sysctl_snapshots() {
+    [ -d "$SYSCTL_SNAPSHOT_DIR" ] || return 0
+    _restored=0
+    for _value_file in "$SYSCTL_SNAPSHOT_DIR"/*.value; do
+        [ -f "$_value_file" ] || continue
+        _path_file="${_value_file%.value}.path"
+        [ -f "$_path_file" ] || continue
+        _path="$(cat "$_path_file" 2>/dev/null)"
+        [ -f "$_path" ] || continue
+        _value="$(cat "$_value_file" 2>/dev/null)"
+        printf '%s\n' "$_value" > "$_path" 2>/dev/null && _restored=$((_restored + 1))
+    done
+    rm -rf "$SYSCTL_SNAPSHOT_DIR" 2>/dev/null || true
+    return 0
 }
 
 rknnovpn_enter_reset_mode() {

@@ -337,6 +337,8 @@ validate_runtime_values() {
     validate_enum IPV6_MANGLE_APPLIED "$IPV6_MANGLE_APPLIED" "0 1"
     validate_enum IPV6_ROUTE_APPLIED "$IPV6_ROUTE_APPLIED" "0 1"
     validate_enum IPV6_FAIL_CLOSED "$IPV6_FAIL_CLOSED" "0 1"
+    BLOCK_QUIC="${BLOCK_QUIC:-0}"
+    validate_enum BLOCK_QUIC "$BLOCK_QUIC" "0 1"
 }
 
 write_snapshot_var() {
@@ -358,7 +360,7 @@ save_snapshot() {
             PROXY_UIDS DIRECT_UIDS BYPASS_UIDS DNS_SCOPE DNS_MODE \
             PROXY_MODE ROUTE_RULE_PREF ROUTE_RULE_PREF_V6 IPV6_MODE \
             IPV6_FAIL_CLOSED IPV6_MANGLE_APPLIED IPV6_ROUTE_APPLIED \
-            SHARING_MODE; do
+            BLOCK_QUIC SHARING_MODE; do
             write_snapshot_var "$_name"
         done
     } > "$_tmp"
@@ -415,6 +417,7 @@ load_snapshot() {
                 IPV6_FAIL_CLOSED) IPV6_FAIL_CLOSED="$_value" ;;
                 IPV6_MANGLE_APPLIED) IPV6_MANGLE_APPLIED="$_value" ;;
                 IPV6_ROUTE_APPLIED) IPV6_ROUTE_APPLIED="$_value" ;;
+                BLOCK_QUIC) BLOCK_QUIC="$_value" ;;
                 SHARING_MODE) SHARING_MODE="$_value" ;;
                 *)
                     log_error "Unknown runtime snapshot key ${_name}"

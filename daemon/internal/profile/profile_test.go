@@ -55,6 +55,49 @@ func TestFromConfigDoesNotCreateNodeFromLegacyConfigOnlyState(t *testing.T) {
 	}
 }
 
+func TestProfileRoutingProjectsRussiaAndSeparateRuleIPs(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Routing.BypassRussia = true
+	cfg.Routing.CustomDirect = []string{"market.yandex.ru", "203.0.113.0/24"}
+	cfg.Routing.CustomProxy = []string{"proxy.example", "198.51.100.0/24"}
+	cfg.Routing.CustomBlock = []string{"ads.example", "192.0.2.0/24"}
+
+	doc := FromConfig(cfg)
+	if !doc.Routing.BypassRussia {
+		t.Fatalf("bypassRussia was not projected: %#v", doc.Routing)
+	}
+	for _, tt := range []struct {
+		name   string
+		values []string
+		want   string
+	}{
+		{"direct domain", doc.Routing.DirectDomains, "market.yandex.ru"},
+		{"direct ip", doc.Routing.DirectIps, "203.0.113.0/24"},
+		{"proxy domain", doc.Routing.ProxyDomains, "proxy.example"},
+		{"proxy ip", doc.Routing.ProxyIps, "198.51.100.0/24"},
+		{"block domain", doc.Routing.BlockDomains, "ads.example"},
+		{"block ip", doc.Routing.BlockIps, "192.0.2.0/24"},
+	} {
+		if !containsString(tt.values, tt.want) {
+			t.Fatalf("%s missing %q in %#v", tt.name, tt.want, tt.values)
+		}
+	}
+
+	doc.Routing.BypassRussia = false
+	doc.Routing.DirectDomains = []string{"ya.ru"}
+	doc.Routing.DirectIps = []string{"5.255.255.0/24"}
+	next, _, err := ApplyToConfig(cfg, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Routing.BypassRussia {
+		t.Fatalf("bypassRussia was not applied: %#v", next.Routing)
+	}
+	if !containsString(next.Routing.CustomDirect, "ya.ru") || !containsString(next.Routing.CustomDirect, "5.255.255.0/24") {
+		t.Fatalf("direct domains and IPs were not merged into custom_direct: %#v", next.Routing.CustomDirect)
+	}
+}
+
 func TestDecodeStrictDocumentRejectsUnknownProfileFields(t *testing.T) {
 	raw := []byte(`{
 		"profileSchemaVersion": 2,
@@ -74,6 +117,15 @@ func TestDecodeStrictDocumentRejectsUnknownProfileFields(t *testing.T) {
 	if _, err := DecodeStrictDocument(raw); err == nil {
 		t.Fatalf("unknown profile field should be rejected")
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDecodeStrictDocumentRejectsUnknownNodeFieldsButAllowsOutboundAndExtra(t *testing.T) {
