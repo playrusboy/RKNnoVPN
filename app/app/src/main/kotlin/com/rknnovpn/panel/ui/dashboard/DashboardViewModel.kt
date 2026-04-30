@@ -315,6 +315,7 @@ private fun String.operationNameRes(): Int = when (this) {
     "start" -> com.rknnovpn.panel.R.string.operation_start
     "stop" -> com.rknnovpn.panel.R.string.operation_stop
     "restart", "reload" -> com.rknnovpn.panel.R.string.operation_reload
+    "applyDesiredState" -> com.rknnovpn.panel.R.string.operation_apply_desired_state
     "profile-apply" -> com.rknnovpn.panel.R.string.operation_profile_apply
     "config-mutation" -> com.rknnovpn.panel.R.string.operation_config_import
     "reset" -> com.rknnovpn.panel.R.string.reset_network_rules

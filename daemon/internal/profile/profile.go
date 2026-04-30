@@ -2,13 +2,11 @@ package profile
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/netip"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -144,16 +142,6 @@ type Warning struct {
 }
 
 type MergeStats = map[string]int
-
-type RejectedSubscriptionNode struct {
-	Link     string `json:"link,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Protocol string `json:"protocol,omitempty"`
-	Server   string `json:"server,omitempty"`
-	Port     int    `json:"port,omitempty"`
-	Code     string `json:"code"`
-	Reason   string `json:"reason"`
-}
 
 func FromConfig(cfg *config.Config) Document {
 	if cfg == nil {
@@ -444,248 +432,6 @@ func MergeNodes(current Document, incoming []Node, markRemovedStale bool) (Docum
 	return next, stats
 }
 
-func MergeSubscriptionNodes(current Document, subscription Subscription, incoming []Node) (Document, map[string]int) {
-	stats := map[string]int{"added": 0, "updated": 0, "unchanged": 0, "stale": 0}
-	subscription.ProviderKey = strings.TrimSpace(subscription.ProviderKey)
-	subscription.URL = strings.TrimSpace(subscription.URL)
-	if subscription.ProviderKey == "" {
-		return current, stats
-	}
-	for i := range incoming {
-		incoming[i].Source.Type = "SUBSCRIPTION"
-		if incoming[i].Source.ProviderKey == "" {
-			incoming[i].Source.ProviderKey = subscription.ProviderKey
-		}
-		if incoming[i].Source.URL == "" {
-			incoming[i].Source.URL = subscription.URL
-		}
-	}
-	next, stats := MergeNodes(current, incoming, false)
-	seenIncoming := map[string]bool{}
-	for _, node := range incoming {
-		if key := nodeMatchKey(node); key != "" {
-			seenIncoming[key] = true
-		}
-	}
-	for i, node := range next.Nodes {
-		if !strings.EqualFold(node.Source.Type, "SUBSCRIPTION") || node.Source.ProviderKey != subscription.ProviderKey {
-			continue
-		}
-		if seenIncoming[nodeMatchKey(node)] {
-			continue
-		}
-		if !node.Stale {
-			stats["stale"]++
-		}
-		next.Nodes[i].Stale = true
-	}
-	if next.ActiveNodeID == "" || nodeByID(next.Nodes, next.ActiveNodeID) == nil || nodeByID(next.Nodes, next.ActiveNodeID).Stale {
-		next.ActiveNodeID = ""
-		for _, node := range next.Nodes {
-			if !node.Stale {
-				next.ActiveNodeID = node.ID
-				break
-			}
-		}
-	}
-	return next, stats
-}
-
-func ProviderKeyFor(rawURL string) string {
-	return strings.ToLower(strings.TrimSpace(rawURL))
-}
-
-func ParseSubscription(body string, headers map[string]string, rawURL string, nowMillis int64) ([]Node, Subscription, int, []RejectedSubscriptionNode) {
-	text := decodeSubscriptionBody(body)
-	nodes := make([]Node, 0)
-	rejected := make([]RejectedSubscriptionNode, 0)
-	failures := 0
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		node, err := ParseLink(line, nowMillis)
-		if err != nil {
-			failures++
-			continue
-		}
-		if IsDisallowedSubscriptionEndpoint(node.Server) {
-			rejected = append(rejected, RejectedSubscriptionNode{
-				Link:     line,
-				Name:     node.Name,
-				Protocol: node.Protocol,
-				Server:   node.Server,
-				Port:     node.Port,
-				Code:     "subscription_local_endpoint",
-				Reason:   fmt.Sprintf("subscription node %s:%d points to a local, private, or reserved endpoint", node.Server, node.Port),
-			})
-			continue
-		}
-		node.Source = NodeSource{
-			Type:        "SUBSCRIPTION",
-			URL:         rawURL,
-			ProviderKey: ProviderKeyFor(rawURL),
-			LastSeenAt:  nowMillis,
-		}
-		nodes = append(nodes, node)
-	}
-	info := subscriptionInfoFromHeaders(headers)
-	sub := Subscription{
-		ProviderKey:       ProviderKeyFor(rawURL),
-		URL:               rawURL,
-		LastFetchedAt:     nowMillis,
-		LastSeenNodeCount: len(nodes),
-		UploadBytes:       info.UploadBytes,
-		DownloadBytes:     info.DownloadBytes,
-		TotalBytes:        info.TotalBytes,
-		ExpireTimestamp:   info.ExpireTimestamp,
-		ParseFailures:     failures,
-	}
-	return nodes, sub, failures, rejected
-}
-
-type subscriptionInfo struct {
-	UploadBytes     int64
-	DownloadBytes   int64
-	TotalBytes      int64
-	ExpireTimestamp int64
-}
-
-func subscriptionInfoFromHeaders(headers map[string]string) subscriptionInfo {
-	var result subscriptionInfo
-	for key, value := range headers {
-		if !strings.EqualFold(key, "subscription-userinfo") {
-			continue
-		}
-		for _, part := range strings.Split(value, ";") {
-			k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
-			if !ok {
-				continue
-			}
-			n, _ := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
-			switch strings.ToLower(strings.TrimSpace(k)) {
-			case "upload":
-				result.UploadBytes = n
-			case "download":
-				result.DownloadBytes = n
-			case "total":
-				result.TotalBytes = n
-			case "expire":
-				result.ExpireTimestamp = n
-			}
-		}
-	}
-	return result
-}
-
-func ParseLink(raw string, nowMillis int64) (Node, error) {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return Node{}, err
-	}
-	proto := normalizeProtocol(parsed.Scheme)
-	if proto == "" {
-		return Node{}, fmt.Errorf("unsupported scheme")
-	}
-	host := parsed.Hostname()
-	port, _ := strconv.Atoi(parsed.Port())
-	if host == "" || port <= 0 || port > 65535 {
-		return Node{}, fmt.Errorf("missing host or port")
-	}
-	name, _ := url.QueryUnescape(parsed.Fragment)
-	if name == "" {
-		name = host
-	}
-	node := Node{
-		ID:        stableNodeID(proto, host, port, parsed.User.String()),
-		Name:      name,
-		Protocol:  proto,
-		Server:    host,
-		Port:      port,
-		Link:      raw,
-		Group:     "Default",
-		CreatedAt: nowMillis,
-		Source:    NodeSource{Type: "MANUAL"},
-	}
-	node.Outbound = buildOutbound(node, parsed)
-	return node, nil
-}
-
-func buildOutbound(node Node, parsed *url.URL) json.RawMessage {
-	settings := map[string]interface{}{}
-	userSecret := ""
-	if parsed.User != nil {
-		userSecret = parsed.User.Username()
-	}
-	switch node.Protocol {
-	case "vless", "vmess":
-		user := map[string]interface{}{"id": userSecret}
-		if flow := parsed.Query().Get("flow"); flow != "" {
-			user["flow"] = flow
-		}
-		settings["vnext"] = []interface{}{map[string]interface{}{
-			"address": node.Server,
-			"port":    node.Port,
-			"users":   []interface{}{user},
-		}}
-	case "trojan", "shadowsocks":
-		server := map[string]interface{}{
-			"address":  node.Server,
-			"port":     node.Port,
-			"password": userSecret,
-		}
-		if node.Protocol == "shadowsocks" {
-			method := parsed.Query().Get("method")
-			if method == "" && strings.Contains(userSecret, ":") {
-				method, userSecret, _ = strings.Cut(userSecret, ":")
-				server["password"] = userSecret
-			}
-			if method == "" {
-				method = "aes-128-gcm"
-			}
-			server["method"] = method
-		}
-		settings["servers"] = []interface{}{server}
-	case "socks":
-		settings["address"] = node.Server
-		settings["port"] = node.Port
-		settings["version"] = "5"
-		if parsed.User != nil {
-			settings["username"] = parsed.User.Username()
-			if password, ok := parsed.User.Password(); ok {
-				settings["password"] = password
-			}
-		}
-	}
-	outbound := map[string]interface{}{
-		"protocol": node.Protocol,
-		"settings": settings,
-	}
-	if security := parsed.Query().Get("security"); security != "" {
-		stream := map[string]interface{}{"security": security}
-		if sni := parsed.Query().Get("sni"); sni != "" {
-			stream["tlsSettings"] = map[string]interface{}{"serverName": sni}
-		}
-		outbound["streamSettings"] = stream
-	}
-	raw, _ := json.Marshal(outbound)
-	return raw
-}
-
-func decodeSubscriptionBody(body string) string {
-	trimmed := strings.TrimSpace(body)
-	if strings.Contains(trimmed, "://") {
-		return trimmed
-	}
-	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
-		if decoded, err := enc.DecodeString(trimmed); err == nil && strings.Contains(string(decoded), "://") {
-			return string(decoded)
-		}
-	}
-	return trimmed
-}
-
 func normalizeSubscriptions(subscriptions []Subscription, nodes []Node) []Subscription {
 	byKey := make(map[string]Subscription)
 	for _, sub := range subscriptions {
@@ -962,28 +708,6 @@ func isValidAndroidPackageName(value string) bool {
 	return true
 }
 
-func stableNodeID(protocol, host string, port int, secret string) string {
-	clean := strings.ToLower(strings.TrimSpace(protocol + "-" + host + "-" + strconv.Itoa(port)))
-	clean = strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			return r
-		}
-		return '-'
-	}, clean)
-	clean = strings.Trim(clean, "-")
-	if clean == "" {
-		clean = "node"
-	}
-	if secret != "" {
-		sum := 0
-		for _, r := range secret {
-			sum = (sum*31 + int(r)) % 100000
-		}
-		clean = fmt.Sprintf("%s-%05d", clean, sum)
-	}
-	return clean
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -1044,7 +768,7 @@ func isLocalSubscriptionHostname(host string) bool {
 		return true
 	}
 	for _, suffix := range localSubscriptionHostSuffixes {
-		if strings.HasSuffix(host, suffix) {
+		if host == strings.TrimPrefix(suffix, ".") || strings.HasSuffix(host, suffix) {
 			return true
 		}
 	}

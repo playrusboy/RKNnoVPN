@@ -165,6 +165,18 @@ func (o *Orchestrator) ApplyDesiredState(desired DesiredState) error {
 	return nil
 }
 
+func (o *Orchestrator) ValidateDesiredState(desired DesiredState) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if err := o.busyLocked(); err != nil {
+		return err
+	}
+	if desired.BackendKind == "" {
+		desired.BackendKind = o.desired.BackendKind
+	}
+	return o.validateDesiredLocked(desired)
+}
+
 func (o *Orchestrator) Status() Status {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -872,7 +884,25 @@ func cloneCompatibilityStatus(compatibility CompatibilityStatus) CompatibilitySt
 	copy := compatibility
 	copy.Capabilities = append([]string(nil), compatibility.Capabilities...)
 	copy.SupportedMethods = append([]string(nil), compatibility.SupportedMethods...)
+	copy.APKRequiredMethods = append([]string(nil), compatibility.APKRequiredMethods...)
+	copy.ErrorCodes = append([]string(nil), compatibility.ErrorCodes...)
+	copy.CompatibilityPolicies = append([]string(nil), compatibility.CompatibilityPolicies...)
+	copy.OperationPolicies = cloneOperationPolicies(compatibility.OperationPolicies)
 	copy.Methods = append([]MethodCapability(nil), compatibility.Methods...)
+	return copy
+}
+
+func cloneOperationPolicies(policies map[string]OperationPolicy) map[string]OperationPolicy {
+	if len(policies) == 0 {
+		return nil
+	}
+	copy := make(map[string]OperationPolicy, len(policies))
+	for operationType, policy := range policies {
+		copy[operationType] = OperationPolicy{
+			Stages:     append([]string(nil), policy.Stages...),
+			ErrorCodes: append([]string(nil), policy.ErrorCodes...),
+		}
+	}
 	return copy
 }
 

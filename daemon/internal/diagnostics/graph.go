@@ -47,6 +47,8 @@ func BuildGraphFromSummary(summary Summary) Graph {
 	graph.addFact("routing.mode", summary.Routing.Mode, false)
 	graph.addFact("compatibility.daemon_version", summary.Compatibility.DaemonVersion, false)
 	graph.addFact("compatibility.module_version", summary.Compatibility.ModuleVersion, false)
+	graph.addFact("compatibility.ipc_contract_version", summary.Compatibility.IPCContractVersion, false)
+	graph.addFact("compatibility.apk_required_method_count", summary.Compatibility.APKRequiredMethodCount, false)
 
 	graph.addCheck(Check{
 		ID:       "runtime.readiness",

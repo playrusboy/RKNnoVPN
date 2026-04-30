@@ -10,9 +10,8 @@ import (
 type desiredStateApplyStage string
 
 const (
-	desiredStateApplyStageRuntime desiredStateApplyStage = "runtime"
-	desiredStateApplyStagePersist desiredStateApplyStage = "persist"
-	desiredStateApplyStageSync    desiredStateApplyStage = "sync"
+	desiredStateApplyStageValidate desiredStateApplyStage = "validate"
+	desiredStateApplyStagePersist  desiredStateApplyStage = "persist"
 )
 
 type desiredStateApplyError struct {
@@ -48,14 +47,11 @@ func (d *daemon) syncRuntimeV2DesiredState() error {
 
 func (d *daemon) applyDesiredStateV2(desired runtimev2.DesiredState) (runtimev2.Status, error) {
 	desired = rootruntime.CompleteDesiredState(desired, d.desiredStateV2())
-	if err := d.runtimeV2.ApplyDesiredState(desired); err != nil {
-		return runtimev2.Status{}, desiredStateApplyError{stage: desiredStateApplyStageRuntime, err: err}
+	if err := d.runtimeV2.ValidateDesiredState(desired); err != nil {
+		return runtimev2.Status{}, desiredStateApplyError{stage: desiredStateApplyStageValidate, err: err}
 	}
 	if err := d.persistDesiredStateV2(desired); err != nil {
 		return runtimev2.Status{}, desiredStateApplyError{stage: desiredStateApplyStagePersist, err: fmt.Errorf("persist desired state: %w", err)}
-	}
-	if err := d.syncRuntimeV2DesiredState(); err != nil {
-		return runtimev2.Status{}, desiredStateApplyError{stage: desiredStateApplyStageSync, err: fmt.Errorf("sync desired state: %w", err)}
 	}
 	return d.runtimeV2.Status(), nil
 }

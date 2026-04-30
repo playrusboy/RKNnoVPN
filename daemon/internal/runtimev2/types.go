@@ -12,7 +12,7 @@ type Phase string
 
 const (
 	PhaseStopped         Phase = "STOPPED"
-	PhaseApplying        Phase = "APPLYING" // legacy coarse in-flight phase
+	PhaseApplying        Phase = "APPLYING" // coarse in-flight phase
 	PhaseStarting        Phase = "STARTING"
 	PhaseConfigChecked   Phase = "CONFIG_CHECKED"
 	PhaseCoreSpawned     Phase = "CORE_SPAWNED"
@@ -30,16 +30,17 @@ const (
 type OperationKind string
 
 const (
-	OperationStart          OperationKind = "start"
-	OperationStop           OperationKind = "stop"
-	OperationRestart        OperationKind = "restart"
-	OperationReset          OperationKind = "reset"
-	OperationReload         OperationKind = "reload"
-	OperationConfigMutation OperationKind = "config-mutation"
-	OperationProfileApply   OperationKind = "profile-apply"
-	OperationNetworkChange  OperationKind = "network-change"
-	OperationRescue         OperationKind = "rescue"
-	OperationUpdateInstall  OperationKind = "update-install"
+	OperationStart             OperationKind = "start"
+	OperationStop              OperationKind = "stop"
+	OperationRestart           OperationKind = "restart"
+	OperationReset             OperationKind = "reset"
+	OperationReload            OperationKind = "reload"
+	OperationApplyDesiredState OperationKind = "applyDesiredState"
+	OperationConfigMutation    OperationKind = "config-mutation"
+	OperationProfileApply      OperationKind = "profile-apply"
+	OperationNetworkChange     OperationKind = "network-change"
+	OperationRescue            OperationKind = "rescue"
+	OperationUpdateInstall     OperationKind = "update-install"
 )
 
 type FallbackPolicy string
@@ -222,24 +223,35 @@ type BackendCapability struct {
 }
 
 type CompatibilityStatus struct {
-	DaemonVersion          string             `json:"daemonVersion,omitempty"`
-	ModuleVersion          string             `json:"moduleVersion,omitempty"`
-	CurrentReleaseVersion  string             `json:"currentReleaseVersion,omitempty"`
-	CurrentReleaseOK       bool               `json:"currentReleaseOk"`
-	CurrentReleaseError    string             `json:"currentReleaseError,omitempty"`
-	ControlProtocolVersion int                `json:"controlProtocolVersion"`
-	SchemaVersion          int                `json:"schemaVersion"`
-	PanelMinVersion        string             `json:"panelMinVersion,omitempty"`
-	Capabilities           []string           `json:"capabilities,omitempty"`
-	SupportedMethods       []string           `json:"supportedMethods,omitempty"`
-	Methods                []MethodCapability `json:"methods,omitempty"`
+	DaemonVersion          string                     `json:"daemonVersion,omitempty"`
+	ModuleVersion          string                     `json:"moduleVersion,omitempty"`
+	CurrentReleaseVersion  string                     `json:"currentReleaseVersion,omitempty"`
+	CurrentReleaseOK       bool                       `json:"currentReleaseOk"`
+	CurrentReleaseError    string                     `json:"currentReleaseError,omitempty"`
+	ControlProtocolVersion int                        `json:"controlProtocolVersion"`
+	SchemaVersion          int                        `json:"schemaVersion"`
+	IPCContractVersion     int                        `json:"ipcContractVersion"`
+	PanelMinVersion        string                     `json:"panelMinVersion,omitempty"`
+	Capabilities           []string                   `json:"capabilities,omitempty"`
+	SupportedMethods       []string                   `json:"supportedMethods,omitempty"`
+	APKRequiredMethods     []string                   `json:"apkRequiredMethods,omitempty"`
+	ErrorCodes             []string                   `json:"errorCodes,omitempty"`
+	CompatibilityPolicies  []string                   `json:"compatibilityPolicies,omitempty"`
+	OperationPolicies      map[string]OperationPolicy `json:"operationPolicies,omitempty"`
+	Methods                []MethodCapability         `json:"methods,omitempty"`
+}
+
+type OperationPolicy struct {
+	Stages     []string `json:"stages"`
+	ErrorCodes []string `json:"errorCodes"`
 }
 
 type MethodCapability struct {
-	Method     string `json:"method"`
-	Capability string `json:"capability,omitempty"`
-	Mutating   bool   `json:"mutating"`
-	Async      bool   `json:"async"`
+	Method        string `json:"method"`
+	Capability    string `json:"capability,omitempty"`
+	Compatibility string `json:"compatibility,omitempty"`
+	Mutating      bool   `json:"mutating"`
+	Async         bool   `json:"async"`
 }
 
 type Status struct {

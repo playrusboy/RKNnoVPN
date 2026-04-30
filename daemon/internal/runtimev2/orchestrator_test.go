@@ -92,6 +92,24 @@ func TestStatusIncludesCompatibilitySnapshot(t *testing.T) {
 	}
 }
 
+func TestValidateDesiredStateDoesNotMutateDesiredState(t *testing.T) {
+	o := NewOrchestrator(
+		DesiredState{BackendKind: BackendRootTProxy, ActiveProfileID: "node-1", FallbackPolicy: FallbackOfferReset},
+		&fakeBackend{kind: BackendRootTProxy},
+	)
+
+	if err := o.ValidateDesiredState(DesiredState{FallbackPolicy: FallbackAutoReset}); err != nil {
+		t.Fatalf("validate desired state failed: %v", err)
+	}
+	status := o.Status()
+	if status.DesiredState.FallbackPolicy != FallbackOfferReset {
+		t.Fatalf("validation must not mutate desired state: %#v", status.DesiredState)
+	}
+	if status.DesiredState.ActiveProfileID != "node-1" {
+		t.Fatalf("validation must keep active profile unchanged: %#v", status.DesiredState)
+	}
+}
+
 func TestStopCallsBackendEvenWhenAppliedPhaseStopped(t *testing.T) {
 	backend := &fakeBackend{kind: BackendRootTProxy}
 	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)

@@ -93,36 +93,12 @@ func (h daemonResetHooks) VerifyCleanup() []string {
 	return h.d.collectNetworkLeftovers(cfg)
 }
 
-func (d *daemon) enterResetMode() error {
-	return resetcontroller.EnterResetMode(d.resetPaths(), time.Now())
-}
-
-func (d *daemon) leaveResetMode() error {
-	return resetcontroller.LeaveResetMode(d.resetPaths())
-}
-
 func (d *daemon) shouldSkipRootReconcile() (bool, string) {
 	return resetcontroller.ShouldSkipRootReconcile(d.resetPaths())
 }
 
-func (d *daemon) resetLockPath() string {
-	return d.resetPaths().ResetLock()
-}
-
-func (d *daemon) activeFilePath() string {
-	return d.resetPaths().ActiveMarker()
-}
-
-func (d *daemon) manualFlagPath() string {
-	return d.resetPaths().ManualFlag()
-}
-
 func (d *daemon) resetPaths() resetcontroller.Paths {
 	return resetcontroller.Paths{DataDir: d.dataDir}
-}
-
-func (d *daemon) removeStaleRuntimeFiles() ([]string, error) {
-	return resetcontroller.RemoveStaleRuntimeFiles(d.resetPaths())
 }
 
 func (d *daemon) collectNetworkLeftovers(cfg *config.Config) []string {

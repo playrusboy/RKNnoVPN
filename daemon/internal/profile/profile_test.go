@@ -194,68 +194,6 @@ func TestNormalizeSubscriptionsRecomputesProviderCounts(t *testing.T) {
 	}
 }
 
-func TestMergeSubscriptionNodesCanMarkProviderEmptyRefreshStale(t *testing.T) {
-	current := Document{
-		ID:           "main",
-		Name:         "Primary",
-		ActiveNodeID: "sub-live",
-		Nodes: []Node{
-			{ID: "manual", Name: "Manual", Protocol: "vless", Server: "manual.example", Port: 443, Outbound: json.RawMessage(`{}`), Source: NodeSource{Type: "MANUAL"}},
-			{ID: "sub-live", Name: "Subscription", Protocol: "vless", Server: "sub.example", Port: 443, Outbound: json.RawMessage(`{}`), Source: NodeSource{Type: "SUBSCRIPTION", ProviderKey: "https://sub.example/list"}},
-			{ID: "other-provider", Name: "Other", Protocol: "vless", Server: "other.example", Port: 443, Outbound: json.RawMessage(`{}`), Source: NodeSource{Type: "SUBSCRIPTION", ProviderKey: "https://other.example/list"}},
-		},
-	}
-
-	next, stats := MergeSubscriptionNodes(current, Subscription{
-		ProviderKey: "https://sub.example/list",
-		URL:         "https://sub.example/list",
-	}, nil)
-
-	if stats["stale"] != 1 {
-		t.Fatalf("expected one stale node, got stats %#v", stats)
-	}
-	if !next.Nodes[1].Stale {
-		t.Fatalf("provider node was not marked stale: %#v", next.Nodes[1])
-	}
-	if next.Nodes[0].Stale || next.Nodes[2].Stale {
-		t.Fatalf("empty refresh touched nodes outside provider scope: %#v", next.Nodes)
-	}
-	if next.ActiveNodeID != "manual" {
-		t.Fatalf("active stale node was not repaired to live manual node: %q", next.ActiveNodeID)
-	}
-}
-
-func TestParseSubscriptionRejectsLocalPrivateAndReservedEndpoints(t *testing.T) {
-	body := strings.Join([]string{
-		"vless://00000000-0000-0000-0000-000000000000@example.com:443#public",
-		"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:10808#loopback",
-		"vless://00000000-0000-0000-0000-000000000000@[::ffff:127.0.0.1]:10808#mapped-loopback",
-		"trojan://secret@192.168.1.10:443#private",
-		"ss://secret@100.64.0.1:8388#cgnat",
-		"vless://00000000-0000-0000-0000-000000000000@proxy.local:443#local-domain",
-		"vless://00000000-0000-0000-0000-000000000000@router.home.arpa:443#home-arpa",
-	}, "\n")
-
-	nodes, sub, failures, rejected := ParseSubscription(body, nil, "https://sub.example/list", 123)
-	if failures != 0 {
-		t.Fatalf("unexpected parse failures: %d", failures)
-	}
-	if len(nodes) != 1 || nodes[0].Server != "example.com" {
-		t.Fatalf("expected only public node to survive, got %#v", nodes)
-	}
-	if sub.LastSeenNodeCount != 1 {
-		t.Fatalf("subscription node count should only include accepted nodes: %#v", sub)
-	}
-	if len(rejected) != 6 {
-		t.Fatalf("expected six rejected local/private nodes, got %#v", rejected)
-	}
-	for _, item := range rejected {
-		if item.Code != "subscription_local_endpoint" || item.Server == "" || item.Port == 0 {
-			t.Fatalf("rejection should carry stable code and endpoint metadata: %#v", item)
-		}
-	}
-}
-
 func TestNormalizeRejectsSubscriptionNodeWithLocalEndpoint(t *testing.T) {
 	doc := Document{
 		ID: "main",
@@ -277,5 +215,33 @@ func TestNormalizeRejectsSubscriptionNodeWithLocalEndpoint(t *testing.T) {
 
 	if _, _, err := Normalize(doc); err == nil || !strings.Contains(err.Error(), "must not be local") {
 		t.Fatalf("expected local subscription endpoint rejection, got %v", err)
+	}
+}
+
+func TestIsDisallowedSubscriptionEndpointCoversLocalNamesAndMappedIPs(t *testing.T) {
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"example.com", false},
+		{"localhost", true},
+		{"localhost.", true},
+		{"local", true},
+		{"proxy.local", true},
+		{"lan", true},
+		{"router.lan", true},
+		{"home.arpa", true},
+		{"router.home.arpa.", true},
+		{"127.0.0.1", true},
+		{"::ffff:127.0.0.1", true},
+		{"10.1.2.3", true},
+		{"100.64.0.1", true},
+		{"198.18.0.1", true},
+		{"8.8.8.8", false},
+	}
+	for _, tt := range tests {
+		if got := IsDisallowedSubscriptionEndpoint(tt.host); got != tt.want {
+			t.Fatalf("IsDisallowedSubscriptionEndpoint(%q)=%v, want %v", tt.host, got, tt.want)
+		}
 	}
 }

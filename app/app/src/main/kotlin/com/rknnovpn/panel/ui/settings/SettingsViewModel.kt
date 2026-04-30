@@ -7,6 +7,12 @@ import com.rknnovpn.panel.BuildConfig
 import com.rknnovpn.panel.i18n.UserMessageFormatter
 import com.rknnovpn.panel.ipc.DaemonClient
 import com.rknnovpn.panel.ipc.DaemonClientResult
+import com.rknnovpn.panel.ipc.GeneratedDaemonContract
+import com.rknnovpn.panel.ipc.apkRequiredMethodMismatches
+import com.rknnovpn.panel.ipc.contractSurfaceMismatches
+import com.rknnovpn.panel.ipc.currentReleaseWarning
+import com.rknnovpn.panel.ipc.missingRequiredMethods
+import com.rknnovpn.panel.ipc.releaseMismatch
 import com.rknnovpn.panel.model.ConnectionState
 import com.rknnovpn.panel.model.DaemonStatus
 import com.rknnovpn.panel.model.DnsIpv6Mode
@@ -27,6 +33,18 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 private const val TAG = "SettingsViewModel"
+private val APPLYING_OPERATION_REQUIRED_STAGES = setOf(
+    "validate",
+    "render",
+    "persist-draft",
+    "runtime-apply",
+    "verify",
+    "commit-generation",
+    "cleanup",
+)
+private val APPLYING_OPERATION_KINDS = GeneratedDaemonContract.OPERATION_POLICIES
+    .filterValues { policy -> APPLYING_OPERATION_REQUIRED_STAGES.all { it in policy.stages } }
+    .keys
 
 enum class RoutingMode { GLOBAL, WHITELIST, BYPASS, DIRECT }
 
@@ -813,11 +831,17 @@ class SettingsViewModel @Inject constructor(
                 is DaemonClientResult.Ok -> {
                     val info = result.data
                     val missingMethods = info.missingRequiredMethods(DaemonClient.REQUIRED_METHODS)
+                    val requiredMethodMismatches = info.apkRequiredMethodMismatches(DaemonClient.REQUIRED_METHODS)
+                    val contractSurfaceMismatches = info.contractSurfaceMismatches(DaemonClient.REQUIRED_METHODS)
+                    val releaseMismatch = info.releaseMismatch(BuildConfig.VERSION_NAME)
+                    val currentReleaseWarning = info.currentReleaseWarning()
                     val compatibilityWarning = when {
-                        info.releaseMismatch(BuildConfig.VERSION_NAME) != null ->
-                            info.releaseMismatch(BuildConfig.VERSION_NAME)
-                        info.currentReleaseWarning() != null ->
-                            info.currentReleaseWarning()
+                        releaseMismatch != null -> releaseMismatch
+                        currentReleaseWarning != null -> currentReleaseWarning
+                        requiredMethodMismatches.isNotEmpty() ->
+                            "APK и модуль несовместимы: daemon APK required methods не совпадают (${requiredMethodMismatches.joinToString(", ")})"
+                        contractSurfaceMismatches.isNotEmpty() ->
+                            "APK и модуль несовместимы: IPC contract не совпадает (${contractSurfaceMismatches.joinToString("; ")})"
                         info.controlProtocolVersion in 1 until DaemonClient.MIN_CONTROL_PROTOCOL_VERSION ->
                             messages.get(
                                 com.rknnovpn.panel.R.string.daemon_status_incompatible_protocol,
@@ -965,7 +989,7 @@ class SettingsViewModel @Inject constructor(
                         messages.get(com.rknnovpn.panel.R.string.daemon_status_resetting)
                     status.activeOperation?.kind == "restart" || status.activeOperation?.kind == "reload" ->
                         messages.get(com.rknnovpn.panel.R.string.daemon_status_restarting)
-                    status.activeOperation?.kind == "profile-apply" || status.activeOperation?.kind == "config-mutation" ->
+                    status.activeOperation?.kind in APPLYING_OPERATION_KINDS ->
                         messages.get(com.rknnovpn.panel.R.string.daemon_status_applying)
                     else ->
                         messages.get(com.rknnovpn.panel.R.string.state_connecting)

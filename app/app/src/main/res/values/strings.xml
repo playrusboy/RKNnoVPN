@@ -269,6 +269,7 @@
     <string name="operation_start">Start</string>
     <string name="operation_stop">Stop</string>
     <string name="operation_reload">Reload</string>
+    <string name="operation_apply_desired_state">Apply settings</string>
     <string name="operation_profile_apply">Apply profile</string>
     <string name="operation_config_import">Import config</string>
     <string name="operation_runtime">Runtime operation</string>

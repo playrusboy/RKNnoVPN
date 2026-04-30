@@ -1,5 +1,54 @@
 {
   "version": 1,
+  "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR", "CONFIG_ERROR", "RUNTIME_BUSY", "RESET_IN_PROGRESS"],
+  "compatibilityPolicies": ["release-mismatch-allowed", "requires-schema", "requires-runtime-schema"],
+  "requestExamples": {
+    "DiagnosticsReportRequest": {"lines": 120},
+    "LogsRequest": {"lines": 100},
+    "ResolveUidRequest": {"uid": 10123},
+    "SelfCheckRequest": {"lines": 80},
+    "SetActiveNodeRequest": {"nodeId": "node-1"},
+    "SubscriptionURLRequest": {"url": "https://example.com/sub"},
+    "TestNodesRequest": {"url": "https://www.gstatic.com/generate_204"}
+  },
+  "operationPolicies": {
+    "applyDesiredState": {
+      "stages": ["validate", "render", "runtime-idle", "persist-draft", "runtime-apply", "verify", "commit-generation", "cleanup"],
+      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"]
+    },
+    "reset": {
+      "stages": ["accepted", "activeOperation", "lastOperation"],
+      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"]
+    },
+    "restart": {
+      "stages": ["accepted", "activeOperation", "lastOperation"],
+      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"]
+    },
+    "start": {
+      "stages": ["accepted", "activeOperation", "lastOperation"],
+      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"]
+    },
+    "stop": {
+      "stages": ["accepted", "activeOperation", "lastOperation"],
+      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"]
+    },
+    "update-install": {
+      "stages": ["accepted", "activeOperation", "lastOperation"],
+      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"]
+    },
+    "config-mutation": {
+      "stages": ["validate", "render", "runtime-idle", "persist-draft", "runtime-apply", "verify", "commit-generation", "cleanup"],
+      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"]
+    },
+    "profile-apply": {
+      "stages": ["validate", "render", "runtime-idle", "persist-draft", "runtime-apply", "verify", "commit-generation", "cleanup"],
+      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"]
+    },
+    "update-download": {
+      "stages": ["update-check", "update-download", "update-verify", "persist-artifacts"],
+      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "INTERNAL_ERROR"]
+    }
+  },
   "capabilities": [
     "backend.root-tproxy",
     "backend.reset.structured",
@@ -32,12 +81,16 @@
     "update.install.v1"
   ],
   "apkRequiredMethods": [
+    "app.list",
+    "app.resolveUid",
+    "audit",
     "backend.applyDesiredState",
     "backend.reset",
     "backend.restart",
     "backend.start",
     "backend.status",
     "backend.stop",
+    "config-list",
     "diagnostics.health",
     "diagnostics.report",
     "diagnostics.testNodes",
@@ -80,55 +133,51 @@
     {
       "method": "backend.applyDesiredState",
       "capability": "runtime.v2",
+      "compatibility": "requires-schema",
       "mutating": true,
       "request": "DesiredState",
       "result": "BackendStatusV2",
-      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"],
       "operation": {
-        "type": "applyDesiredState",
-        "stages": ["accepted", "activeOperation", "lastOperation"]
+        "type": "applyDesiredState"
       }
     },
     {
       "method": "backend.reset",
       "capability": "backend.reset.structured",
+      "compatibility": "release-mismatch-allowed",
       "mutating": true,
       "async": true,
       "request": "empty",
       "result": "AcceptedStatus",
-      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"],
       "operation": {
         "type": "reset",
-        "asyncResultVia": "backend.status.lastOperation",
-        "stages": ["accepted", "activeOperation", "lastOperation"]
+        "asyncResultVia": "backend.status.lastOperation"
       }
     },
     {
       "method": "backend.restart",
       "capability": "runtime.v2",
+      "compatibility": "requires-runtime-schema",
       "mutating": true,
       "async": true,
       "request": "empty",
       "result": "AcceptedStatus",
-      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"],
       "operation": {
         "type": "restart",
-        "asyncResultVia": "backend.status.lastOperation",
-        "stages": ["accepted", "activeOperation", "lastOperation"]
+        "asyncResultVia": "backend.status.lastOperation"
       }
     },
     {
       "method": "backend.start",
       "capability": "runtime.v2",
+      "compatibility": "requires-runtime-schema",
       "mutating": true,
       "async": true,
       "request": "empty",
       "result": "AcceptedStatus",
-      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"],
       "operation": {
         "type": "start",
-        "asyncResultVia": "backend.status.lastOperation",
-        "stages": ["accepted", "activeOperation", "lastOperation"]
+        "asyncResultVia": "backend.status.lastOperation"
       }
     },
     {
@@ -141,29 +190,27 @@
     {
       "method": "backend.stop",
       "capability": "runtime.v2",
+      "compatibility": "release-mismatch-allowed",
       "mutating": true,
       "async": true,
       "request": "empty",
       "result": "AcceptedStatus",
-      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"],
       "operation": {
         "type": "stop",
-        "asyncResultVia": "backend.status.lastOperation",
-        "stages": ["accepted", "activeOperation", "lastOperation"]
+        "asyncResultVia": "backend.status.lastOperation"
       }
     },
     {
       "method": "config-import",
       "capability": "config.import.v2",
+      "compatibility": "requires-schema",
       "mutating": true,
       "async": true,
       "request": "Config",
       "result": "ConfigMutationResult",
-      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"],
       "operation": {
         "type": "config-mutation",
-        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation",
-        "stages": ["validate", "render", "persist-draft", "runtime-apply", "verify", "commit-generation", "cleanup"]
+        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation"
       }
     },
     {
@@ -190,6 +237,7 @@
     {
       "method": "diagnostics.report",
       "capability": "diagnostics.bundle.v2",
+      "compatibility": "release-mismatch-allowed",
       "request": "DiagnosticsReportRequest",
       "result": "DiagnosticsReport",
       "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR"]
@@ -204,6 +252,7 @@
     {
       "method": "logs",
       "capability": "runtime.logs",
+      "compatibility": "release-mismatch-allowed",
       "request": "LogsRequest",
       "result": "LogSection[]",
       "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR"]
@@ -211,15 +260,14 @@
     {
       "method": "profile.apply",
       "capability": "profile.apply.v2",
+      "compatibility": "requires-schema",
       "mutating": true,
       "async": true,
       "request": "ProfileApplyRequest|ProfileDocument",
       "result": "ProfileApplyResult",
-      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"],
       "operation": {
         "type": "profile-apply",
-        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation",
-        "stages": ["validate", "render", "persist-draft", "runtime-apply", "verify", "commit-generation", "cleanup"]
+        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation"
       }
     },
     {
@@ -232,34 +280,33 @@
     {
       "method": "profile.importNodes",
       "capability": "profile.importNodes.v2",
+      "compatibility": "requires-schema",
       "mutating": true,
       "async": true,
       "request": "ImportNodesRequest",
       "result": "ProfileApplyResult",
-      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"],
       "operation": {
         "type": "profile-apply",
-        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation",
-        "stages": ["validate", "render", "persist-draft", "runtime-apply", "verify", "commit-generation", "cleanup"]
+        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation"
       }
     },
     {
       "method": "profile.setActiveNode",
       "capability": "profile.apply.v2",
+      "compatibility": "requires-schema",
       "mutating": true,
       "async": true,
       "request": "SetActiveNodeRequest",
       "result": "ProfileApplyResult",
-      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"],
       "operation": {
         "type": "profile-apply",
-        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation",
-        "stages": ["validate", "render", "persist-draft", "runtime-apply", "verify", "commit-generation", "cleanup"]
+        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation"
       }
     },
     {
       "method": "self-check",
       "capability": "privacy.self-check.v1",
+      "compatibility": "release-mismatch-allowed",
       "request": "SelfCheckRequest",
       "result": "SelfCheckReport",
       "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR"]
@@ -274,20 +321,20 @@
     {
       "method": "subscription.refresh",
       "capability": "profile.subscription.v2",
+      "compatibility": "requires-schema",
       "mutating": true,
       "async": true,
       "request": "SubscriptionURLRequest",
       "result": "SubscriptionRefreshResult",
-      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"],
       "operation": {
         "type": "profile-apply",
-        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation",
-        "stages": ["validate", "render", "persist-draft", "runtime-apply", "verify", "commit-generation", "cleanup"]
+        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation"
       }
     },
     {
       "method": "update-check",
       "capability": "update.install.v1",
+      "compatibility": "release-mismatch-allowed",
       "request": "empty",
       "result": "UpdateInfo",
       "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR"]
@@ -295,27 +342,25 @@
     {
       "method": "update-download",
       "capability": "update.install.v1",
+      "compatibility": "release-mismatch-allowed",
       "mutating": true,
-      "request": "UpdateDownloadRequest",
+      "request": "empty",
       "result": "UpdateArtifactSet",
-      "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR"],
       "operation": {
-        "type": "update-download",
-        "stages": ["validate", "download", "verify", "persist-artifacts"]
+        "type": "update-download"
       }
     },
     {
       "method": "update-install",
       "capability": "update.install.v1",
+      "compatibility": "release-mismatch-allowed",
       "mutating": true,
       "async": true,
       "request": "UpdateInstallRequest",
       "result": "AcceptedStatus",
-      "errorCodes": ["INVALID_PARAMS", "RUNTIME_BUSY", "RESET_IN_PROGRESS", "CONFIG_ERROR", "INTERNAL_ERROR"],
       "operation": {
         "type": "update-install",
-        "asyncResultVia": "backend.status.lastOperation",
-        "stages": ["accepted", "activeOperation", "lastOperation"]
+        "asyncResultVia": "backend.status.lastOperation"
       }
     },
     {

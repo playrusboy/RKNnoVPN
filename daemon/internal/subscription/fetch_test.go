@@ -20,7 +20,7 @@ func TestRefreshResultResponseExposesStableRPCFields(t *testing.T) {
 			LastFetchedAt: 123,
 		},
 		Nodes:         []profiledoc.Node{{ID: "node-1"}, {ID: "node-2"}},
-		RejectedNodes: []profiledoc.RejectedSubscriptionNode{{Server: "127.0.0.1", Port: 10808, Code: "subscription_local_endpoint"}},
+		RejectedNodes: []RejectedNode{{Server: "127.0.0.1", Port: 10808, Code: "subscription_local_endpoint"}},
 		ParseFailures: 3,
 		Merge:         map[string]int{"added": 2},
 	}

@@ -1,0 +1,132 @@
+package control
+
+import (
+	"encoding/json"
+	"errors"
+	"log"
+
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
+	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/updater"
+)
+
+type UpdateInstallOperationRunner func(func(generation int64) error) (runtimev2.Status, error)
+
+type UpdateHandlers struct {
+	Version                       string
+	DataDir                       string
+	RuntimeWasRunning             func() bool
+	RuntimeStatus                 RuntimeStatusFunc
+	RunUpdateInstallOperation     UpdateInstallOperationRunner
+	SetOperationStep              func(generation int64, name, status, code, detail string)
+	StopRuntimeForModuleInstall   func() error
+	RestoreRuntimeAfterModuleFail func()
+	RuntimeError                  func(error) *ipc.RPCError
+	Logf                          func(format string, args ...interface{})
+}
+
+func (h UpdateHandlers) UpdateCheck(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	info, err := updater.CheckForUpdate(updater.NormalizeVersionTag(h.Version))
+	if err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInternalError,
+			Message: "update check failed: " + err.Error(),
+		}
+	}
+	return info, nil
+}
+
+func (h UpdateHandlers) UpdateDownload(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	if rpcErr := h.failIfRuntimeOperationActive(); rpcErr != nil {
+		return nil, rpcErr
+	}
+	downloaded, err := updater.RunDownloadTransaction(updater.DownloadTransaction{
+		CurrentVersion: h.Version,
+		DataDir:        h.DataDir,
+		Logf:           h.logf,
+	})
+	if err != nil {
+		if errors.Is(err, updater.ErrNoUpdateAvailable) {
+			return nil, &ipc.RPCError{
+				Code:    ipc.CodeInvalidParams,
+				Message: err.Error(),
+			}
+		}
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInternalError,
+			Message: "download failed: " + err.Error(),
+		}
+	}
+	return downloaded, nil
+}
+
+func (h UpdateHandlers) UpdateInstall(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	artifacts, err := updater.ResolveVerifiedInstallArtifacts(h.DataDir, params)
+	if err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: err.Error(),
+		}
+	}
+	if h.RunUpdateInstallOperation == nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "update install operation runner is not configured"}
+	}
+
+	wasRunning := false
+	if h.RuntimeWasRunning != nil {
+		wasRunning = h.RuntimeWasRunning()
+	}
+	status, err := h.RunUpdateInstallOperation(func(generation int64) error {
+		return updater.RunInstallTransaction(updater.InstallTransaction{
+			DataDir:           h.DataDir,
+			Generation:        generation,
+			Artifacts:         artifacts,
+			WasRuntimeRunning: wasRunning,
+			Hooks: updater.InstallHooks{
+				SetOperationStep: func(name, status, code, detail string) {
+					if h.SetOperationStep != nil {
+						h.SetOperationStep(generation, name, status, code, detail)
+					}
+				},
+				StopRuntimeForModuleInstall:   h.StopRuntimeForModuleInstall,
+				RestoreRuntimeAfterModuleFail: h.RestoreRuntimeAfterModuleFail,
+				RuntimeErrorCode:              rootruntime.RuntimeErrorCode,
+				ScheduleSelfExit: func() {
+					go updater.ScheduleSelfExit(updater.SelfExitDelay)
+				},
+				Logf: h.logf,
+			},
+		})
+	})
+	if err != nil {
+		return nil, h.runtimeError(err)
+	}
+	return status, nil
+}
+
+func (h UpdateHandlers) failIfRuntimeOperationActive() *ipc.RPCError {
+	if h.RuntimeStatus == nil {
+		return nil
+	}
+	status, ok := h.RuntimeStatus()
+	if !ok || status.ActiveOperation == nil {
+		return nil
+	}
+	return h.runtimeError(runtimev2.NewRuntimeBusyError(*status.ActiveOperation))
+}
+
+func (h UpdateHandlers) runtimeError(err error) *ipc.RPCError {
+	if h.RuntimeError != nil {
+		return h.RuntimeError(err)
+	}
+	return &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
+}
+
+func (h UpdateHandlers) logf(format string, args ...interface{}) {
+	if h.Logf != nil {
+		h.Logf(format, args...)
+		return
+	}
+	log.Printf("[updater] "+format, args...)
+}

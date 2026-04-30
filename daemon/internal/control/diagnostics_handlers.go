@@ -1,0 +1,287 @@
+package control
+
+import (
+	"encoding/json"
+	"path/filepath"
+	"time"
+
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
+	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
+)
+
+type DiagnosticsState struct {
+	Config      *config.Config
+	ConfigPath  string
+	ProfilePath string
+	DataDir     string
+}
+
+type DiagnosticsHandlers struct {
+	Version               string
+	CurrentState          func() DiagnosticsState
+	RunHealth             func() *health.HealthResult
+	HealthSnapshot        func(*health.HealthResult, bool) runtimev2.HealthSnapshot
+	RuntimeStatus         func() (runtimev2.Status, bool)
+	NetstackReport        func(*config.Config) netstack.Report
+	NetstackRuntimeReport func(*config.Config) netstack.Report
+	TestNodes             func(url string, timeoutMS int, nodeIDs []string) []runtimev2.NodeProbeResult
+	CoreStartReport       func() core.RuntimeStageReport
+	CoreRuntimeReport     func() core.RuntimeStageReport
+	ReloadReport          func() core.RuntimeStageReport
+	Exec                  diagnostics.ExecCommandFunc
+	Now                   func() time.Time
+}
+
+func (h DiagnosticsHandlers) DiagnosticsReport(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	request, err := DecodeDiagnosticsReportParams(params)
+	if err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: err.Error(),
+		}
+	}
+	return h.buildReport(request.Lines), nil
+}
+
+func (h DiagnosticsHandlers) SelfCheck(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	summary, err := h.BuildSelfCheckSummary(DefaultDiagnosticsReportLines)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
+	}
+	return summary, nil
+}
+
+func (h DiagnosticsHandlers) buildReport(lines int) map[string]interface{} {
+	state := h.state()
+	cfg := state.Config
+	cfgPath := state.ConfigPath
+	profilePath := state.ProfilePath
+	dataDir := state.DataDir
+	if profilePath == "" && cfgPath != "" {
+		profilePath = profiledoc.Path(cfgPath)
+	}
+
+	modulePaths := modulecontract.NewPaths(dataDir)
+	renderedConfigPath := filepath.Join(modulePaths.RenderedConfigDir(), "singbox.json")
+	singBoxPath := filepath.Join(modulePaths.BinDir(), "sing-box")
+
+	healthResult := h.runHealth()
+	healthSnapshot := h.healthSnapshot(healthResult, true)
+	var backendStatus interface{}
+	runtimeStatus, hasRuntimeStatus := h.runtimeStatus()
+	if hasRuntimeStatus {
+		backendStatus = runtimeStatus
+	}
+	moduleVersion := diagnostics.ReadModuleVersion()
+	ports := diagnostics.PortStatuses(cfg)
+	portConflicts := diagnostics.LocalPortConflicts(cfg)
+	netstackReport := h.netstackReport(cfg)
+	netstackRuntimeReport := h.netstackRuntimeReport(cfg)
+	leftovers := netstackReport.Leftovers
+	var nodeResults []runtimev2.NodeProbeResult
+	if cfg != nil && h.TestNodes != nil {
+		nodeResults = h.TestNodes(cfg.Health.URL, 2500, nil)
+	}
+	exec := h.exec()
+	privacy := diagnostics.Privacy(cfg, lines, exec)
+	singBoxCheck := diagnostics.SingBoxCheck(singBoxPath, renderedConfigPath, lines, exec)
+	releaseIntegrity := diagnostics.ReleaseIntegrityReport(dataDir)
+	routingSummary := diagnostics.RoutingSummaryFromConfig(cfg)
+	profileSummary := diagnostics.ProfileSummaryFromConfig(cfg, runtimeStatus)
+	packageResolution := diagnostics.PackageResolutionFromConfig(cfg)
+	summary := diagnostics.WithIPCContractFacts(
+		diagnostics.BuildSummaryWithCanonical(h.Version, ProtocolVersion, runtimeStatus.Canonical, healthSnapshot, leftovers, netstackRuntimeReport, nodeResults, ports, privacy, moduleVersion, singBoxCheck, releaseIntegrity, profileSummary, routingSummary, packageResolution),
+		ipc.ContractVersion(),
+		ipc.APKRequiredMethods(),
+	)
+	versions := addIPCContractFields(map[string]interface{}{
+		"daemon":             h.Version,
+		"core":               h.Version,
+		"daemonctl_expected": h.Version,
+		"panel_min_version":  h.Version,
+		"sing_box":           diagnostics.SingBoxVersion(singBoxPath, lines, exec),
+		"module":             moduleVersion,
+	})
+
+	report := map[string]interface{}{
+		"generated_at":      h.now().Format(time.RFC3339),
+		"summary":           summary,
+		"diagnostics_graph": summary.Graph,
+		"versions":          versions,
+		"device":            diagnostics.DeviceCommands(lines, exec),
+		"paths": map[string]diagnostics.FileStatus{
+			"data_dir":          diagnostics.StatFile(dataDir, false),
+			"current_release":   diagnostics.StatFile(filepath.Join(dataDir, "current"), false),
+			"releases_dir":      diagnostics.StatFile(filepath.Join(dataDir, "releases"), false),
+			"config":            diagnostics.StatFile(cfgPath, false),
+			"profile":           diagnostics.StatFile(profilePath, false),
+			"rendered_singbox":  diagnostics.StatFile(renderedConfigPath, false),
+			"sing_box_binary":   diagnostics.StatFile(singBoxPath, true),
+			"daemon_log":        diagnostics.StatFile(filepath.Join(modulePaths.LogDir(), "daemon.log"), false),
+			"sing_box_log":      diagnostics.StatFile(filepath.Join(modulePaths.LogDir(), "sing-box.log"), false),
+			"daemon_socket":     diagnostics.StatFile(modulePaths.DaemonSocket(), false),
+			"sing_box_pid_file": diagnostics.StatFile(modulePaths.SingBoxPIDFile(), false),
+		},
+		"health": map[string]interface{}{
+			"snapshot": healthSnapshot,
+			"raw":      healthResult,
+		},
+		"canonical_status":    runtimeStatus.Canonical,
+		"backend_status":      backendStatus,
+		"core_start_report":   h.coreStartReport(),
+		"core_runtime_report": h.coreRuntimeReport(),
+		"reload_report":       h.reloadReport(),
+		"ports":               ports,
+		"port_conflicts":      portConflicts,
+		"routing":             routingSummary,
+		"profile":             profileSummary,
+		"package_resolution":  packageResolution,
+		"netstack":            netstackReport,
+		"netstack_runtime":    netstackRuntimeReport,
+		"leftovers":           leftovers,
+		"node_tests":          diagnostics.RedactNodeProbeResults(nodeResults),
+		"logs":                diagnostics.ReadLogSections(diagnostics.DefaultLogFileSpecs(dataDir), lines, 512*1024, diagnostics.RedactText),
+		"config": map[string]diagnostics.JSONSection{
+			"daemon":           diagnostics.ReadRedactedJSONFile(cfgPath),
+			"profile":          diagnostics.ReadRedactedJSONFile(profilePath),
+			"rendered_singbox": diagnostics.ReadRedactedJSONFile(renderedConfigPath),
+		},
+		"runtime":           diagnostics.RuntimeCommands(lines, exec),
+		"privacy":           privacy,
+		"release_integrity": releaseIntegrity,
+	}
+	report["sing_box_check"] = singBoxCheck
+	return report
+}
+
+func (h DiagnosticsHandlers) BuildSelfCheckSummary(lines int) (diagnostics.Summary, error) {
+	state := h.state()
+	cfg := state.Config
+	dataDir := state.DataDir
+	if cfg == nil {
+		return diagnostics.Summary{Status: "failed", Issues: []string{"config unavailable"}, IssueCount: 1}, nil
+	}
+	if lines <= 0 {
+		lines = DefaultDiagnosticsReportLines
+	}
+	modulePaths := modulecontract.NewPaths(dataDir)
+	renderedConfigPath := filepath.Join(modulePaths.RenderedConfigDir(), "singbox.json")
+	singBoxPath := filepath.Join(modulePaths.BinDir(), "sing-box")
+	healthResult := h.runHealth()
+	healthSnapshot := h.healthSnapshot(healthResult, true)
+	netstackReport := h.netstackReport(cfg)
+	netstackRuntimeReport := h.netstackRuntimeReport(cfg)
+	var nodeResults []runtimev2.NodeProbeResult
+	if cfg != nil && h.TestNodes != nil {
+		nodeResults = h.TestNodes(cfg.Health.URL, 2500, nil)
+	}
+	runtimeStatus, _ := h.runtimeStatus()
+	exec := h.exec()
+	return diagnostics.WithIPCContractFacts(
+		diagnostics.BuildSummaryWithCanonical(
+			h.Version,
+			ProtocolVersion,
+			runtimeStatus.Canonical,
+			healthSnapshot,
+			netstackReport.Leftovers,
+			netstackRuntimeReport,
+			nodeResults,
+			diagnostics.PortStatuses(cfg),
+			diagnostics.Privacy(cfg, lines, exec),
+			diagnostics.ReadModuleVersion(),
+			diagnostics.SingBoxCheck(singBoxPath, renderedConfigPath, lines, exec),
+			diagnostics.ReleaseIntegrityReport(dataDir),
+			diagnostics.ProfileSummaryFromConfig(cfg, runtimeStatus),
+			diagnostics.RoutingSummaryFromConfig(cfg),
+			diagnostics.PackageResolutionFromConfig(cfg),
+		),
+		ipc.ContractVersion(),
+		ipc.APKRequiredMethods(),
+	), nil
+}
+
+func (h DiagnosticsHandlers) state() DiagnosticsState {
+	if h.CurrentState != nil {
+		return h.CurrentState()
+	}
+	return DiagnosticsState{}
+}
+
+func (h DiagnosticsHandlers) runHealth() *health.HealthResult {
+	if h.RunHealth != nil {
+		return h.RunHealth()
+	}
+	return nil
+}
+
+func (h DiagnosticsHandlers) healthSnapshot(result *health.HealthResult, allowEgressProbe bool) runtimev2.HealthSnapshot {
+	if h.HealthSnapshot != nil {
+		return h.HealthSnapshot(result, allowEgressProbe)
+	}
+	return runtimev2.HealthSnapshot{}
+}
+
+func (h DiagnosticsHandlers) runtimeStatus() (runtimev2.Status, bool) {
+	if h.RuntimeStatus != nil {
+		return h.RuntimeStatus()
+	}
+	return runtimev2.Status{}, false
+}
+
+func (h DiagnosticsHandlers) netstackReport(cfg *config.Config) netstack.Report {
+	if h.NetstackReport != nil {
+		return h.NetstackReport(cfg)
+	}
+	return netstack.Report{}
+}
+
+func (h DiagnosticsHandlers) netstackRuntimeReport(cfg *config.Config) netstack.Report {
+	if h.NetstackRuntimeReport != nil {
+		return h.NetstackRuntimeReport(cfg)
+	}
+	return netstack.Report{}
+}
+
+func (h DiagnosticsHandlers) coreStartReport() core.RuntimeStageReport {
+	if h.CoreStartReport != nil {
+		return h.CoreStartReport()
+	}
+	return core.RuntimeStageReport{}
+}
+
+func (h DiagnosticsHandlers) coreRuntimeReport() core.RuntimeStageReport {
+	if h.CoreRuntimeReport != nil {
+		return h.CoreRuntimeReport()
+	}
+	return core.RuntimeStageReport{}
+}
+
+func (h DiagnosticsHandlers) reloadReport() core.RuntimeStageReport {
+	if h.ReloadReport != nil {
+		return h.ReloadReport()
+	}
+	return core.RuntimeStageReport{}
+}
+
+func (h DiagnosticsHandlers) exec() diagnostics.ExecCommandFunc {
+	if h.Exec != nil {
+		return h.Exec
+	}
+	return func(name string, args ...string) (string, error) {
+		return "", nil
+	}
+}
+
+func (h DiagnosticsHandlers) now() time.Time {
+	if h.Now != nil {
+		return h.Now()
+	}
+	return time.Now()
+}

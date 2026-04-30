@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/control"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
@@ -79,17 +80,6 @@ func TestRegisteredHandlersMatchIPCContract(t *testing.T) {
 	}
 }
 
-func TestDaemonctlCommandsMatchIPCContract(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "daemonctl", "main.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := quotedMapKeysInVar(string(data), "commands")
-	if !slices.Equal(got, ipc.SupportedMethods()) {
-		t.Fatalf("daemonctl command table drifted from IPC contract:\ndaemonctl=%#v\ncontract=%#v", got, ipc.SupportedMethods())
-	}
-}
-
 func TestGeneratedKotlinRequiredMethodsMatchIPCContract(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "app", "app", "src", "main", "kotlin", "com", "rknnovpn", "panel", "ipc", "GeneratedDaemonContract.kt"))
 	if err != nil {
@@ -108,18 +98,6 @@ func TestGeneratedKotlinRequiredMethodsMatchIPCContract(t *testing.T) {
 			t.Fatalf("generated APK_REQUIRED_METHODS missing APK-used contract method %s: %#v", method, required)
 		}
 	}
-}
-
-func quotedMapKeysInVar(source string, varName string) []string {
-	block := extractInitializerBlock(source, varName)
-	re := regexp.MustCompile(`(?m)^\s*"([^"]+)"\s*:`)
-	matches := re.FindAllStringSubmatch(block, -1)
-	values := make([]string, 0, len(matches))
-	for _, match := range matches {
-		values = append(values, match[1])
-	}
-	slices.Sort(values)
-	return values
 }
 
 func quotedSetValuesInKotlinVar(source string, varName string) []string {
@@ -192,7 +170,7 @@ func TestDiagnosticKeepsNodeProbeEndpointMetadata(t *testing.T) {
 func TestDiagnosticSummaryFlagsTCPOnlyAndLeftovers(t *testing.T) {
 	summary := diagnostics.BuildSummary(
 		Version,
-		controlProtocolVersion,
+		control.ProtocolVersion,
 		runtimev2.HealthSnapshot{
 			CoreReady:    true,
 			RoutingReady: true,
@@ -234,7 +212,7 @@ func TestDiagnosticSummaryFlagsTCPOnlyAndLeftovers(t *testing.T) {
 func TestDiagnosticSummaryFlagsPrivacyFailures(t *testing.T) {
 	summary := diagnostics.BuildSummary(
 		Version,
-		controlProtocolVersion,
+		control.ProtocolVersion,
 		runtimev2.HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true},
 		nil,
 		netstack.Report{},
@@ -320,7 +298,7 @@ func TestDiagnosticLocalhostProxyPortsUseConfiguredPorts(t *testing.T) {
 func TestDiagnosticSummaryFlagsReleaseIntegrityMismatch(t *testing.T) {
 	summary := diagnostics.BuildSummary(
 		Version,
-		controlProtocolVersion,
+		control.ProtocolVersion,
 		runtimev2.HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true},
 		nil,
 		netstack.Report{},
@@ -352,7 +330,7 @@ func TestDiagnosticSummaryFlagsReleaseIntegrityMismatch(t *testing.T) {
 func TestDiagnosticSummaryFlagsRuntimeNetstackFailure(t *testing.T) {
 	summary := diagnostics.BuildSummary(
 		Version,
-		controlProtocolVersion,
+		control.ProtocolVersion,
 		runtimev2.HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true},
 		nil,
 		netstack.Report{
@@ -462,7 +440,7 @@ func TestDiagnosticPortConflictsDetectDuplicateConfiguredPorts(t *testing.T) {
 func TestDiagnosticSummaryFlagsPackageResolutionAndPortWarnings(t *testing.T) {
 	summary := diagnostics.BuildSummary(
 		Version,
-		controlProtocolVersion,
+		control.ProtocolVersion,
 		runtimev2.HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true},
 		nil,
 		netstack.Report{},

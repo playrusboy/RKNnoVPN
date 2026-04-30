@@ -63,6 +63,32 @@ func ResolveInstallArtifacts(dataDir string, params *json.RawMessage) (InstallAr
 	}, nil
 }
 
+func ResolveVerifiedInstallArtifacts(dataDir string, params *json.RawMessage) (InstallArtifacts, error) {
+	artifacts, err := ResolveInstallArtifacts(dataDir, params)
+	if err != nil {
+		return InstallArtifacts{}, err
+	}
+	if err := VerifyDownloadedUpdate(artifacts.ModulePath, artifacts.ApkPath); err != nil {
+		return InstallArtifacts{}, fmt.Errorf("update artifacts are not checksum-verified: %w", err)
+	}
+	verifiedManifest, err := ReadVerifiedUpdateManifest(artifacts.UpdateDir)
+	if err != nil {
+		return InstallArtifacts{}, fmt.Errorf("update artifacts are not manifest-verified: %w", err)
+	}
+	modulePreflight, err := PreflightModuleUpdate(artifacts.ModulePath, dataDir)
+	if err != nil {
+		return InstallArtifacts{}, fmt.Errorf("module update preflight failed: %w", err)
+	}
+	if modulePreflight.Version != NormalizeVersionTag(verifiedManifest.LatestVersion) {
+		return InstallArtifacts{}, fmt.Errorf(
+			"module version %s does not match verified update version %s",
+			modulePreflight.Version,
+			NormalizeVersionTag(verifiedManifest.LatestVersion),
+		)
+	}
+	return artifacts, nil
+}
+
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil

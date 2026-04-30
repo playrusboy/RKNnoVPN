@@ -1,9 +1,7 @@
 package main
 
 import (
-	"fmt"
-	"time"
-
+	applytx "github.com/youtubediscord/RKNnoVPN/daemon/internal/apply"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
@@ -12,15 +10,8 @@ import (
 )
 
 func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, operation runtimev2.OperationKind) error {
-	if operation == "" {
-		operation = runtimev2.OperationReload
-	}
 	wasRunning := d.coreMgr.GetState() == core.StateRunning ||
 		d.coreMgr.GetState() == core.StateDegraded
-
-	if err := d.failIfRuntimeOperationActive(); err != nil {
-		return err
-	}
 
 	d.mu.Lock()
 	oldCfg := d.cfg
@@ -30,57 +21,43 @@ func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, op
 		rootruntime.BuildScriptEnv(newCfg, d.dataDir),
 	)
 
-	if err := newCfg.Save(d.cfgPath); err != nil {
-		return fmt.Errorf("persist config: %w", err)
-	}
+	return applytx.ApplyRuntimeConfig(
+		applytx.RuntimeConfigApplyInput{
+			NewConfig:        newCfg,
+			ConfigPath:       d.cfgPath,
+			Reload:           reload,
+			Operation:        operation,
+			WasRunning:       wasRunning,
+			NeedsFullRestart: needsFullRestart,
+		},
+		applytx.RuntimeConfigApplyDeps{
+			EnsureIdle: d.failIfRuntimeOperationActive,
+			CommitConfig: func(newCfg *config.Config) {
+				d.commitAppliedRuntimeConfig(newCfg)
+			},
+			SyncDesiredState: d.syncRuntimeV2DesiredState,
+			RunOperation: func(kind runtimev2.OperationKind, phase runtimev2.Phase, fn func(generation int64) error) error {
+				_, err := d.runtimeV2.RunOperation(kind, phase, fn)
+				return err
+			},
+			ReloadRuntime: func(cfg *config.Config, generation int64, fullRestart bool) error {
+				return d.reloadRuntimeAfterConfigChange(cfg, "apply config", "config saved", generation, fullRestart)
+			},
+		},
+	)
+}
 
+func (d *daemon) commitAppliedRuntimeConfig(newCfg *config.Config) {
 	d.mu.Lock()
 	d.cfg = newCfg
 	d.mu.Unlock()
 
 	d.coreMgr.SetConfig(newCfg)
 	d.rescueMgr.SetConfig(newCfg)
-	healthInterval := time.Duration(newCfg.Health.IntervalSec) * time.Second
-	if healthInterval <= 0 {
-		healthInterval = 30 * time.Second
-	}
-	healthTimeout := time.Duration(newCfg.Health.TimeoutSec) * time.Second
-	if healthTimeout <= 0 {
-		healthTimeout = 5 * time.Second
-	}
-	healthThreshold := newCfg.Health.Threshold
-	if healthThreshold < 1 {
-		healthThreshold = 3
-	}
-	tproxyPort := newCfg.Proxy.TProxyPort
-	if tproxyPort == 0 {
-		tproxyPort = 10853
-	}
-	dnsPort := newCfg.Proxy.DNSPort
-	if dnsPort == 0 {
-		dnsPort = 10856
-	}
-	routeMark := newCfg.Proxy.Mark
-	if routeMark == 0 {
-		routeMark = 0x2023
-	}
-	d.healthMon.SetConfig(healthInterval, healthThreshold, tproxyPort, dnsPort, routeMark, newCfg.Health.URL, newCfg.Health.DNSProbeDomains, newCfg.Health.DNSIsHardReadiness, healthTimeout)
+	applyHealthRuntimeConfig(d.healthMon, newHealthRuntimeConfig(newCfg))
 	if d.netWatcher != nil {
 		d.netWatcher.SetEnv(rootruntime.BuildScriptEnv(newCfg, d.dataDir))
 	}
-	if err := d.syncRuntimeV2DesiredState(); err != nil {
-		return fmt.Errorf("config saved: sync runtime desired state: %w", err)
-	}
-
-	if reload && wasRunning {
-		if _, err := d.runtimeV2.RunOperation(operation, runtimev2.PhaseStarting, func(generation int64) error {
-			return d.reloadRuntimeAfterConfigChange(newCfg, "apply config", "config saved", generation, needsFullRestart)
-		}); err != nil {
-			return fmt.Errorf("config saved: %w", err)
-		}
-	}
-
-	return nil
 }
 
 func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context string, savedLabel string, generation int64, fullRestart bool) error {

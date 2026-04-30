@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +23,8 @@ const (
 	releasesURL = "https://api.github.com/repos/youtubediscord/RKNnoVPN/releases/latest"
 	httpTimeout = 30 * time.Second
 )
+
+var ErrNoUpdateAvailable = errors.New("no update available")
 
 // --------------------------------------------------------------------------
 // Public types

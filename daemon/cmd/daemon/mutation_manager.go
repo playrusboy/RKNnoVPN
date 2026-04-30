@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	applytx "github.com/youtubediscord/RKNnoVPN/daemon/internal/apply"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
@@ -14,6 +16,22 @@ func (d *daemon) persistProfileConfigMutationForAction(nextCfg *config.Config, r
 	return applytx.ConfigTransaction{
 		Action:     action,
 		EnsureIdle: d.failIfRuntimeOperationActive,
+		ValidateConfig: func(nextCfg *config.Config) error {
+			if err := nextCfg.Validate(); err != nil {
+				return fmt.Errorf("validation failed: %w", err)
+			}
+			return nil
+		},
+		CheckRuntimeProjection: func(nextCfg *config.Config) error {
+			profile := nextCfg.ResolveProfile()
+			if profile == nil || profile.Address == "" {
+				return nil
+			}
+			if _, err := config.RenderSingboxConfig(nextCfg, profile); err != nil {
+				return fmt.Errorf("render validation failed: %w", err)
+			}
+			return nil
+		},
 		SaveProfile: func(nextCfg *config.Config) error {
 			return profiledoc.Save(d.profilePath, profiledoc.FromConfig(nextCfg))
 		},

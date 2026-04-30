@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/control"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
@@ -15,9 +16,7 @@ import (
 )
 
 func TestConfigMutationSuccessEnvelopeIsExplicit(t *testing.T) {
-	d := &daemon{}
-
-	result := d.configMutationSuccess("config-import", "ok", true, true, 2)
+	result := control.MutationSuccess("config-import", "ok", true, true, 2, nil)
 
 	if result["ok"] != true {
 		t.Fatalf("mutation success must set ok=true: %#v", result)
@@ -53,9 +52,7 @@ func TestConfigMutationSuccessEnvelopeIsExplicit(t *testing.T) {
 }
 
 func TestConfigApplyRPCErrorEnvelopeKeepsSavedFailureVisible(t *testing.T) {
-	d := &daemon{}
-
-	rpcErr := d.configApplyRPCErrorSaved("config-import", errors.New("config saved: apply config hot-swap failed"), true)
+	rpcErr := control.MutationRPCErrorSaved("config-import", errors.New("config saved: apply config hot-swap failed"), true, nil)
 	data, ok := rpcErr.Data.(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected structured mutation error data, got %#v", rpcErr.Data)
@@ -88,7 +85,7 @@ func TestBackendStatusIncludesCompatibilitySnapshot(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.initRuntimeV2()
 
-	payload, rpcErr := d.handleBackendStatus(nil)
+	payload, rpcErr := d.runtimeControlHandlers().BackendStatus(nil)
 	if rpcErr != nil {
 		t.Fatalf("backend status failed: %#v", rpcErr)
 	}
@@ -96,7 +93,7 @@ func TestBackendStatusIncludesCompatibilitySnapshot(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected status payload type %T", payload)
 	}
-	if status.Compatibility.ControlProtocolVersion != controlProtocolVersion {
+	if status.Compatibility.ControlProtocolVersion != control.ProtocolVersion {
 		t.Fatalf("expected control protocol in backend.status, got %#v", status.Compatibility)
 	}
 	if status.Compatibility.SchemaVersion != config.CurrentSchemaVersion {
@@ -115,7 +112,7 @@ func TestBackendStartUsesRuntimeActorWhenAlreadyRunning(t *testing.T) {
 	d.initRuntimeV2()
 	d.coreMgr.SetState(core.StateRunning)
 
-	payload, rpcErr := d.handleBackendStart(nil)
+	payload, rpcErr := d.runtimeControlHandlers().BackendStart(nil)
 	if rpcErr != nil {
 		t.Fatalf("backend start should be idempotent through runtime actor, got %#v", rpcErr)
 	}
@@ -134,7 +131,7 @@ func TestBackendStartRecordsMissingNodeFailure(t *testing.T) {
 	d.cfg.Profile.Nodes = nil
 	d.initRuntimeV2()
 
-	if _, rpcErr := d.handleBackendStart(nil); rpcErr != nil {
+	if _, rpcErr := d.runtimeControlHandlers().BackendStart(nil); rpcErr != nil {
 		t.Fatalf("backend start should accept through runtime actor, got %#v", rpcErr)
 	}
 	status := waitForDaemonRuntimeOperationDone(t, d.runtimeV2, runtimev2.OperationStart)
@@ -152,7 +149,7 @@ func TestBackendApplyDesiredStateCompletesDefaultsAndReturnsStatus(t *testing.T)
 	d.initRuntimeV2()
 
 	params := json.RawMessage(`{"fallbackPolicy":"AUTO_RESET_ROOTED"}`)
-	payload, rpcErr := d.handleBackendApplyDesiredState(&params)
+	payload, rpcErr := d.runtimeControlHandlers().BackendApplyDesiredState(&params)
 	if rpcErr != nil {
 		t.Fatalf("backend.applyDesiredState failed: %#v", rpcErr)
 	}
@@ -182,7 +179,7 @@ func TestBackendApplyDesiredStateBusyReturnsRuntimeBusy(t *testing.T) {
 	defer close(release)
 
 	params := json.RawMessage(`{}`)
-	_, rpcErr := d.handleBackendApplyDesiredState(&params)
+	_, rpcErr := d.runtimeControlHandlers().BackendApplyDesiredState(&params)
 	if rpcErr == nil {
 		t.Fatal("expected runtime busy error")
 	}
@@ -201,7 +198,7 @@ func TestBackendRestartReturnsRuntimeStatus(t *testing.T) {
 	d.initRuntimeV2()
 	d.coreMgr.SetState(core.StateRunning)
 
-	payload, rpcErr := d.handleBackendRestart(nil)
+	payload, rpcErr := d.runtimeControlHandlers().BackendRestart(nil)
 	if rpcErr != nil {
 		t.Fatalf("backend restart failed: %#v", rpcErr)
 	}
@@ -229,7 +226,7 @@ func TestConfigImportReturnsRuntimeStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	params := json.RawMessage(raw)
-	payload, rpcErr := d.handleConfigImport(&params)
+	payload, rpcErr := d.configControlHandlers().ConfigImport(&params)
 	if rpcErr != nil {
 		t.Fatalf("config import failed: %#v", rpcErr)
 	}
@@ -268,7 +265,7 @@ func TestConfigImportRejectsLinkPayload(t *testing.T) {
 	d.initRuntimeV2()
 
 	params := json.RawMessage(`{"links":"vless://example"}`)
-	_, rpcErr := d.handleConfigImport(&params)
+	_, rpcErr := d.configControlHandlers().ConfigImport(&params)
 	if rpcErr == nil {
 		t.Fatal("link payload must not be treated as a full config import")
 	}
@@ -287,7 +284,7 @@ func TestConfigImportRejectsPanelPayload(t *testing.T) {
 	d.initRuntimeV2()
 
 	params := json.RawMessage(`{"schema_version":5,"panel":{"id":"old-panel"}}`)
-	_, rpcErr := d.handleConfigImport(&params)
+	_, rpcErr := d.configControlHandlers().ConfigImport(&params)
 	if rpcErr == nil {
 		t.Fatal("panel payload must not be accepted by config-import")
 	}
@@ -391,7 +388,7 @@ func TestProfileApplyReturnsRuntimeStatus(t *testing.T) {
 	}
 	params := json.RawMessage(paramsRaw)
 
-	payload, rpcErr := d.handleProfileApply(&params)
+	payload, rpcErr := d.profileControlHandlers().ProfileApply(&params)
 	if rpcErr != nil {
 		t.Fatalf("profile apply failed: %#v", rpcErr)
 	}

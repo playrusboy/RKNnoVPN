@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/control"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
@@ -36,10 +37,11 @@ func (d *daemon) refreshRuntimeV2Compatibility() {
 	methods := make([]runtimev2.MethodCapability, 0, len(contracts))
 	for _, contract := range contracts {
 		methods = append(methods, runtimev2.MethodCapability{
-			Method:     contract.Method,
-			Capability: contract.Capability,
-			Mutating:   contract.Mutating,
-			Async:      contract.Async,
+			Method:        contract.Method,
+			Capability:    contract.Capability,
+			Compatibility: contract.Compatibility,
+			Mutating:      contract.Mutating,
+			Async:         contract.Async,
 		})
 	}
 	d.runtimeV2.SetCompatibility(runtimev2.CompatibilityStatus{
@@ -48,13 +50,32 @@ func (d *daemon) refreshRuntimeV2Compatibility() {
 		CurrentReleaseVersion:  release.Version,
 		CurrentReleaseOK:       release.OK,
 		CurrentReleaseError:    releaseIntegrityStatusDetail(release),
-		ControlProtocolVersion: controlProtocolVersion,
+		ControlProtocolVersion: control.ProtocolVersion,
 		SchemaVersion:          config.CurrentSchemaVersion,
+		IPCContractVersion:     ipc.ContractVersion(),
 		PanelMinVersion:        Version,
 		Capabilities:           ipc.SupportedCapabilities(),
 		SupportedMethods:       ipc.SupportedMethods(),
+		APKRequiredMethods:     ipc.APKRequiredMethods(),
+		ErrorCodes:             ipc.ErrorCodes(),
+		CompatibilityPolicies:  ipc.CompatibilityPolicies(),
+		OperationPolicies:      runtimeOperationPolicies(ipc.OperationPolicies()),
 		Methods:                methods,
 	})
+}
+
+func runtimeOperationPolicies(policies map[string]ipc.OperationPolicy) map[string]runtimev2.OperationPolicy {
+	if len(policies) == 0 {
+		return nil
+	}
+	result := make(map[string]runtimev2.OperationPolicy, len(policies))
+	for operationType, policy := range policies {
+		result[operationType] = runtimev2.OperationPolicy{
+			Stages:     append([]string(nil), policy.Stages...),
+			ErrorCodes: append([]string(nil), policy.ErrorCodes...),
+		}
+	}
+	return result
 }
 
 func releaseIntegrityStatusDetail(release diagnostics.ReleaseIntegrity) string {

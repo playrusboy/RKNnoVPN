@@ -1,15 +1,18 @@
-package main
+package control
 
 import (
 	"encoding/json"
 
-	"github.com/youtubediscord/RKNnoVPN/daemon/internal/control"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 )
 
-func (d *daemon) handleLogs(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	request, err := control.DecodeLogsParams(params)
+type LogHandlers struct {
+	DataDir string
+}
+
+func (h LogHandlers) Logs(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	request, err := DecodeLogsParams(params)
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInvalidParams,
@@ -17,7 +20,7 @@ func (d *daemon) handleLogs(params *json.RawMessage) (interface{}, *ipc.RPCError
 		}
 	}
 
-	sections := diagnostics.ReadLogSections(diagnostics.ResolveLogFileSpecs(d.dataDir, request.Files), request.Lines, 512*1024, nil)
+	sections := diagnostics.ReadLogSections(diagnostics.ResolveLogFileSpecs(h.DataDir, request.Files), request.Lines, 512*1024, nil)
 	combined := make([]string, 0, len(request.Files)*request.Lines)
 	for _, section := range sections {
 		combined = append(combined, "== "+section.Path+" ==")

@@ -1,16 +1,19 @@
-package main
+package control
 
 import (
 	"encoding/json"
 	"fmt"
 
 	appcatalog "github.com/youtubediscord/RKNnoVPN/daemon/internal/apps"
-	"github.com/youtubediscord/RKNnoVPN/daemon/internal/control"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 )
 
-func (d *daemon) handleAppList(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	apps, err := appcatalog.LoadInstalled(appcatalog.DefaultPackagesListPath)
+type AppHandlers struct {
+	PackagesListPath string
+}
+
+func (h AppHandlers) AppList(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	apps, err := appcatalog.LoadInstalled(h.packagesListPath())
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInternalError,
@@ -20,8 +23,8 @@ func (d *daemon) handleAppList(params *json.RawMessage) (interface{}, *ipc.RPCEr
 	return apps, nil
 }
 
-func (d *daemon) handleResolveUID(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	request, err := control.DecodeResolveUIDParams(params)
+func (h AppHandlers) ResolveUID(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	request, err := DecodeResolveUIDParams(params)
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInvalidParams,
@@ -29,7 +32,7 @@ func (d *daemon) handleResolveUID(params *json.RawMessage) (interface{}, *ipc.RP
 		}
 	}
 
-	apps, err := appcatalog.LoadInstalled(appcatalog.DefaultPackagesListPath)
+	apps, err := appcatalog.LoadInstalled(h.packagesListPath())
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInternalError,
@@ -45,4 +48,11 @@ func (d *daemon) handleResolveUID(params *json.RawMessage) (interface{}, *ipc.RP
 		Code:    ipc.CodeInvalidParams,
 		Message: fmt.Sprintf("no package found for uid %d", request.UID),
 	}
+}
+
+func (h AppHandlers) packagesListPath() string {
+	if h.PackagesListPath != "" {
+		return h.PackagesListPath
+	}
+	return appcatalog.DefaultPackagesListPath
 }

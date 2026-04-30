@@ -1,7 +1,7 @@
 package main
 
 import (
-	applytx "github.com/youtubediscord/RKNnoVPN/daemon/internal/apply"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/control"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
@@ -19,13 +19,13 @@ func (d *daemon) applyProfileDocument(doc profiledoc.Document, reload bool, acti
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeConfigError,
 			Message: "profile validation failed: " + err.Error(),
-			Data:    profileOperation(action, "failed", false, false, "not_started", before.AppliedState.Generation+1, before.AppliedState.Generation, "validation_failed", err.Error(), nil, warnings, updated),
+			Data:    profileOperation(action, "failed", false, false, "not_started", before.AppliedState.Generation+1, before.AppliedState.Generation, "CONFIG_VALIDATION_FAILED", err.Error(), nil, warnings, updated),
 		}
 	}
 
 	mutation, err := d.persistProfileConfigMutationForAction(nextCfg, reload, action)
 	if err != nil {
-		rpcErr := d.configApplyRPCErrorSaved(action, err, mutation.ConfigSaved)
+		rpcErr := control.MutationRPCErrorSaved(action, err, mutation.ConfigSaved, d.controlRuntimeStatus)
 		status := d.runtimeV2.Status()
 		resultStatus := "failed"
 		runtimeApply := "not_started"
@@ -38,7 +38,7 @@ func (d *daemon) applyProfileDocument(doc profiledoc.Document, reload bool, acti
 	}
 
 	status := d.runtimeV2.Status()
-	runtimeApply := applytx.RuntimeApplyStatus(reload, mutation.RuntimeWasRunning)
+	runtimeApply := control.RuntimeApplyStatus(reload, mutation.RuntimeWasRunning)
 	runtimeApplied := runtimeApply == "applied"
 	if runtimeApply == "accepted" {
 		runtimeApplied = false
@@ -68,14 +68,7 @@ func profileOperation(
 	warnings []profiledoc.Warning,
 	updated int,
 ) map[string]interface{} {
-	warningItems := make([]applytx.Warning, 0, len(warnings))
-	for _, warning := range warnings {
-		warningItems = append(warningItems, applytx.Warning{
-			Code:    warning.Code,
-			Message: warning.Message,
-		})
-	}
-	return applytx.ProfileOperation(action, status, configSaved, runtimeApplied, runtimeApply, desiredGeneration, appliedGeneration, code, message, resetReport, warningItems, updated)
+	return control.ProfileOperation(action, status, configSaved, runtimeApplied, runtimeApply, desiredGeneration, appliedGeneration, code, message, resetReport, warnings, updated)
 }
 
 func desiredGeneration(status runtimev2.Status, before runtimev2.Status) int64 {

@@ -47,6 +47,19 @@ func NewInstallTracker(dataDir string, generation int64, modulePath string, apkP
 	}
 }
 
+func NewDownloadTracker(dataDir string) *InstallTracker {
+	now := time.Now().Format(time.RFC3339)
+	return &InstallTracker{
+		path: filepath.Join(modulecontract.NewPaths(dataDir).RunDir(), installStateFileName),
+		state: InstallState{
+			Status:    "downloading",
+			Step:      "update-download",
+			StartedAt: now,
+			UpdatedAt: now,
+		},
+	}
+}
+
 func ReadInstallState(dataDir string) (*InstallState, error) {
 	data, err := os.ReadFile(filepath.Join(modulecontract.NewPaths(dataDir).RunDir(), installStateFileName))
 	if err != nil {
@@ -70,7 +83,7 @@ func (t *InstallTracker) Step(name, status, code, detail string) error {
 	t.state.Detail = detail
 	if status == "failed" {
 		t.state.Status = "failed"
-	} else if t.state.Status != "completed" {
+	} else if t.state.Status != "completed" && t.state.Status != "failed" {
 		t.state.Status = "running"
 	}
 	return t.write()
@@ -91,6 +104,19 @@ func (t *InstallTracker) Complete() error {
 	t.state.StepStatus = "ok"
 	t.state.Code = ""
 	t.state.Detail = ""
+	return t.write()
+}
+
+func (t *InstallTracker) CompleteDownload(downloaded *DownloadedUpdate) error {
+	t.state.Status = "downloaded"
+	t.state.Step = "persist-artifacts"
+	t.state.StepStatus = "ok"
+	t.state.Code = ""
+	t.state.Detail = ""
+	if downloaded != nil {
+		t.state.ModulePath = downloaded.ModulePath
+		t.state.ApkPath = downloaded.ApkPath
+	}
 	return t.write()
 }
 

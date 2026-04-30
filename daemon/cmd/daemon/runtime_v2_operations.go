@@ -1,6 +1,9 @@
 package main
 
-import "github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+import (
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
+)
 
 func (d *daemon) beginRuntimeStartOperation() uint64 {
 	d.runtimeOpMu.Lock()
@@ -8,6 +11,17 @@ func (d *daemon) beginRuntimeStartOperation() uint64 {
 	d.runtimeOpEpoch++
 	d.runtimeDesiredRunning = true
 	return d.runtimeOpEpoch
+}
+
+func (d *daemon) failIfRuntimeOperationActive() error {
+	if d.runtimeV2 == nil {
+		return nil
+	}
+	status := d.runtimeV2.Status()
+	if status.ActiveOperation == nil {
+		return nil
+	}
+	return runtimev2.NewRuntimeBusyError(*status.ActiveOperation)
 }
 
 func (d *daemon) beginRuntimeStopOperation() uint64 {

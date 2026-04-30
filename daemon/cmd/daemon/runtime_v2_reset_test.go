@@ -14,43 +14,44 @@ import (
 
 func TestResetModeCreatesManualLockAndClearsActive(t *testing.T) {
 	d := &daemon{dataDir: t.TempDir()}
+	paths := d.resetPaths()
 	if err := os.MkdirAll(d.dataDir+"/run", 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(d.activeFilePath(), []byte("active\n"), 0640); err != nil {
+	if err := os.WriteFile(paths.ActiveMarker(), []byte("active\n"), 0640); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := d.enterResetMode(); err != nil {
+	if err := resetcontroller.EnterResetMode(paths, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(d.resetLockPath()); err != nil {
+	if _, err := os.Stat(paths.ResetLock()); err != nil {
 		t.Fatalf("reset lock missing: %v", err)
 	}
-	if _, err := os.Stat(d.manualFlagPath()); err != nil {
+	if _, err := os.Stat(paths.ManualFlag()); err != nil {
 		t.Fatalf("manual flag missing: %v", err)
 	}
-	if _, err := os.Stat(d.activeFilePath()); !os.IsNotExist(err) {
+	if _, err := os.Stat(paths.ActiveMarker()); !os.IsNotExist(err) {
 		t.Fatalf("active marker should be removed, stat err=%v", err)
 	}
 	if skip, detail := d.shouldSkipRootReconcile(); !skip || !strings.Contains(detail, "reset lock") {
 		t.Fatalf("expected reset lock guard, got skip=%v detail=%q", skip, detail)
 	}
 
-	if err := d.leaveResetMode(); err != nil {
+	if err := resetcontroller.LeaveResetMode(paths); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(d.resetLockPath()); !os.IsNotExist(err) {
+	if _, err := os.Stat(paths.ResetLock()); !os.IsNotExist(err) {
 		t.Fatalf("reset lock should be removed, stat err=%v", err)
 	}
-	if _, err := os.Stat(d.manualFlagPath()); err != nil {
+	if _, err := os.Stat(paths.ManualFlag()); err != nil {
 		t.Fatalf("manual flag should remain after reset: %v", err)
 	}
 }
 
 func TestRuntimeStartFailsWhileResetLockPresent(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
-	if err := os.WriteFile(d.resetLockPath(), []byte("reset\n"), 0640); err != nil {
+	if err := os.WriteFile(d.resetPaths().ResetLock(), []byte("reset\n"), 0640); err != nil {
 		t.Fatal(err)
 	}
 
@@ -66,11 +67,12 @@ func TestRuntimeStartFailsWhileResetLockPresent(t *testing.T) {
 
 func TestRecoverStaleResetLockRunsStructuredCleanup(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
+	paths := d.resetPaths()
 	old := time.Now().Add(-resetcontroller.StaleAfter - time.Minute).Format(time.RFC3339)
-	if err := os.WriteFile(d.resetLockPath(), []byte(old+"\n"), 0640); err != nil {
+	if err := os.WriteFile(paths.ResetLock(), []byte(old+"\n"), 0640); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(d.activeFilePath(), []byte("active\n"), 0640); err != nil {
+	if err := os.WriteFile(paths.ActiveMarker(), []byte("active\n"), 0640); err != nil {
 		t.Fatal(err)
 	}
 
@@ -81,17 +83,17 @@ func TestRecoverStaleResetLockRunsStructuredCleanup(t *testing.T) {
 	if report == nil || report.Generation != 12 || report.Status != "ok" {
 		t.Fatalf("expected structured recovery report, got %#v", report)
 	}
-	if _, err := os.Stat(d.resetLockPath()); !os.IsNotExist(err) {
+	if _, err := os.Stat(paths.ResetLock()); !os.IsNotExist(err) {
 		t.Fatalf("stale reset lock should be removed, stat err=%v", err)
 	}
-	if _, err := os.Stat(d.activeFilePath()); !os.IsNotExist(err) {
+	if _, err := os.Stat(paths.ActiveMarker()); !os.IsNotExist(err) {
 		t.Fatalf("stale recovery should clear active marker, stat err=%v", err)
 	}
 }
 
 func TestRecoverFreshResetLockStillBlocks(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
-	if err := os.WriteFile(d.resetLockPath(), []byte(time.Now().Format(time.RFC3339)+"\n"), 0640); err != nil {
+	if err := os.WriteFile(d.resetPaths().ResetLock(), []byte(time.Now().Format(time.RFC3339)+"\n"), 0640); err != nil {
 		t.Fatal(err)
 	}
 
@@ -106,6 +108,7 @@ func TestRecoverFreshResetLockStillBlocks(t *testing.T) {
 
 func TestRootReconcileGuardRequiresActiveMarker(t *testing.T) {
 	d := &daemon{dataDir: t.TempDir()}
+	paths := d.resetPaths()
 	if err := os.MkdirAll(d.dataDir+"/run", 0750); err != nil {
 		t.Fatal(err)
 	}
@@ -117,14 +120,14 @@ func TestRootReconcileGuardRequiresActiveMarker(t *testing.T) {
 		t.Fatalf("expected inactive guard, got skip=%v detail=%q", skip, detail)
 	}
 
-	if err := os.WriteFile(d.activeFilePath(), []byte("active\n"), 0640); err != nil {
+	if err := os.WriteFile(paths.ActiveMarker(), []byte("active\n"), 0640); err != nil {
 		t.Fatal(err)
 	}
 	if skip, detail := d.shouldSkipRootReconcile(); skip {
 		t.Fatalf("active runtime should reconcile, detail=%q", detail)
 	}
 
-	if err := os.WriteFile(d.manualFlagPath(), []byte("manual\n"), 0600); err != nil {
+	if err := os.WriteFile(paths.ManualFlag(), []byte("manual\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if skip, detail := d.shouldSkipRootReconcile(); !skip || !strings.Contains(detail, "manual mode") {
@@ -143,14 +146,14 @@ func TestRemoveStaleRuntimeFilesIsIdempotent(t *testing.T) {
 		}
 	}
 
-	removed, err := d.removeStaleRuntimeFiles()
+	removed, err := resetcontroller.RemoveStaleRuntimeFiles(d.resetPaths())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(removed) < 6 {
 		t.Fatalf("expected stale files to be removed, got %#v", removed)
 	}
-	removed, err = d.removeStaleRuntimeFiles()
+	removed, err = resetcontroller.RemoveStaleRuntimeFiles(d.resetPaths())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,6 +12,10 @@ func ImportNodes(current Document, nodes []Node) (Document, MergeStats) {
 	return MergeNodes(current, nodes, false)
 }
 
+func NodeMatchKey(node Node) string {
+	return nodeMatchKey(node)
+}
+
 func SetActiveNode(current Document, nodeID string) (Document, error) {
 	found := false
 	for _, node := range current.Nodes {

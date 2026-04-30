@@ -210,16 +210,28 @@ data class RuntimeCompatibilityStatus(
     val currentReleaseError: String = "",
     val controlProtocolVersion: Int = 0,
     val schemaVersion: Int = 0,
+    val ipcContractVersion: Int = 0,
     val panelMinVersion: String = "",
     val capabilities: List<String> = emptyList(),
     val supportedMethods: List<String> = emptyList(),
+    val apkRequiredMethods: List<String> = emptyList(),
+    val errorCodes: List<String> = emptyList(),
+    val compatibilityPolicies: List<String> = emptyList(),
+    val operationPolicies: Map<String, RuntimeOperationPolicy> = emptyMap(),
     val methods: List<RuntimeMethodCapability> = emptyList(),
+)
+
+@Serializable
+data class RuntimeOperationPolicy(
+    val stages: List<String> = emptyList(),
+    val errorCodes: List<String> = emptyList(),
 )
 
 @Serializable
 data class RuntimeMethodCapability(
     val method: String = "",
     val capability: String = "",
+    val compatibility: String = "",
     val mutating: Boolean = false,
     val async: Boolean = false,
 )

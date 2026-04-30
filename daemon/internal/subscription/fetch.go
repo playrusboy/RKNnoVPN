@@ -7,8 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	neturl "net/url"
-	"strings"
 	"time"
 
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
@@ -47,58 +45,6 @@ type Client struct {
 	Now     func() time.Time
 }
 
-type SubscriptionSource struct {
-	ProviderKey string `json:"providerKey"`
-	URL         string `json:"url"`
-}
-
-type ManualNode struct {
-	Node profiledoc.Node `json:"node"`
-}
-
-type SubscriptionNode struct {
-	Node   profiledoc.Node    `json:"node"`
-	Source SubscriptionSource `json:"source"`
-	Stale  bool               `json:"stale"`
-}
-
-type PreviewResult struct {
-	Source        SubscriptionSource                    `json:"source"`
-	Subscription  profiledoc.Subscription               `json:"subscription"`
-	Nodes         []profiledoc.Node                     `json:"nodes"`
-	RejectedNodes []profiledoc.RejectedSubscriptionNode `json:"rejectedNodes"`
-	Rejected      int                                   `json:"rejected"`
-	Added         int                                   `json:"added"`
-	Updated       int                                   `json:"updated"`
-	Unchanged     int                                   `json:"unchanged"`
-	Stale         int                                   `json:"stale"`
-	ParseFailures int                                   `json:"parseFailures"`
-	FetchStatus   int                                   `json:"-"`
-	FetchHeaders  map[string]string                     `json:"-"`
-}
-
-type RefreshResult struct {
-	Source        SubscriptionSource                    `json:"source"`
-	Profile       profiledoc.Document                   `json:"profile"`
-	Subscription  profiledoc.Subscription               `json:"subscription"`
-	Nodes         []profiledoc.Node                     `json:"nodes"`
-	RejectedNodes []profiledoc.RejectedSubscriptionNode `json:"rejectedNodes"`
-	Merge         map[string]int                        `json:"merge"`
-	ParseFailures int                                   `json:"parseFailures"`
-	FetchStatus   int                                   `json:"-"`
-	FetchHeaders  map[string]string                     `json:"-"`
-}
-
-type RefreshResponse struct {
-	Source        SubscriptionSource                    `json:"source"`
-	Subscription  profiledoc.Subscription               `json:"subscription"`
-	Imported      int                                   `json:"imported"`
-	ParseFailures int                                   `json:"parseFailures"`
-	Rejected      int                                   `json:"rejected"`
-	RejectedNodes []profiledoc.RejectedSubscriptionNode `json:"rejectedNodes"`
-	Merge         map[string]int                        `json:"merge"`
-}
-
 func NewClient(fetcher Fetcher) Client {
 	if fetcher == nil {
 		fetcher = FetcherFunc(FetchURL)
@@ -107,65 +53,74 @@ func NewClient(fetcher Fetcher) Client {
 }
 
 func (c Client) Preview(rawURL string, current profiledoc.Document) (PreviewResult, error) {
-	source, nodes, sub, failures, rejected, fetched, err := c.fetchAndParse(rawURL)
+	parsed, err := c.fetchAndParse(rawURL)
 	if err != nil {
-		return PreviewResult{Source: source, FetchStatus: fetched.Status, FetchHeaders: fetched.Headers}, err
+		return PreviewResult{
+			Source:       parsed.Source,
+			FetchStatus:  parsed.Fetch.Status,
+			FetchHeaders: parsed.Fetch.Headers,
+		}, err
 	}
-	_, stats := profiledoc.MergeSubscriptionNodes(current, sub, nodes)
+	_, stats := MergeSubscriptionNodes(current, parsed.Subscription, parsed.Nodes)
 	return PreviewResult{
-		Source:        source,
-		Subscription:  sub,
-		Nodes:         nodes,
-		RejectedNodes: rejected,
-		Rejected:      len(rejected),
+		Source:        parsed.Source,
+		Subscription:  parsed.Subscription,
+		Nodes:         parsed.Nodes,
+		RejectedNodes: parsed.Rejected,
+		Rejected:      len(parsed.Rejected),
 		Added:         stats["added"],
 		Updated:       stats["updated"],
 		Unchanged:     stats["unchanged"],
 		Stale:         stats["stale"],
-		ParseFailures: failures,
-		FetchStatus:   fetched.Status,
-		FetchHeaders:  fetched.Headers,
+		ParseFailures: parsed.ParseFailures,
+		FetchStatus:   parsed.Fetch.Status,
+		FetchHeaders:  parsed.Fetch.Headers,
 	}, nil
 }
 
 func (c Client) ApplyRefresh(rawURL string, current profiledoc.Document) (RefreshResult, error) {
-	source, nodes, sub, failures, rejected, fetched, err := c.fetchAndParse(rawURL)
+	parsed, err := c.fetchAndParse(rawURL)
 	if err != nil {
-		return RefreshResult{Source: source, FetchStatus: fetched.Status, FetchHeaders: fetched.Headers}, err
-	}
-	if len(nodes) == 0 && (failures > 0 || len(rejected) > 0) {
 		return RefreshResult{
-			Source:        source,
-			Subscription:  sub,
-			RejectedNodes: rejected,
-			ParseFailures: failures,
-			FetchStatus:   fetched.Status,
-			FetchHeaders:  fetched.Headers,
+			Source:       parsed.Source,
+			FetchStatus:  parsed.Fetch.Status,
+			FetchHeaders: parsed.Fetch.Headers,
+		}, err
+	}
+	if len(parsed.Nodes) == 0 && (parsed.ParseFailures > 0 || len(parsed.Rejected) > 0) {
+		return RefreshResult{
+			Source:        parsed.Source,
+			Subscription:  parsed.Subscription,
+			RejectedNodes: parsed.Rejected,
+			ParseFailures: parsed.ParseFailures,
+			FetchStatus:   parsed.Fetch.Status,
+			FetchHeaders:  parsed.Fetch.Headers,
 		}, ErrNoSupportedNodes
 	}
-	next, stats := profiledoc.MergeSubscriptionNodes(current, sub, nodes)
+	next, stats := MergeSubscriptionNodes(current, parsed.Subscription, parsed.Nodes)
+	subscription := parsed.Subscription
 	replaced := false
 	for i, existing := range next.Subscriptions {
-		if existing.ProviderKey == sub.ProviderKey {
-			sub.Name = existing.Name
-			next.Subscriptions[i] = sub
+		if existing.ProviderKey == subscription.ProviderKey {
+			subscription.Name = existing.Name
+			next.Subscriptions[i] = subscription
 			replaced = true
 			break
 		}
 	}
 	if !replaced {
-		next.Subscriptions = append(next.Subscriptions, sub)
+		next.Subscriptions = append(next.Subscriptions, subscription)
 	}
 	return RefreshResult{
-		Source:        source,
+		Source:        parsed.Source,
 		Profile:       next,
-		Subscription:  sub,
-		Nodes:         nodes,
-		RejectedNodes: rejected,
+		Subscription:  subscription,
+		Nodes:         parsed.Nodes,
+		RejectedNodes: parsed.Rejected,
 		Merge:         stats,
-		ParseFailures: failures,
-		FetchStatus:   fetched.Status,
-		FetchHeaders:  fetched.Headers,
+		ParseFailures: parsed.ParseFailures,
+		FetchStatus:   parsed.Fetch.Status,
+		FetchHeaders:  parsed.Fetch.Headers,
 	}, nil
 }
 
@@ -181,10 +136,19 @@ func (r RefreshResult) Response() RefreshResponse {
 	}
 }
 
-func (c Client) fetchAndParse(rawURL string) (SubscriptionSource, []profiledoc.Node, profiledoc.Subscription, int, []profiledoc.RejectedSubscriptionNode, FetchResult, error) {
+type parsedFetch struct {
+	Source        SubscriptionSource
+	Nodes         []profiledoc.Node
+	Subscription  profiledoc.Subscription
+	ParseFailures int
+	Rejected      []RejectedNode
+	Fetch         FetchResult
+}
+
+func (c Client) fetchAndParse(rawURL string) (parsedFetch, error) {
 	source, err := NewSubscriptionSource(rawURL)
 	if err != nil {
-		return source, nil, profiledoc.Subscription{}, 0, nil, FetchResult{}, err
+		return parsedFetch{Source: source}, err
 	}
 	if c.Fetcher == nil {
 		c.Fetcher = FetcherFunc(FetchURL)
@@ -195,16 +159,17 @@ func (c Client) fetchAndParse(rawURL string) (SubscriptionSource, []profiledoc.N
 	}
 	fetched, err := c.Fetcher.FetchURL(source.URL)
 	if err != nil {
-		return source, nil, profiledoc.Subscription{}, 0, nil, fetched, err
+		return parsedFetch{Source: source, Fetch: fetched}, err
 	}
-	nodes, sub, failures, rejected := profiledoc.ParseSubscription(fetched.Body, fetched.Headers, source.URL, now.UnixMilli())
-	sub.ProviderKey = source.ProviderKey
-	sub.URL = source.URL
-	for i := range nodes {
-		nodes[i].Source.ProviderKey = source.ProviderKey
-		nodes[i].Source.URL = source.URL
-	}
-	return source, nodes, sub, failures, rejected, fetched, nil
+	nodes, sub, failures, rejected := ParseSubscription(fetched.Body, fetched.Headers, source, now.UnixMilli())
+	return parsedFetch{
+		Source:        source,
+		Nodes:         nodes,
+		Subscription:  sub,
+		ParseFailures: failures,
+		Rejected:      rejected,
+		Fetch:         fetched,
+	}, nil
 }
 
 func FetchURL(rawURL string) (FetchResult, error) {
@@ -270,49 +235,22 @@ func ClassifyError(rawURL string, err error) ErrorKind {
 	return ErrorInternal
 }
 
-func NewSubscriptionSource(rawURL string) (SubscriptionSource, error) {
-	var source SubscriptionSource
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" {
-		return source, fmt.Errorf("url is required")
-	}
-	parsed, err := neturl.Parse(rawURL)
-	if err != nil {
-		return source, fmt.Errorf("invalid URL: %w", err)
-	}
-	parsed.Scheme = strings.ToLower(parsed.Scheme)
-	parsed.Host = strings.ToLower(parsed.Host)
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return source, fmt.Errorf("subscription URL scheme must be http or https")
-	}
-	host := strings.TrimSpace(parsed.Hostname())
-	if host == "" {
-		return source, fmt.Errorf("subscription URL host is required")
-	}
-	if IsDisallowedHost(host) {
-		return source, fmt.Errorf("subscription URL host is local or private")
-	}
-	source.URL = parsed.String()
-	source.ProviderKey = profiledoc.ProviderKeyFor(source.URL)
-	return source, nil
-}
-
 func fetchDialContext(ctx context.Context, network string, address string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		host = address
 		port = ""
 	}
-	if IsDisallowedHost(host) {
-		return nil, fmt.Errorf("subscription URL host is local or private")
+	if isDisallowedSourceHost(host) {
+		return nil, fmt.Errorf("subscription URL host is local, private, or reserved")
 	}
 	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return nil, err
 	}
 	for _, resolved := range ips {
-		if IsDisallowedIP(resolved.IP) {
-			return nil, fmt.Errorf("subscription URL resolved to local or private address")
+		if isDisallowedSourceIP(resolved.IP) {
+			return nil, fmt.Errorf("subscription URL resolved to local, private, or reserved address")
 		}
 	}
 	var dialer net.Dialer
@@ -332,28 +270,4 @@ func fetchDialContext(ctx context.Context, network string, address string) (net.
 		return nil, lastErr
 	}
 	return nil, fmt.Errorf("subscription URL host did not resolve")
-}
-
-func IsDisallowedHost(host string) bool {
-	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
-	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
-		return true
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		return IsDisallowedIP(ip)
-	}
-	return false
-}
-
-func IsDisallowedIP(ip net.IP) bool {
-	if ip == nil {
-		return true
-	}
-	return ip.IsUnspecified() ||
-		ip.IsLoopback() ||
-		ip.IsPrivate() ||
-		ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() ||
-		ip.IsInterfaceLocalMulticast() ||
-		ip.IsMulticast()
 }

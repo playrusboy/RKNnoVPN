@@ -51,6 +51,8 @@ type CompatSummary struct {
 	ModuleVersion          string `json:"moduleVersion"`
 	ControlProtocolVersion int    `json:"controlProtocolVersion"`
 	SchemaVersion          int    `json:"schemaVersion"`
+	IPCContractVersion     int    `json:"ipcContractVersion"`
+	APKRequiredMethodCount int    `json:"apkRequiredMethodCount"`
 	PanelMinVersion        string `json:"panelMinVersion"`
 	CurrentReleaseVersion  string `json:"currentReleaseVersion,omitempty"`
 	CurrentReleaseOK       bool   `json:"currentReleaseOk"`
@@ -254,6 +256,13 @@ func BuildSummaryWithCanonical(
 	if summary.Status == "ok" && summary.IssueCount > 0 {
 		summary.Status = "degraded"
 	}
+	summary.Graph = BuildGraphFromSummary(summary)
+	return summary
+}
+
+func WithIPCContractFacts(summary Summary, contractVersion int, apkRequiredMethods []string) Summary {
+	summary.Compatibility.IPCContractVersion = contractVersion
+	summary.Compatibility.APKRequiredMethodCount = len(apkRequiredMethods)
 	summary.Graph = BuildGraphFromSummary(summary)
 	return summary
 }
