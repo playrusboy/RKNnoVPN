@@ -7,6 +7,11 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+val releaseStoreFilePath = providers.environmentVariable("RKNNOVPN_RELEASE_STORE_FILE").orNull
+val releaseStorePassword = providers.environmentVariable("RKNNOVPN_RELEASE_STORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("RKNNOVPN_RELEASE_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("RKNNOVPN_RELEASE_KEY_PASSWORD").orNull
+
 android {
     namespace = "com.rknnovpn.panel"
     compileSdk = 35
@@ -23,8 +28,21 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            if (!releaseStoreFilePath.isNullOrBlank()) {
+                storeFile = file(releaseStoreFilePath)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword ?: releaseStorePassword
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
+            isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

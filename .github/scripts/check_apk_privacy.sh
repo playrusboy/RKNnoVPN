@@ -54,6 +54,7 @@ check_present_file "SOCKS helper disabled by default" 'val socksPort: Int = 0' "
 check_present_file "HTTP helper disabled by default" 'val httpPort: Int = 0' "${profile_config}"
 check_present_file "TUN disabled by default" 'val enabled: Boolean = false' "${profile_config}"
 check_present_file "Clash API disabled by default" 'APIPort:[[:space:]]+0' "${daemon_config}"
+check_absent_file "No daemonctl command-string logging" 'Log\.[dw]\([^)]*commandString|su -c "\\$commandString' "${repo_root}/app/app/src/main/kotlin/com/rknnovpn/panel/ipc/DaemonctlExecutor.kt"
 check_absent_file "No default local helper ports in module config" '10808|10809|9090|"api_port"[[:space:]]*:[[:space:]]*[1-9]' "${module_default_config}"
 if [ -e "${repo_root}/module/defaults/panel.json" ]; then
   echo "::error file=${repo_root}/module/defaults/panel.json,title=No panel defaults::panel.json is not a supported v2 storage artifact"

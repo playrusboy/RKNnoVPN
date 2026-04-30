@@ -44,10 +44,14 @@ func RenderSingboxConfig(cfg *Config, profile *NodeProfile) ([]byte, error) {
 		}
 	}
 	if cfg.Proxy.APIPort > 0 {
+		secret := strings.TrimSpace(cfg.Proxy.APISecret)
+		if secret == "" {
+			return nil, fmt.Errorf("renderer: proxy.api_secret is required when proxy.api_port is enabled")
+		}
 		experimental := ensureExperimental(sbCfg)
 		experimental["clash_api"] = map[string]interface{}{
 			"external_controller": fmt.Sprintf("127.0.0.1:%d", cfg.Proxy.APIPort),
-			"secret":              "",
+			"secret":              secret,
 		}
 	}
 	outbounds, err := buildOutbounds(cfg, profile)

@@ -106,7 +106,10 @@ class DaemonctlExecutor @Inject constructor() {
                 "su", "-c", commandString
             )
 
-            Log.d(TAG, ">>> su -c \"$commandString\"")
+            Log.d(
+                TAG,
+                ">>> daemonctl method=$method params=${if (params.isEmpty()) "none" else "redacted"}"
+            )
 
             process = Runtime.getRuntime().exec(command)
 
@@ -129,7 +132,7 @@ class DaemonctlExecutor @Inject constructor() {
             stdoutReader.join()
             stderrReader.join()
 
-            Log.d(TAG, "<<< exit=$exitCode stdout=${stdout.take(200)}")
+            Log.d(TAG, "<<< daemonctl method=$method exit=$exitCode")
 
             val result = parseResponse(exitCode, stdout, stderr, method)
             if (cont.isActive) {

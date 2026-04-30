@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"syscall"
 )
 
 const maxFrameBytes = 16 * 1024 * 1024
@@ -68,8 +69,9 @@ func (s *Server) Start() error {
 	}
 	s.listener = ln
 
-	// Make the socket accessible.
-	if err := os.Chmod(s.socketPath, 0660); err != nil {
+	// daemonctl talks to this socket through su, so direct socket access stays
+	// root-only. Peer credentials are still checked for defense in depth.
+	if err := os.Chmod(s.socketPath, 0600); err != nil {
 		log.Printf("ipc: warning: chmod socket: %v", err)
 	}
 
@@ -115,6 +117,11 @@ func (s *Server) handleConn(conn net.Conn) {
 	defer s.wg.Done()
 	defer conn.Close()
 
+	if err := authorizePeer(conn); err != nil {
+		log.Printf("ipc: rejected peer: %v", err)
+		return
+	}
+
 	reader := bufio.NewReader(conn)
 
 	for {
@@ -146,6 +153,31 @@ func (s *Server) handleConn(conn net.Conn) {
 			return
 		}
 	}
+}
+
+func authorizePeer(conn net.Conn) error {
+	unixConn, ok := conn.(*net.UnixConn)
+	if !ok {
+		return os.ErrPermission
+	}
+	raw, err := unixConn.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var cred *syscall.Ucred
+	var credErr error
+	if err := raw.Control(func(fd uintptr) {
+		cred, credErr = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+	}); err != nil {
+		return err
+	}
+	if credErr != nil {
+		return credErr
+	}
+	if cred == nil || cred.Uid != 0 {
+		return os.ErrPermission
+	}
+	return nil
 }
 
 func readFrame(reader *bufio.Reader) ([]byte, error) {

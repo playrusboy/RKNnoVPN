@@ -105,6 +105,10 @@ validate_env() {
     CHAIN_PROXY_PORTS="${CHAIN_PROXY_PORTS:-}"
     CHAIN_PROXY_UIDS="${CHAIN_PROXY_UIDS:-}"
     CHAIN_PROXY_RULES="${CHAIN_PROXY_RULES:-}"
+    ROUTE_RULE_PREF="${ROUTE_RULE_PREF:-10000}"
+    ROUTE_RULE_PREF_V6="${ROUTE_RULE_PREF_V6:-10001}"
+    IPV6_MODE="${IPV6_MODE:-mirror}"
+    IPV6_FAIL_CLOSED="${IPV6_FAIL_CLOSED:-1}"
     DNS_MODE="${DNS_MODE:-per_uid}"
     DNS_SCOPE="${DNS_SCOPE:-}"
 
@@ -171,6 +175,23 @@ validate_uint() {
     esac
 }
 
+validate_port() {
+    _name="$1"
+    _value="$2"
+    _allow_zero="${3:-0}"
+    validate_uint "$_name" "$_value"
+    _min=1
+    [ "$_allow_zero" = "1" ] && _min=0
+    if ! awk -v v="$_value" -v min="$_min" 'BEGIN { exit ((v + 0) >= min && (v + 0) <= 65535) ? 0 : 1 }'; then
+        if [ "$_allow_zero" = "1" ]; then
+            log_error "Invalid ${_name}: expected 0 or 1-65535"
+        else
+            log_error "Invalid ${_name}: expected 1-65535"
+        fi
+        exit 1
+    fi
+}
+
 validate_hex_mark() {
     _name="$1"
     _value="$2"
@@ -212,6 +233,15 @@ validate_uint_list() {
     done
 }
 
+validate_port_list() {
+    _name="$1"
+    _value="$2"
+    _item=""
+    for _item in $_value; do
+        validate_port "$_name" "$_item" 0
+    done
+}
+
 validate_port_uid_rules() {
     _name="$1"
     _value="$2"
@@ -223,7 +253,7 @@ validate_port_uid_rules() {
             *:*)
                 _port="${_item%%:*}"
                 _uid="${_item#*:}"
-                validate_uint "$_name port" "$_port"
+                validate_port "$_name port" "$_port" 0
                 validate_uint "$_name uid" "$_uid"
                 ;;
             *)
@@ -234,23 +264,68 @@ validate_port_uid_rules() {
     done
 }
 
+validate_port_conflicts() {
+    _core_seen=""
+    for _entry in \
+        "TPROXY_PORT:${TPROXY_PORT}" \
+        "DNS_PORT:${DNS_PORT}" \
+        "API_PORT:${API_PORT}" \
+        "SOCKS_PORT:${SOCKS_PORT}" \
+        "HTTP_PORT:${HTTP_PORT}"; do
+        _name="${_entry%%:*}"
+        _port="${_entry#*:}"
+        [ "$_port" = "0" ] && continue
+        case " ${_core_seen} " in
+            *" ${_port} "*) log_error "Port conflict: ${_name}=${_port} is already used"; exit 1 ;;
+        esac
+        _core_seen="${_core_seen} ${_port}"
+    done
+    _chain_seen=""
+    for _port in ${CHAIN_PROXY_PORTS}; do
+        case " ${_core_seen} " in
+            *" ${_port} "*) log_error "Port conflict: CHAIN_PROXY_PORTS contains reserved listener port ${_port}"; exit 1 ;;
+        esac
+        case " ${_chain_seen} " in
+            *" ${_port} "*) log_error "Port conflict: CHAIN_PROXY_PORTS repeats port ${_port}"; exit 1 ;;
+        esac
+        _chain_seen="${_chain_seen} ${_port}"
+    done
+    for _rule in ${CHAIN_PROXY_RULES}; do
+        _port="${_rule%%:*}"
+        case " ${_core_seen} " in
+            *" ${_port} "*) log_error "Port conflict: CHAIN_PROXY_RULES contains reserved listener port ${_port}"; exit 1 ;;
+        esac
+    done
+}
+
+ipv6_required() {
+    [ "${IPV6_FAIL_CLOSED:-1}" = "1" ] || return 1
+    case "${IPV6_MODE:-mirror}" in
+        disable|disabled|off|ipv4_only|IPv4_ONLY|DISABLE|DISABLED|OFF) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
 validate_runtime_values() {
-    validate_uint TPROXY_PORT "$TPROXY_PORT"
-    validate_uint DNS_PORT "$DNS_PORT"
-    validate_uint API_PORT "$API_PORT"
-    validate_uint SOCKS_PORT "$SOCKS_PORT"
-    validate_uint HTTP_PORT "$HTTP_PORT"
+    validate_port TPROXY_PORT "$TPROXY_PORT" 0
+    validate_port DNS_PORT "$DNS_PORT" 0
+    validate_port API_PORT "$API_PORT" 1
+    validate_port SOCKS_PORT "$SOCKS_PORT" 1
+    validate_port HTTP_PORT "$HTTP_PORT" 1
     validate_uint CORE_GID "$CORE_GID"
     validate_uint ROUTE_TABLE "$ROUTE_TABLE"
     validate_uint ROUTE_TABLE_V6 "$ROUTE_TABLE_V6"
+    validate_uint ROUTE_RULE_PREF "$ROUTE_RULE_PREF"
+    validate_uint ROUTE_RULE_PREF_V6 "$ROUTE_RULE_PREF_V6"
     validate_hex_mark FWMARK "$FWMARK"
     validate_enum APP_MODE "$APP_MODE" "whitelist blacklist all off"
     validate_enum DNS_SCOPE "$DNS_SCOPE" "off all uids all_except_uids"
     validate_enum DNS_MODE "$DNS_MODE" "off all per_uid uid"
     validate_enum PROXY_MODE "$PROXY_MODE" "tproxy"
-    validate_uint_list CHAIN_PROXY_PORTS "$CHAIN_PROXY_PORTS"
+    validate_port_list CHAIN_PROXY_PORTS "$CHAIN_PROXY_PORTS"
     validate_uint_list CHAIN_PROXY_UIDS "$CHAIN_PROXY_UIDS"
     validate_port_uid_rules CHAIN_PROXY_RULES "$CHAIN_PROXY_RULES"
+    validate_port_conflicts
     validate_uint_list PROXY_UIDS "$PROXY_UIDS"
     validate_uint_list DIRECT_UIDS "$DIRECT_UIDS"
     validate_uint_list BYPASS_UIDS "$BYPASS_UIDS"
@@ -258,6 +333,7 @@ validate_runtime_values() {
     IPV6_ROUTE_APPLIED="${IPV6_ROUTE_APPLIED:-0}"
     validate_enum IPV6_MANGLE_APPLIED "$IPV6_MANGLE_APPLIED" "0 1"
     validate_enum IPV6_ROUTE_APPLIED "$IPV6_ROUTE_APPLIED" "0 1"
+    validate_enum IPV6_FAIL_CLOSED "$IPV6_FAIL_CLOSED" "0 1"
 }
 
 write_snapshot_var() {
@@ -277,7 +353,8 @@ save_snapshot() {
             CHAIN_PROXY_PORTS CHAIN_PROXY_UIDS CHAIN_PROXY_RULES \
             FWMARK ROUTE_TABLE ROUTE_TABLE_V6 CORE_GID APP_MODE \
             PROXY_UIDS DIRECT_UIDS BYPASS_UIDS DNS_SCOPE DNS_MODE \
-            PROXY_MODE IPV6_MANGLE_APPLIED IPV6_ROUTE_APPLIED; do
+            PROXY_MODE ROUTE_RULE_PREF ROUTE_RULE_PREF_V6 IPV6_MODE \
+            IPV6_FAIL_CLOSED IPV6_MANGLE_APPLIED IPV6_ROUTE_APPLIED; do
             write_snapshot_var "$_name"
         done
     } > "$_tmp"
@@ -320,6 +397,8 @@ load_snapshot() {
                 FWMARK) FWMARK="$_value" ;;
                 ROUTE_TABLE) ROUTE_TABLE="$_value" ;;
                 ROUTE_TABLE_V6) ROUTE_TABLE_V6="$_value" ;;
+                ROUTE_RULE_PREF) ROUTE_RULE_PREF="$_value" ;;
+                ROUTE_RULE_PREF_V6) ROUTE_RULE_PREF_V6="$_value" ;;
                 CORE_GID) CORE_GID="$_value" ;;
                 APP_MODE) APP_MODE="$_value" ;;
                 PROXY_UIDS) PROXY_UIDS="$_value" ;;
@@ -328,6 +407,8 @@ load_snapshot() {
                 DNS_SCOPE) DNS_SCOPE="$_value" ;;
                 DNS_MODE) DNS_MODE="$_value" ;;
                 PROXY_MODE) PROXY_MODE="$_value" ;;
+                IPV6_MODE) IPV6_MODE="$_value" ;;
+                IPV6_FAIL_CLOSED) IPV6_FAIL_CLOSED="$_value" ;;
                 IPV6_MANGLE_APPLIED) IPV6_MANGLE_APPLIED="$_value" ;;
                 IPV6_ROUTE_APPLIED) IPV6_ROUTE_APPLIED="$_value" ;;
                 *)
@@ -354,7 +435,7 @@ setup_policy_routing() {
     : > "${_ip_rule_err}"
     : > "${_ip_route_err}"
 
-    if ! ip rule add fwmark "${FWMARK}" table "${ROUTE_TABLE}" 2>"${_ip_rule_err}" && ! ip_rule_present 4 "$ROUTE_TABLE"; then
+    if ! ip rule add fwmark "${FWMARK}" table "${ROUTE_TABLE}" pref "${ROUTE_RULE_PREF}" 2>"${_ip_rule_err}" && ! ip_rule_present 4 "$ROUTE_TABLE"; then
         _detail="$(cat "${_ip_rule_err}" 2>/dev/null || true)"
         log_error "Failed to add IPv4 policy rule fwmark ${FWMARK} table ${ROUTE_TABLE}: ${_detail:-unknown error}"
         return 1
@@ -365,15 +446,25 @@ setup_policy_routing() {
         return 1
     fi
 
-    if ip -6 rule add fwmark "${FWMARK}" table "${ROUTE_TABLE_V6}" 2>/dev/null || ip_rule_present 6 "$ROUTE_TABLE_V6"; then
+    if ip -6 rule add fwmark "${FWMARK}" table "${ROUTE_TABLE_V6}" pref "${ROUTE_RULE_PREF_V6}" 2>/dev/null || ip_rule_present 6 "$ROUTE_TABLE_V6"; then
         if ip -6 route add local default dev lo table "${ROUTE_TABLE_V6}" 2>/dev/null || local_route_present 6 "$ROUTE_TABLE_V6"; then
             IPV6_ROUTE_APPLIED=1
         else
+            if ipv6_required; then
+                log_error "IPv6 local route unavailable and IPv6 fail-closed is enabled"
+                while ip -6 rule del fwmark "${FWMARK}" table "${ROUTE_TABLE_V6}" 2>/dev/null; do :; done
+                ip -6 route del local default dev lo table "${ROUTE_TABLE_V6}" 2>/dev/null || true
+                return 1
+            fi
             log_warn "IPv6 local route unavailable; continuing with IPv4-only routing"
             while ip -6 rule del fwmark "${FWMARK}" table "${ROUTE_TABLE_V6}" 2>/dev/null; do :; done
             ip -6 route del local default dev lo table "${ROUTE_TABLE_V6}" 2>/dev/null || true
         fi
     else
+        if ipv6_required; then
+            log_error "IPv6 policy routing unavailable and IPv6 fail-closed is enabled"
+            return 1
+        fi
         log_warn "IPv6 policy routing unavailable; continuing with IPv4-only routing"
     fi
 
@@ -434,6 +525,10 @@ do_start() {
     if ipv6_mangle_available; then
         flush_chains ip6tables
     else
+        if ipv6_required; then
+            log_error "IPv6 iptables mangle/restore unavailable and IPv6 fail-closed is enabled"
+            exit 1
+        fi
         log_warn "IPv6 iptables mangle/restore unavailable; continuing with IPv4-only interception"
     fi
     if ! setup_policy_routing; then
@@ -457,17 +552,27 @@ do_start() {
     if ipv6_mangle_available; then
         log_info "Applying IPv6 rules..."
         if ! ip6tables-restore ${IPT_WAIT} --noflush < "${SNAPSHOT_DIR}/ip6tables.rules"; then
-            log_warn "ip6tables-restore failed for IPv6; continuing with IPv4-only interception"
             cat "${SNAPSHOT_DIR}/ip6tables.rules" >&2
             flush_chains ip6tables
             IPV6_MANGLE_APPLIED=0
             IPV6_ROUTE_APPLIED=0
             while ip -6 rule del fwmark ${FWMARK} table ${ROUTE_TABLE_V6} 2>/dev/null; do :; done
             ip -6 route del local default dev lo table ${ROUTE_TABLE_V6} 2>/dev/null || true
+            if ipv6_required; then
+                log_error "ip6tables-restore failed for IPv6 and IPv6 fail-closed is enabled"
+                do_stop
+                exit 1
+            fi
+            log_warn "ip6tables-restore failed for IPv6; continuing with IPv4-only interception"
         else
             IPV6_MANGLE_APPLIED=1
         fi
     else
+        if ipv6_required; then
+            log_error "Skipping IPv6 rules apply is forbidden because IPv6 fail-closed is enabled"
+            do_stop
+            exit 1
+        fi
         log_warn "Skipping IPv6 rules apply: ip6tables/ip6tables-restore unavailable"
     fi
 

@@ -1167,28 +1167,41 @@ func (m *CoreManager) scriptEnv() map[string]string {
 	chainProxyPorts, chainProxyUIDs, chainProxyRules := BuildChainedProxyProtectionEnv(m.config)
 
 	return map[string]string{
-		"RKNNOVPN_DIR":      m.dataDir,
-		"CORE_GID":          strconv.Itoa(gid),
-		"TPROXY_PORT":       strconv.Itoa(tproxyPort),
-		"DNS_PORT":          strconv.Itoa(dnsPort),
-		"API_PORT":          strconv.Itoa(apiPort),
-		"SOCKS_PORT":        strconv.Itoa(profileInbounds.SocksPort),
-		"HTTP_PORT":         strconv.Itoa(profileInbounds.HTTPPort),
-		"CHAIN_PROXY_PORTS": chainProxyPorts,
-		"CHAIN_PROXY_UIDS":  chainProxyUIDs,
-		"CHAIN_PROXY_RULES": chainProxyRules,
-		"FWMARK":            fmt.Sprintf("0x%x", mark),
-		"ROUTE_TABLE":       "2023",
-		"ROUTE_TABLE_V6":    "2024",
-		"APP_MODE":          appRouting.AppMode,
-		"PROXY_UIDS":        appRouting.ProxyUIDs,
-		"DIRECT_UIDS":       appRouting.DirectUIDs,
-		"BYPASS_UIDS":       appRouting.BypassUIDs,
-		"DNS_SCOPE":         appRouting.DNSScope,
-		"DNS_MODE":          appRouting.DNSMode,
-		"PROXY_MODE":        "tproxy",
-		"SHARING_MODE":      m.config.SharingModeEnv(),
-		"SHARING_IFACES":    m.config.SharingInterfacesEnv(),
+		"RKNNOVPN_DIR":       m.dataDir,
+		"CORE_GID":           strconv.Itoa(gid),
+		"TPROXY_PORT":        strconv.Itoa(tproxyPort),
+		"DNS_PORT":           strconv.Itoa(dnsPort),
+		"API_PORT":           strconv.Itoa(apiPort),
+		"SOCKS_PORT":         strconv.Itoa(profileInbounds.SocksPort),
+		"HTTP_PORT":          strconv.Itoa(profileInbounds.HTTPPort),
+		"CHAIN_PROXY_PORTS":  chainProxyPorts,
+		"CHAIN_PROXY_UIDS":   chainProxyUIDs,
+		"CHAIN_PROXY_RULES":  chainProxyRules,
+		"FWMARK":             fmt.Sprintf("0x%x", mark),
+		"ROUTE_TABLE":        "2023",
+		"ROUTE_TABLE_V6":     "2024",
+		"ROUTE_RULE_PREF":    "10000",
+		"ROUTE_RULE_PREF_V6": "10001",
+		"APP_MODE":           appRouting.AppMode,
+		"PROXY_UIDS":         appRouting.ProxyUIDs,
+		"DIRECT_UIDS":        appRouting.DirectUIDs,
+		"BYPASS_UIDS":        appRouting.BypassUIDs,
+		"DNS_SCOPE":          appRouting.DNSScope,
+		"DNS_MODE":           appRouting.DNSMode,
+		"PROXY_MODE":         "tproxy",
+		"IPV6_MODE":          m.config.IPv6.Mode,
+		"IPV6_FAIL_CLOSED":   ipv6FailClosedEnv(m.config.IPv6.Mode),
+		"SHARING_MODE":       m.config.SharingModeEnv(),
+		"SHARING_IFACES":     m.config.SharingInterfacesEnv(),
+	}
+}
+
+func ipv6FailClosedEnv(mode string) string {
+	switch mode {
+	case "disable", "disabled", "off", "ipv4_only":
+		return "0"
+	default:
+		return "1"
 	}
 }
 

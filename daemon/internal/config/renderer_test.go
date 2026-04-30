@@ -291,6 +291,7 @@ func TestRenderPreservesDNSIPv6ModeWithFakeIP(t *testing.T) {
 func TestRenderAddsClashAPIWhenExplicitlyEnabled(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Proxy.APIPort = 9090
+	cfg.Proxy.APISecret = "test-secret"
 	cfg.Node.Address = "example.com"
 	cfg.Node.Port = 443
 	cfg.Node.Protocol = "vless"
@@ -308,6 +309,22 @@ func TestRenderAddsClashAPIWhenExplicitlyEnabled(t *testing.T) {
 	clashAPI := experimental["clash_api"].(map[string]any)
 	if clashAPI["external_controller"] != "127.0.0.1:9090" {
 		t.Fatalf("unexpected clash API controller: %#v", clashAPI)
+	}
+	if clashAPI["secret"] != "test-secret" {
+		t.Fatalf("clash API must render configured secret: %#v", clashAPI)
+	}
+}
+
+func TestRenderRejectsClashAPIWithoutSecret(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Proxy.APIPort = 9090
+	cfg.Node.Address = "example.com"
+	cfg.Node.Port = 443
+	cfg.Node.Protocol = "vless"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+
+	if _, err := RenderSingboxConfig(cfg, cfg.ResolveProfile()); err == nil || !strings.Contains(err.Error(), "api_secret") {
+		t.Fatalf("expected missing api_secret error, got %v", err)
 	}
 }
 

@@ -37,6 +37,7 @@ type ProxyConfig struct {
 	GID        int    `json:"gid"`      // core process GID (matches config.json proxy.gid)
 	Mark       int    `json:"mark"`     // fwmark for policy routing (matches config.json proxy.mark)
 	APIPort    int    `json:"api_port"` // 0 disables sing-box Clash REST API
+	APISecret  string `json:"api_secret,omitempty"`
 }
 
 // TransportConfig controls the outbound protocol transport layer.
@@ -581,6 +582,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Proxy.APIPort < 0 || c.Proxy.APIPort > 65535 {
 		return fmt.Errorf("proxy.api_port must be 0-65535, got %d", c.Proxy.APIPort)
+	}
+	if c.Proxy.APIPort > 0 && strings.TrimSpace(c.Proxy.APISecret) == "" {
+		return fmt.Errorf("proxy.api_secret is required when proxy.api_port is enabled")
 	}
 
 	validProto := map[string]bool{

@@ -13,7 +13,7 @@ permissions:
 env:
   GO_VERSION: "1.22"
   SINGBOX_GO_VERSION: "1.24.x"
-  SINGBOX_VERSION: "stable"
+  SINGBOX_VERSION: "1.13.0"
   SINGBOX_TAGS: "with_quic,with_wireguard,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0"
   ANDROID_API: "23"
   ANDROID_NDK_VERSION: "27.2.12479018"
@@ -398,11 +398,39 @@ jobs:
 
       - name: Build and sign APK
         working-directory: app
+        env:
+          RKNNOVPN_RELEASE_KEYSTORE_BASE64: ${{ secrets.RKNNOVPN_RELEASE_KEYSTORE_BASE64 }}
+          RKNNOVPN_RELEASE_STORE_PASSWORD: ${{ secrets.RKNNOVPN_RELEASE_STORE_PASSWORD }}
+          RKNNOVPN_RELEASE_KEY_ALIAS: ${{ secrets.RKNNOVPN_RELEASE_KEY_ALIAS }}
+          RKNNOVPN_RELEASE_KEY_PASSWORD: ${{ secrets.RKNNOVPN_RELEASE_KEY_PASSWORD }}
         run: |
-          # Build debug APK (auto-signed with debug keystore)
-          # For production releases: use assembleRelease with a proper keystore
-          ./gradlew assembleDebug --no-daemon --stacktrace
-          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          STORE_FILE="${RUNNER_TEMP}/rknnovpn-release.jks"
+          if [ -n "${RKNNOVPN_RELEASE_KEYSTORE_BASE64:-}" ]; then
+            printf '%s' "${RKNNOVPN_RELEASE_KEYSTORE_BASE64}" | base64 -d > "${STORE_FILE}"
+          elif [[ "${GITHUB_REF_NAME}" == v* ]]; then
+            echo "ERROR: stable tag builds require RKNNOVPN_RELEASE_KEYSTORE_BASE64 signing secret" >&2
+            exit 1
+          else
+            RKNNOVPN_RELEASE_STORE_PASSWORD="dev-release-store-${GITHUB_RUN_ID}"
+            RKNNOVPN_RELEASE_KEY_PASSWORD="${RKNNOVPN_RELEASE_STORE_PASSWORD}"
+            RKNNOVPN_RELEASE_KEY_ALIAS="rknnovpn-dev"
+            keytool -genkeypair \
+              -keystore "${STORE_FILE}" \
+              -storepass "${RKNNOVPN_RELEASE_STORE_PASSWORD}" \
+              -keypass "${RKNNOVPN_RELEASE_KEY_PASSWORD}" \
+              -alias "${RKNNOVPN_RELEASE_KEY_ALIAS}" \
+              -keyalg RSA \
+              -keysize 4096 \
+              -validity 30 \
+              -dname "CN=RKNnoVPN Dev Release,O=RKNnoVPN,C=RU"
+          fi
+          export RKNNOVPN_RELEASE_STORE_FILE="${STORE_FILE}"
+          export RKNNOVPN_RELEASE_STORE_PASSWORD
+          export RKNNOVPN_RELEASE_KEY_ALIAS
+          export RKNNOVPN_RELEASE_KEY_PASSWORD
+
+          ./gradlew assembleRelease --no-daemon --stacktrace
+          APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
           if [ -z "$APK" ]; then
             echo "ERROR: No APK found!"
             find . -name "*.apk" -ls

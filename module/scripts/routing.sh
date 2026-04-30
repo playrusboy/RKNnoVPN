@@ -34,6 +34,8 @@ fi
 FWMARK="${FWMARK:-0x2023}"
 ROUTE_TABLE="${ROUTE_TABLE:-2023}"
 ROUTE_TABLE_V6="${ROUTE_TABLE_V6:-2024}"
+ROUTE_RULE_PREF="${ROUTE_RULE_PREF:-10000}"
+ROUTE_RULE_PREF_V6="${ROUTE_RULE_PREF_V6:-10001}"
 
 log() { /system/bin/log -t "$TAG" -p i "$*"; }
 
@@ -50,13 +52,13 @@ start() {
     fi
 
     # ── IPv4 ────────────────────────────────────────────────────────────
-    ip rule add fwmark "$FWMARK" table "$ROUTE_TABLE" pref 100 2>/dev/null || true
+    ip rule add fwmark "$FWMARK" table "$ROUTE_TABLE" pref "$ROUTE_RULE_PREF" 2>/dev/null || true
     # Local catch-all route — TPROXY packets are delivered to lo.
     ip route add local 0.0.0.0/0 dev lo table "$ROUTE_TABLE" 2>/dev/null || \
         ip route replace local 0.0.0.0/0 dev lo table "$ROUTE_TABLE"
 
     # ── IPv6 ────────────────────────────────────────────────────────────
-    ip -6 rule add fwmark "$FWMARK" table "$ROUTE_TABLE_V6" pref 100 2>/dev/null || true
+    ip -6 rule add fwmark "$FWMARK" table "$ROUTE_TABLE_V6" pref "$ROUTE_RULE_PREF_V6" 2>/dev/null || true
     ip -6 route add local ::/0 dev lo table "$ROUTE_TABLE_V6" 2>/dev/null || \
         ip -6 route replace local ::/0 dev lo table "$ROUTE_TABLE_V6"
 

@@ -30,6 +30,18 @@ func TestValidateChecksProfileProjectionSchema(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresClashAPISecretWhenEnabled(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Proxy.APIPort = 9090
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("api_port without api_secret should be rejected")
+	}
+	cfg.Proxy.APISecret = "secret"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("api_port with api_secret should validate: %v", err)
+	}
+}
+
 func TestNormalizeProfileNodesDoesNotAddManualSource(t *testing.T) {
 	profile := defaultProfileProjectionConfig()
 	profile.Nodes = []json.RawMessage{
