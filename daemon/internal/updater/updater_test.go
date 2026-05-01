@@ -2,11 +2,14 @@ package updater
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeVersionTag(t *testing.T) {
@@ -95,6 +98,35 @@ func TestDownloadUpdateRejectsMissingChecksumAsset(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing checksum URL to reject downloaded update")
 	}
+}
+
+func TestBootstrapResolverIgnoresSystemLoopbackDNSServer(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	done := make(chan struct{})
+	go func() {
+		conn, err := listener.Accept()
+		if err == nil {
+			_ = conn.Close()
+		}
+		close(done)
+	}()
+
+	previous := updateBootstrapDNSServers
+	updateBootstrapDNSServers = []string{listener.Addr().String()}
+	t.Cleanup(func() { updateBootstrapDNSServers = previous })
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	conn, err := newBootstrapResolver().Dial(ctx, "tcp", "[::1]:53")
+	if err != nil {
+		t.Fatalf("expected resolver to use bootstrap DNS instead of passed loopback address: %v", err)
+	}
+	_ = conn.Close()
+	<-done
 }
 
 func TestVerifyDownloadedUpdateRequiresChecksumFile(t *testing.T) {

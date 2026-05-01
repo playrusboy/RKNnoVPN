@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.1.2
+
+- Fixed daemon-side update checks and update downloads so GitHub requests use bootstrap DNS instead of a stale system resolver such as `[::1]:53`.
+- Fixed subscription preview/refresh fetches to use the same bootstrap DNS path while keeping private, local, and reserved subscription endpoints blocked.
+- Added regression coverage for updater and subscription resolver bootstrap behavior.
+- Synchronized app, daemon, daemonctl, module, and update feed metadata to `v2.1.2`.
+
 ## v1.8.0
 
 - Added a runtime actor for lifecycle operations so start, stop, restart, reset, reload, network-change, rescue, and update restore no longer wait on each other through hidden long-running locks.

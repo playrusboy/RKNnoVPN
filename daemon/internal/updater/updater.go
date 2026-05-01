@@ -5,12 +5,14 @@
 package updater
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,6 +27,12 @@ const (
 )
 
 var ErrNoUpdateAvailable = errors.New("no update available")
+
+var updateBootstrapDNSServers = []string{
+	"1.1.1.1:53",
+	"8.8.8.8:53",
+	"9.9.9.9:53",
+}
 
 // --------------------------------------------------------------------------
 // Public types
@@ -84,7 +92,7 @@ type ghAsset struct {
 // CheckForUpdate queries the GitHub Releases API and compares the latest
 // tag against currentVersion. Both are expected in "vX.Y.Z" format.
 func CheckForUpdate(currentVersion string) (*UpdateInfo, error) {
-	client := &http.Client{Timeout: httpTimeout}
+	client := newHTTPClient(httpTimeout)
 	currentVersion = NormalizeVersionTag(currentVersion)
 
 	req, err := http.NewRequest("GET", releasesURL, nil)
@@ -333,7 +341,7 @@ func requireRegularArtifact(path string, label string) error {
 // downloadFile fetches a URL to a local path, calling onProgress with each
 // chunk's byte count.
 func downloadFile(url, dest string, onProgress func(int64)) error {
-	client := &http.Client{Timeout: 10 * time.Minute}
+	client := newHTTPClient(10 * time.Minute)
 
 	resp, err := client.Get(url)
 	if err != nil {
@@ -390,6 +398,37 @@ func downloadFile(url, dest string, onProgress func(int64)) error {
 	}
 	cleanup = false
 	return nil
+}
+
+func newHTTPClient(timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Resolver:  newBootstrapResolver(),
+	}).DialContext
+	return &http.Client{Timeout: timeout, Transport: transport}
+}
+
+func newBootstrapResolver() *net.Resolver {
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var lastErr error
+			for _, server := range updateBootstrapDNSServers {
+				dialer := net.Dialer{Timeout: 5 * time.Second}
+				conn, err := dialer.DialContext(ctx, network, server)
+				if err == nil {
+					return conn, nil
+				}
+				lastErr = err
+			}
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, errors.New("no bootstrap DNS servers configured")
+		},
+	}
 }
 
 func cleanupDownloadedArtifacts(destDir string) error {

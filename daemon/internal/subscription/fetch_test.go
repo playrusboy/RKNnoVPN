@@ -1,9 +1,12 @@
 package subscription
 
 import (
+	"context"
 	"errors"
+	"net"
 	"strings"
 	"testing"
+	"time"
 
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 )
@@ -101,6 +104,35 @@ func TestApplyRefreshRejectsAllRejectedSubscriptionEndpoints(t *testing.T) {
 	if len(result.RejectedNodes) != 1 {
 		t.Fatalf("expected rejected endpoint in refresh result: %#v", result)
 	}
+}
+
+func TestBootstrapResolverIgnoresSystemLoopbackDNSServer(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	done := make(chan struct{})
+	go func() {
+		conn, err := listener.Accept()
+		if err == nil {
+			_ = conn.Close()
+		}
+		close(done)
+	}()
+
+	previous := fetchBootstrapDNSServers
+	fetchBootstrapDNSServers = []string{listener.Addr().String()}
+	t.Cleanup(func() { fetchBootstrapDNSServers = previous })
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	conn, err := newBootstrapResolver().Dial(ctx, "tcp", "[::1]:53")
+	if err != nil {
+		t.Fatalf("expected resolver to use bootstrap DNS instead of passed loopback address: %v", err)
+	}
+	_ = conn.Close()
+	<-done
 }
 
 func TestClassifyError(t *testing.T) {

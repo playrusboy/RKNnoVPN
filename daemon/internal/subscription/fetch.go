@@ -16,6 +16,12 @@ const maxBodyBytes = 4 * 1024 * 1024
 
 var ErrNoSupportedNodes = errors.New("subscription contains no supported nodes")
 
+var fetchBootstrapDNSServers = []string{
+	"1.1.1.1:53",
+	"8.8.8.8:53",
+	"9.9.9.9:53",
+}
+
 type ErrorKind string
 
 const (
@@ -244,7 +250,7 @@ func fetchDialContext(ctx context.Context, network string, address string) (net.
 	if isDisallowedSourceHost(host) {
 		return nil, fmt.Errorf("subscription URL host is local, private, or reserved")
 	}
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	ips, err := newBootstrapResolver().LookupIPAddr(ctx, host)
 	if err != nil {
 		return nil, err
 	}
@@ -270,4 +276,25 @@ func fetchDialContext(ctx context.Context, network string, address string) (net.
 		return nil, lastErr
 	}
 	return nil, fmt.Errorf("subscription URL host did not resolve")
+}
+
+func newBootstrapResolver() *net.Resolver {
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var lastErr error
+			for _, server := range fetchBootstrapDNSServers {
+				dialer := net.Dialer{Timeout: 5 * time.Second}
+				conn, err := dialer.DialContext(ctx, network, server)
+				if err == nil {
+					return conn, nil
+				}
+				lastErr = err
+			}
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, errors.New("no bootstrap DNS servers configured")
+		},
+	}
 }
