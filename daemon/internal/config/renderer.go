@@ -481,6 +481,19 @@ func activeProfileNodeTag(cfg *Config, profiles []*NodeProfile) string {
 }
 
 func buildProxyOutbound(profile *NodeProfile) (map[string]interface{}, error) {
+	if RequiresXraySidecar(profile) {
+		sidecarProfile := *profile
+		sidecarProfile.Protocol = "socks"
+		sidecarProfile.Address = "127.0.0.1"
+		sidecarProfile.Port = XraySidecarSocksPort
+		sidecarProfile.Transport = "tcp"
+		sidecarProfile.TLSServer = ""
+		sidecarProfile.RealityPubKey = ""
+		sidecarProfile.RealityShortID = ""
+		sidecarProfile.Extra = nil
+		return buildProxyOutbound(&sidecarProfile)
+	}
+
 	tag := profile.Tag
 	if tag == "" {
 		tag = "proxy"
@@ -735,6 +748,7 @@ func profileFromStoredNode(raw json.RawMessage, index int) (*NodeProfile, error)
 		Fingerprint:  "chrome",
 		Extra:        map[string]string{},
 		Stale:        node.Stale,
+		RawOutbound:  append(json.RawMessage(nil), node.Outbound...),
 	}
 
 	settings := mapFromMap(outbound, "settings")
@@ -830,9 +844,18 @@ func profileFromStoredNode(raw json.RawMessage, index int) (*NodeProfile, error)
 
 func renderableProfileNodes(cfg *Config, profiles []*NodeProfile) ([]*NodeProfile, error) {
 	activeID := strings.TrimSpace(cfg.Profile.ActiveNodeID)
+	activeProfile := ResolveActiveProfile(cfg)
+	activeXHTTPID := ""
+	if RequiresXraySidecar(activeProfile) {
+		activeXHTTPID = activeProfile.ID
+	}
 	renderable := make([]*NodeProfile, 0, len(profiles))
 	skipped := 0
 	for _, profile := range profiles {
+		if RequiresXraySidecar(profile) && profile.ID != activeXHTTPID {
+			skipped++
+			continue
+		}
 		if _, err := buildProxyOutbound(profile); err != nil {
 			if activeID != "" && profile.ID == activeID {
 				return nil, fmt.Errorf("renderer: active node %q is invalid: %w", firstNonEmpty(profile.Name, profile.ID, profile.Address, profile.Tag), err)
@@ -1043,6 +1066,11 @@ func applyStreamSettings(profile *NodeProfile, stream map[string]interface{}) {
 		httpUpgrade := mapFromMap(stream, "httpupgradeSettings")
 		profile.Extra["path"] = stringFromMap(httpUpgrade, "path")
 		profile.Extra["host"] = stringFromMap(httpUpgrade, "host")
+	case "xhttp":
+		xhttp := mapFromMap(stream, "xhttpSettings")
+		profile.Extra["path"] = stringFromMap(xhttp, "path")
+		profile.Extra["host"] = stringFromMap(xhttp, "host")
+		profile.Extra["mode"] = stringFromMap(xhttp, "mode")
 	case "quic":
 		quic := mapFromMap(stream, "quicSettings")
 		profile.Extra["quic_security"] = stringFromMap(quic, "security")
@@ -1424,6 +1452,13 @@ func buildRoute(cfg *Config) map[string]interface{} {
 		})
 	}
 
+	if rule := buildForcedProxyPackageRule(cfg); rule != nil {
+		rules = append(rules, rule)
+	}
+	for _, rule := range buildAppGroupRouteRules(cfg) {
+		rules = append(rules, rule)
+	}
+
 	// Bypass private/LAN ranges.
 	if cfg.Routing.BypassLAN {
 		rules = append(rules, map[string]interface{}{
@@ -1523,10 +1558,6 @@ func buildRoute(cfg *Config) map[string]interface{} {
 		})
 	}
 
-	for _, rule := range buildAppGroupRouteRules(cfg) {
-		rules = append(rules, rule)
-	}
-
 	finalOutbound := "proxy"
 	if cfg.Routing.Mode == "direct" {
 		finalOutbound = "direct"
@@ -1607,6 +1638,35 @@ func endpointHost(address string) string {
 	return strings.Trim(strings.TrimSpace(address), "[]")
 }
 
+func buildForcedProxyPackageRule(cfg *Config) map[string]interface{} {
+	if cfg == nil || cfg.Routing.Mode != "rules" || cfg.Apps.Mode != "all" {
+		return nil
+	}
+	alwaysDirect := map[string]struct{}{}
+	for _, packageName := range cfg.Routing.AlwaysDirectApps {
+		packageName = strings.TrimSpace(packageName)
+		if packageName != "" {
+			alwaysDirect[packageName] = struct{}{}
+		}
+	}
+	groupRouted := map[string]struct{}{}
+	for packageName, groupName := range cfg.Apps.AppGroups {
+		packageName = strings.TrimSpace(packageName)
+		if packageName != "" && strings.TrimSpace(groupName) != "" {
+			groupRouted[packageName] = struct{}{}
+		}
+	}
+	packages := uniqueSortedPackages(cfg.Apps.Packages, alwaysDirect, groupRouted)
+	if len(packages) == 0 {
+		return nil
+	}
+	return map[string]interface{}{
+		"package_name": packages,
+		"action":       "route",
+		"outbound":     "proxy",
+	}
+}
+
 func buildAppGroupRouteRules(cfg *Config) []map[string]interface{} {
 	if cfg == nil || len(cfg.Apps.AppGroups) == 0 {
 		return nil
@@ -1626,11 +1686,21 @@ func buildAppGroupRouteRules(cfg *Config) []map[string]interface{} {
 		groupOutbounds[plan.name] = "group-" + plan.base
 	}
 
+	alwaysDirect := map[string]struct{}{}
+	for _, packageName := range cfg.Routing.AlwaysDirectApps {
+		packageName = strings.TrimSpace(packageName)
+		if packageName != "" {
+			alwaysDirect[packageName] = struct{}{}
+		}
+	}
 	packagesByOutbound := map[string][]string{}
 	for packageName, groupName := range cfg.Apps.AppGroups {
 		packageName = strings.TrimSpace(packageName)
 		groupName = strings.TrimSpace(groupName)
 		if packageName == "" || groupName == "" {
+			continue
+		}
+		if _, blocked := alwaysDirect[packageName]; blocked {
 			continue
 		}
 		outbound := groupOutbounds[groupName]
@@ -1657,6 +1727,33 @@ func buildAppGroupRouteRules(cfg *Config) []map[string]interface{} {
 		})
 	}
 	return rules
+}
+
+func uniqueSortedPackages(values []string, excludeSets ...map[string]struct{}) []string {
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		excluded := false
+		for _, excludeSet := range excludeSets {
+			if _, ok := excludeSet[value]; ok {
+				excluded = true
+				break
+			}
+		}
+		if excluded {
+			continue
+		}
+		seen[value] = struct{}{}
+	}
+	result := make([]string, 0, len(seen))
+	for value := range seen {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func splitCSV(value string) []string {

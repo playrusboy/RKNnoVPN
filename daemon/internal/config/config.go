@@ -256,7 +256,10 @@ type NodeProfile struct {
 	WGReserved      []int             `json:"wg_reserved,omitempty"`
 	Extra           map[string]string `json:"extra,omitempty"`
 	Stale           bool              `json:"stale,omitempty"`
+	RawOutbound     json.RawMessage   `json:"-"`
 }
+
+const XraySidecarSocksPort = 10859
 
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() *Config {
@@ -627,6 +630,7 @@ func (c *Config) Validate() error {
 		validTransport := map[string]bool{
 			"tcp": true, "reality": true, "ws": true, "grpc": true,
 			"http": true, "h2": true, "quic": true, "httpupgrade": true,
+			"xhttp": true,
 		}
 		if !validTransport[c.Transport.Protocol] {
 			return fmt.Errorf("transport.protocol %q is not supported by sing-box V2Ray transport", c.Transport.Protocol)
@@ -682,6 +686,9 @@ func (c *Config) Validate() error {
 // ResolveProfile merges Node + Transport into a flat NodeProfile
 // suitable for rendering a sing-box outbound.
 func (c *Config) ResolveProfile() *NodeProfile {
+	if profile := ResolveActiveProfile(c); RequiresXraySidecar(profile) {
+		return profile
+	}
 	return &NodeProfile{
 		Protocol:        c.Node.Protocol,
 		Address:         c.Node.Address,

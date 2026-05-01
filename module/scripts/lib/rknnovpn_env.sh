@@ -24,6 +24,7 @@ ACTIVE_FILE="${ACTIVE_FILE:-${RUN_DIR}/active}"
 MANUAL_FLAG="${MANUAL_FLAG:-${CONFIG_DIR}/manual}"
 DAEMON_PID_FILE="${DAEMON_PID_FILE:-${RUN_DIR}/daemon.pid}"
 SINGBOX_PID_FILE="${SINGBOX_PID_FILE:-${RUN_DIR}/singbox.pid}"
+XRAY_PID_FILE="${XRAY_PID_FILE:-${RUN_DIR}/xray.pid}"
 DAEMON_SOCK="${DAEMON_SOCK:-${RUN_DIR}/daemon.sock}"
 
 FWMARK="${FWMARK:-0x2023}"
@@ -201,6 +202,7 @@ rknnovpn_has_boot_cleanup_markers() {
         "$RESET_LOCK" \
         "$DAEMON_PID_FILE" \
         "$SINGBOX_PID_FILE" \
+        "$XRAY_PID_FILE" \
         "$DAEMON_SOCK" \
         "$RUN_DIR/env.sh" \
         "$RUN_DIR/iptables.rules" \
@@ -214,6 +216,7 @@ rknnovpn_has_boot_cleanup_markers() {
 
 rknnovpn_remove_runtime_snapshots() {
     rm -f "$SINGBOX_PID_FILE" 2>/dev/null || true
+    rm -f "$XRAY_PID_FILE" 2>/dev/null || true
     rm -f "$RUN_DIR/net_change.lock" 2>/dev/null || true
     rm -f "$RUN_DIR/env.sh" 2>/dev/null || true
     rm -f "$RUN_DIR/iptables.rules" "$RUN_DIR/ip6tables.rules" 2>/dev/null || true

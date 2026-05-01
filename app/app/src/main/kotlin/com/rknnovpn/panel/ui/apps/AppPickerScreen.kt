@@ -110,6 +110,8 @@ fun AppPickerScreen(
                                 R.string.app_picker_banner_disabled
                             } else if (state.routingMode == RoutingMode.PER_APP_BYPASS) {
                                 R.string.app_picker_banner_bypass
+                            } else if (state.routingMode == RoutingMode.RULES) {
+                                R.string.app_picker_banner_rules
                             } else {
                                 R.string.app_picker_banner
                             }
@@ -117,6 +119,16 @@ fun AppPickerScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
+                }
+            }
+            if (!state.supportsPerAppSelection) {
+                FilledTonalButton(
+                    onClick = viewModel::enablePerAppProxyMode,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                ) {
+                    Icon(Icons.Filled.Apps, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.enable_app_proxy_mode))
                 }
             }
 

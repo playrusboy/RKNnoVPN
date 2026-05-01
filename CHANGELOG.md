@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.2.1
+
+- Added collapsible server sections grouped by subscription and manual configs.
+- Fixed manual active-server display so the main screen uses the selected profile node.
+- Made app process routing explicit in Rule-sets mode: selected packages are forced through proxy before geo/domain/IP rules.
+- Improved the app routing UI with selected apps at the top, clearer always-direct override handling, and a direct Settings shortcut.
+- Preserved profile configuration during module updates and made first-install no-node status non-alarming.
+- Fixed runtime log ZIP sharing to use lightweight runtime logs.
+- Synchronized app, daemon, daemonctl, module, and update feed metadata to `v2.2.1`.
+
 ## v2.2.0
 
 - Fixed single-node group selector rendering so sing-box no longer references a missing `node-*` outbound from `group-default`.

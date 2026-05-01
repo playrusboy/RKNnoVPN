@@ -472,10 +472,17 @@ class SettingsViewModel @Inject constructor(
         val excluded = parsePackageList(_uiState.value.alwaysDirectExcludedPackagesText)
         viewModelScope.launch {
             val ok = profileRepository.updateConfig { config ->
+                val restoredDirectPackages = config.routing.alwaysDirectExcludedAppList
+                    .filterNot { it in excluded }
+                    .toSet()
                 config.copy(
                     routing = config.routing.copy(
                         alwaysDirectAppList = packages,
                         alwaysDirectExcludedAppList = excluded,
+                        appProxyList = config.routing.appProxyList
+                            .filterNot { it in packages || it in restoredDirectPackages },
+                        appGroupRoutes = config.routing.appGroupRoutes
+                            .filterKeys { it !in packages && it !in restoredDirectPackages },
                     ),
                 )
             }
@@ -636,12 +643,13 @@ class SettingsViewModel @Inject constructor(
         }
         _uiState.update { it.copy(isLoadingLogs = true, errorMessage = null) }
         viewModelScope.launch {
-            when (val result = daemonClient.diagnosticBundle(lines = 220)) {
+            when (val result = daemonClient.runtimeLogs(lines = 220)) {
                 is DaemonClientResult.Ok -> {
+                    val logs = result.data.text
                     _uiState.update {
                         it.copy(
-                            logsText = result.data,
-                            shareLogsText = result.data,
+                            logsText = logs,
+                            shareLogsText = logs,
                             shareLogsEventId = it.shareLogsEventId + 1,
                             isLoadingLogs = false,
                         )
@@ -952,6 +960,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     private fun formatRuntimeStatus(status: DaemonStatus, fallback: String): String {
+        if (!profileRepository.profile.value.hasAvailableNodes()) {
+            return messages.get(com.rknnovpn.panel.R.string.daemon_status_no_nodes_first_setup)
+        }
         val healthIssue = messages.formatHealthIssue(
             status.health.lastCode,
             status.health.lastError,
@@ -1020,6 +1031,9 @@ class SettingsViewModel @Inject constructor(
             .map(String::trim)
             .filter(String::isNotBlank)
             .distinct()
+
+    private fun ProfileConfig?.hasAvailableNodes(): Boolean =
+        this?.nodes?.any { !it.stale } == true
 
     private fun parseRuleList(raw: String): List<String> =
         raw.split('\n', ',', ';', ' ', '\t')

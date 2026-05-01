@@ -35,6 +35,11 @@ fun NavGraph(
         composable(TopLevelRoute.Settings.route) {
             SettingsScreen(
                 onNavigateToAudit = { navController.navigate(AUDIT_ROUTE) },
+                onNavigateToApps = {
+                    navController.navigate(TopLevelRoute.Apps.route) {
+                        launchSingleTop = true
+                    }
+                },
             )
         }
         composable(AUDIT_ROUTE) {

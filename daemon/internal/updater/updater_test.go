@@ -188,7 +188,7 @@ func TestValidateModuleStagingAcceptsCompleteBundle(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"sing-box", "daemon", "daemonctl"} {
+	for _, name := range []string{"sing-box", "xray", "daemon", "daemonctl"} {
 		writeTestFile(t, filepath.Join(binDir, name), 0755)
 	}
 	for _, path := range []string{
@@ -224,7 +224,7 @@ func TestValidateModuleStagingRejectsBadModuleProp(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"sing-box", "daemon", "daemonctl"} {
+	for _, name := range []string{"sing-box", "xray", "daemon", "daemonctl"} {
 		writeTestFile(t, filepath.Join(binDir, name), 0755)
 	}
 	for _, path := range []string{
@@ -287,7 +287,7 @@ func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"sing-box", "daemon", "daemonctl"} {
+	for _, name := range []string{"sing-box", "xray", "daemon", "daemonctl"} {
 		writeTestFile(t, filepath.Join(binDir, name), 0755)
 	}
 	for _, path := range []string{
@@ -566,7 +566,7 @@ type zipTestFile struct {
 func writeCompleteModuleZipForTest(t *testing.T, zipPath string, version string) {
 	t.Helper()
 	files := map[string]zipTestFile{}
-	for _, name := range []string{"sing-box", "daemon", "daemonctl"} {
+	for _, name := range []string{"sing-box", "xray", "daemon", "daemonctl"} {
 		files[filepath.ToSlash(filepath.Join("binaries", runtimeBinaryArch(), name))] = zipTestFile{mode: 0755, body: "bin\n"}
 	}
 	for _, path := range []string{

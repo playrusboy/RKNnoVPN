@@ -20,8 +20,8 @@ android {
         applicationId = "com.rknnovpn.panel"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2200
-        versionName = "v2.2.0"
+        versionCode = 2201
+        versionName = "v2.2.1"
 
         vectorDrawables {
             useSupportLibrary = true

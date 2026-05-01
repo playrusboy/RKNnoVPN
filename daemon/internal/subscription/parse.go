@@ -176,15 +176,78 @@ func buildOutbound(node profiledoc.Node, parsed *neturl.URL) json.RawMessage {
 		"protocol": node.Protocol,
 		"settings": settings,
 	}
-	if security := parsed.Query().Get("security"); security != "" {
-		stream := map[string]interface{}{"security": security}
-		if sni := parsed.Query().Get("sni"); sni != "" {
-			stream["tlsSettings"] = map[string]interface{}{"serverName": sni}
-		}
+	if stream := buildStreamSettings(parsed.Query()); len(stream) > 0 {
 		outbound["streamSettings"] = stream
 	}
 	raw, _ := json.Marshal(outbound)
 	return raw
+}
+
+func buildStreamSettings(query neturl.Values) map[string]interface{} {
+	stream := map[string]interface{}{}
+	network := strings.ToLower(strings.TrimSpace(query.Get("type")))
+	if network != "" {
+		stream["network"] = network
+	}
+	security := strings.ToLower(strings.TrimSpace(query.Get("security")))
+	if security != "" {
+		stream["security"] = security
+	}
+	tlsSettings := map[string]interface{}{}
+	if sni := strings.TrimSpace(firstQuery(query, "sni", "servername")); sni != "" {
+		tlsSettings["serverName"] = sni
+	}
+	if fp := strings.TrimSpace(firstQuery(query, "fp", "fingerprint")); fp != "" {
+		tlsSettings["fingerprint"] = fp
+	}
+	switch security {
+	case "reality":
+		if pbk := strings.TrimSpace(firstQuery(query, "pbk", "publicKey")); pbk != "" {
+			tlsSettings["publicKey"] = pbk
+		}
+		if sid := strings.TrimSpace(firstQuery(query, "sid", "shortId")); sid != "" {
+			tlsSettings["shortId"] = sid
+		}
+		if spx := strings.TrimSpace(firstQuery(query, "spx", "spiderX")); spx != "" {
+			tlsSettings["spiderX"] = spx
+		}
+		stream["realitySettings"] = tlsSettings
+	case "tls":
+		if len(tlsSettings) > 0 {
+			stream["tlsSettings"] = tlsSettings
+		}
+	}
+	if network == "xhttp" {
+		xhttp := map[string]interface{}{}
+		if path := strings.TrimSpace(query.Get("path")); path != "" {
+			xhttp["path"] = path
+		} else {
+			xhttp["path"] = "/"
+		}
+		if host := strings.TrimSpace(query.Get("host")); host != "" {
+			xhttp["host"] = host
+		}
+		if mode := strings.TrimSpace(query.Get("mode")); mode != "" {
+			xhttp["mode"] = mode
+		}
+		if extra := strings.TrimSpace(query.Get("extra")); extra != "" {
+			var value interface{}
+			if err := json.Unmarshal([]byte(extra), &value); err == nil {
+				xhttp["extra"] = value
+			}
+		}
+		stream["xhttpSettings"] = xhttp
+	}
+	return stream
+}
+
+func firstQuery(query neturl.Values, keys ...string) string {
+	for _, key := range keys {
+		if value := query.Get(key); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func decodeSubscriptionBody(body string) string {

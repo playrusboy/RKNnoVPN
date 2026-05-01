@@ -543,6 +543,81 @@ func TestRenderSocksOutboundDoesNotInheritTransport(t *testing.T) {
 	}
 }
 
+func TestRenderXHTTPProfileUsesXraySidecarSocksOutbound(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = ""
+	cfg.Node.UUID = ""
+	cfg.Profile.ActiveNodeID = "xhttp-node"
+	cfg.Profile.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"xhttp-node",
+			"name":"XHTTP",
+			"protocol":"VLESS",
+			"server":"example.com",
+			"port":443,
+			"outbound":{
+				"protocol":"vless",
+				"settings":{
+					"vnext":[{
+						"address":"example.com",
+						"port":443,
+						"users":[{
+							"id":"00000000-0000-0000-0000-000000000000",
+							"encryption":"none"
+						}]
+					}]
+				},
+				"streamSettings":{
+					"network":"xhttp",
+					"security":"reality",
+					"realitySettings":{
+						"serverName":"www.example.com",
+						"fingerprint":"chrome",
+						"publicKey":"public-key",
+						"shortId":""
+					},
+					"xhttpSettings":{
+						"path":"/api",
+						"host":"cdn.example.com",
+						"mode":"auto"
+					}
+				}
+			}
+		}`),
+	}
+
+	profile := cfg.ResolveProfile()
+	if !RequiresXraySidecar(profile) {
+		t.Fatalf("xhttp profile must require xray sidecar: %#v", profile)
+	}
+	data, err := RenderSingboxConfig(cfg, profile)
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	var rendered map[string]any
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	outbound := rendered["outbounds"].([]any)[0].(map[string]any)
+	if outbound["type"] != "socks" || outbound["server"] != "127.0.0.1" || int(outbound["server_port"].(float64)) != XraySidecarSocksPort {
+		t.Fatalf("xhttp sing-box outbound must point at xray sidecar socks: %#v", outbound)
+	}
+
+	xrayData, err := RenderXraySidecarConfig(profile, XraySidecarSocksPort)
+	if err != nil {
+		t.Fatalf("render xray sidecar: %v", err)
+	}
+	var xray map[string]any
+	if err := json.Unmarshal(xrayData, &xray); err != nil {
+		t.Fatalf("unmarshal xray config: %v", err)
+	}
+	xrayOutbound := xray["outbounds"].([]any)[0].(map[string]any)
+	stream := xrayOutbound["streamSettings"].(map[string]any)
+	if stream["network"] != "xhttp" {
+		t.Fatalf("xray outbound must preserve xhttp stream: %#v", stream)
+	}
+}
+
 func TestRenderGRPCTransportOmitsXrayOnlyFields(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = "example.com"
@@ -1325,6 +1400,53 @@ func TestRenderAppGroupRouteRules(t *testing.T) {
 	packages := groupRule["package_name"].([]any)
 	if len(packages) != 2 || packages[0] != "com.chat.app" || packages[1] != "com.video.app" {
 		t.Fatalf("unexpected app group packages: %#v", packages)
+	}
+}
+
+func TestRenderRulesModeForcedProxyPackagesBeforeRuleSets(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = "proxy.example"
+	cfg.Node.Port = 443
+	cfg.Node.Protocol = "vless"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	cfg.Routing.Mode = "rules"
+	cfg.Routing.BypassRussia = true
+	cfg.Routing.CustomDirect = []string{"example.org"}
+	cfg.Apps.Mode = "all"
+	cfg.Apps.Packages = []string{"org.telegram.messenger", " com.discord ", "org.telegram.messenger"}
+	cfg.Routing.AlwaysDirectApps = []string{"com.rknnovpn.panel"}
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	rules := rendered["route"].(map[string]any)["rules"].([]any)
+	forceIndex := -1
+	directIndex := -1
+	for index, rawRule := range rules {
+		rule := rawRule.(map[string]any)
+		if rule["outbound"] == "proxy" {
+			if packages, ok := rule["package_name"].([]any); ok && len(packages) == 2 &&
+				packages[0] == "com.discord" && packages[1] == "org.telegram.messenger" {
+				forceIndex = index
+			}
+		}
+		if rule["outbound"] == "direct" {
+			if _, ok := rule["domain"].([]any); ok {
+				directIndex = index
+			}
+		}
+	}
+	if forceIndex < 0 {
+		t.Fatalf("expected forced proxy package rule, got %#v", rules)
+	}
+	if directIndex >= 0 && forceIndex > directIndex {
+		t.Fatalf("forced proxy package rule must run before direct domain/rule-set rules: force=%d direct=%d rules=%#v", forceIndex, directIndex, rules)
 	}
 }
 

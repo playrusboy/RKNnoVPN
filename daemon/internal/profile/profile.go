@@ -515,6 +515,7 @@ func routingFromConfig(cfg *config.Config) RoutingConfig {
 		routing.Mode = "DIRECT"
 	case "rules":
 		routing.Mode = "RULES"
+		routing.AppProxyList = append([]string(nil), cfg.Apps.Packages...)
 	default:
 		routing.Mode = "PER_APP"
 		routing.AppProxyList = append([]string(nil), cfg.Apps.Packages...)
@@ -550,7 +551,7 @@ func applyRoutingToConfig(cfg *config.Config, routing RoutingConfig) {
 	case "RULES":
 		cfg.Routing.Mode = "rules"
 		cfg.Apps.Mode = "all"
-		cfg.Apps.Packages = nil
+		cfg.Apps.Packages = append([]string(nil), routing.AppProxyList...)
 	default:
 		cfg.Routing.Mode = "whitelist"
 		cfg.Apps.Mode = "whitelist"

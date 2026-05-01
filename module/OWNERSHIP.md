@@ -13,6 +13,9 @@ entrypoint.
   `rknnovpn_env.sh` whether boot cleanup markers exist, run canonical boot
   cleanup, and launch `daemon`. It must not implement its own stale
   process/socket/PID cleanup.
+- `bin/xray` is an optional runtime sidecar owned by `daemon` and used only
+  for VLESS/XHTTP profiles. sing-box remains the owner of TPROXY, DNS, routing,
+  and all non-XHTTP profiles.
 - `scripts/rescue_reset.sh` is the canonical root cleanup API.
 - `scripts/privacy_guard.sh` owns best-effort Android package visibility
   hardening for sensitive direct apps. It must not claim or implement

@@ -98,6 +98,35 @@ func TestProfileRoutingProjectsRussiaAndSeparateRuleIPs(t *testing.T) {
 	}
 }
 
+func TestProfileRulesModePreservesForcedProxyApps(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Routing.Mode = "rules"
+	cfg.Apps.Mode = "all"
+	cfg.Apps.Packages = []string{"org.telegram.messenger", "com.discord"}
+
+	doc := FromConfig(cfg)
+	if doc.Routing.Mode != "RULES" {
+		t.Fatalf("expected RULES mode, got %#v", doc.Routing.Mode)
+	}
+	for _, want := range []string{"org.telegram.messenger", "com.discord"} {
+		if !containsString(doc.Routing.AppProxyList, want) {
+			t.Fatalf("forced proxy app %q missing from profile: %#v", want, doc.Routing.AppProxyList)
+		}
+	}
+
+	doc.Routing.AppProxyList = []string{"com.discord"}
+	next, _, err := ApplyToConfig(cfg, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Routing.Mode != "rules" || next.Apps.Mode != "all" {
+		t.Fatalf("rules process routing changed modes: routing=%q apps=%q", next.Routing.Mode, next.Apps.Mode)
+	}
+	if len(next.Apps.Packages) != 1 || next.Apps.Packages[0] != "com.discord" {
+		t.Fatalf("forced proxy apps not applied to rules mode: %#v", next.Apps.Packages)
+	}
+}
+
 func TestDecodeStrictDocumentRejectsUnknownProfileFields(t *testing.T) {
 	raw := []byte(`{
 		"profileSchemaVersion": 2,

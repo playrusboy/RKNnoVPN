@@ -102,6 +102,7 @@ validate_env() {
     BYPASS_UIDS="${BYPASS_UIDS:-}"
     SOCKS_PORT="${SOCKS_PORT:-0}"
     HTTP_PORT="${HTTP_PORT:-0}"
+    XRAY_SIDECAR_PORT="${XRAY_SIDECAR_PORT:-0}"
     CHAIN_PROXY_PORTS="${CHAIN_PROXY_PORTS:-}"
     CHAIN_PROXY_UIDS="${CHAIN_PROXY_UIDS:-}"
     CHAIN_PROXY_RULES="${CHAIN_PROXY_RULES:-}"
@@ -273,7 +274,8 @@ validate_port_conflicts() {
         "DNS_PORT:${DNS_PORT}" \
         "API_PORT:${API_PORT}" \
         "SOCKS_PORT:${SOCKS_PORT}" \
-        "HTTP_PORT:${HTTP_PORT}"; do
+        "HTTP_PORT:${HTTP_PORT}" \
+        "XRAY_SIDECAR_PORT:${XRAY_SIDECAR_PORT}"; do
         _name="${_entry%%:*}"
         _port="${_entry#*:}"
         [ "$_port" = "0" ] && continue
@@ -314,6 +316,7 @@ validate_runtime_values() {
     validate_port API_PORT "$API_PORT" 1
     validate_port SOCKS_PORT "$SOCKS_PORT" 1
     validate_port HTTP_PORT "$HTTP_PORT" 1
+    validate_port XRAY_SIDECAR_PORT "$XRAY_SIDECAR_PORT" 1
     validate_uint CORE_GID "$CORE_GID"
     validate_uint ROUTE_TABLE "$ROUTE_TABLE"
     validate_uint ROUTE_TABLE_V6 "$ROUTE_TABLE_V6"
@@ -354,7 +357,7 @@ save_snapshot() {
     _tmp="${SNAPSHOT_DIR}/env.sh.tmp.$$"
     {
         echo "# RKNnoVPN runtime snapshot - generated at $(date)"
-        for _name in TPROXY_PORT DNS_PORT API_PORT SOCKS_PORT HTTP_PORT \
+        for _name in TPROXY_PORT DNS_PORT API_PORT SOCKS_PORT HTTP_PORT XRAY_SIDECAR_PORT \
             CHAIN_PROXY_PORTS CHAIN_PROXY_UIDS CHAIN_PROXY_RULES \
             FWMARK ROUTE_TABLE ROUTE_TABLE_V6 CORE_GID APP_MODE \
             PROXY_UIDS DIRECT_UIDS BYPASS_UIDS DNS_SCOPE DNS_MODE \
@@ -397,6 +400,7 @@ load_snapshot() {
                 API_PORT) API_PORT="$_value" ;;
                 SOCKS_PORT) SOCKS_PORT="$_value" ;;
                 HTTP_PORT) HTTP_PORT="$_value" ;;
+                XRAY_SIDECAR_PORT) XRAY_SIDECAR_PORT="$_value" ;;
                 CHAIN_PROXY_PORTS) CHAIN_PROXY_PORTS="$_value" ;;
                 CHAIN_PROXY_UIDS) CHAIN_PROXY_UIDS="$_value" ;;
                 CHAIN_PROXY_RULES) CHAIN_PROXY_RULES="$_value" ;;

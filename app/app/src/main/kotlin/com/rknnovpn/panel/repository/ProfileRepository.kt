@@ -191,13 +191,6 @@ class ProfileRepository @Inject constructor(
             _error.value = null
             _notice.value = null
             try {
-                val current = _profile.value ?: refreshUnlockedOrNull(allowModuleRepair = true) ?: run {
-                    if (_error.value.isNullOrBlank()) {
-                        _error.value = messages.get(com.rknnovpn.panel.R.string.error_no_profile_loaded)
-                    }
-                    return@withLock emptyList()
-                }
-
                 if (LinkParser.isSubscriptionUrl(input.trim())) {
                     importSubscriptionUnlocked(input.trim())
                 } else {

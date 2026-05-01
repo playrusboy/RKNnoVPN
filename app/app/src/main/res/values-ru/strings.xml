@@ -109,6 +109,10 @@
     <string name="link_copied">Ссылка скопирована</string>
     <string name="node_source_subscription">Подписка</string>
     <string name="node_source_subscription_stale">Удалён из подписки</string>
+    <string name="node_section_manual_configs">Без подписки</string>
+    <string name="node_section_nodes_count">Серверов: %1$d</string>
+    <string name="node_section_subscription_counts">Активных %1$d, удалённых %2$d</string>
+    <string name="node_section_subscription_counts_with_errors">Активных %1$d, удалённых %2$d, ошибок разбора %3$d</string>
 
     <!-- Import sheet -->
     <string name="import_nodes">Импорт серверов</string>
@@ -131,9 +135,11 @@
     <string name="filter_system_apps">Системные приложения</string>
     <string name="apps_empty">Приложения не найдены.\nУстановите демон для маршрутизации по приложениям.</string>
     <string name="app_picker_title">Прокси для приложений</string>
-    <string name="app_picker_banner">Выбранные приложения работают через прокси. Остальные подключаются напрямую.</string>
+    <string name="app_picker_banner">Выбранные приложения полностью проксируются как Android-процессы. Остальные подключаются напрямую.</string>
     <string name="app_picker_banner_bypass">Выбранные приложения подключаются напрямую. Остальные идут через прокси.</string>
-    <string name="app_picker_banner_disabled">Выбор приложений не используется в текущем режиме маршрутизации. Переключите Маршрутизацию на Белый список или Исключения в настройках.</string>
+    <string name="app_picker_banner_rules">Выбранные приложения принудительно идут через прокси до проверки доменных, IP и rule-set правил.</string>
+    <string name="app_picker_banner_disabled">Правила для процессов приложений не используются в текущем режиме. Включите режим прокси для приложений или выберите Rule-sets в настройках маршрутизации.</string>
+    <string name="enable_app_proxy_mode">Включить прокси для приложений</string>
     <string name="template_browsers">Браузеры</string>
     <string name="template_social">Соцсети</string>
     <string name="template_streaming">Стриминг</string>
@@ -154,13 +160,18 @@
 
     <!-- Settings -->
     <string name="settings_routing">Маршрутизация</string>
-    <string name="routing_global">Глобально</string>
-    <string name="routing_whitelist">Белый список</string>
-    <string name="routing_bypass">Исключения</string>
-    <string name="routing_rules">Правила</string>
+    <string name="routing_mode_title">Режим маршрутизации</string>
+    <string name="routing_global">Все приложения</string>
+    <string name="routing_whitelist">Прокси прилож.</string>
+    <string name="routing_bypass">Напрямую прилож.</string>
+    <string name="routing_rules">Rule-sets</string>
     <string name="routing_direct">Напрямую</string>
-    <string name="routing_rule_editor">Правила доменов и IP</string>
-    <string name="routing_rule_editor_desc">Добавляйте по одному значению в строке. Правила «напрямую» обходят прокси, правила «через прокси» принудительно ведут трафик через RKNnoVPN, а правила блокировки отклоняют трафик.</string>
+    <string name="app_process_proxy_title">Проксировать приложения как процессы</string>
+    <string name="app_process_proxy_desc">Откройте список приложений, чтобы выбрать Android-пакеты, которые должны полностью идти через прокси.</string>
+    <string name="app_process_proxy_desc_rules">В режиме Rule-sets выбранные пакеты идут через прокси до geo, доменных и IP-правил.</string>
+    <string name="app_process_proxy_open">Выбрать приложения</string>
+    <string name="routing_rule_editor">Rule-sets и свои правила</string>
+    <string name="routing_rule_editor_desc">Режим Rule-sets использует встроенные geo/ad SRS rule-set списки и эти правила доменов/IP. Правила «напрямую» обходят прокси, правила «через прокси» ведут через RKNnoVPN, блокировка отклоняет трафик.</string>
     <string name="routing_direct_domains">Домены напрямую</string>
     <string name="routing_proxy_domains">Домены через прокси</string>
     <string name="routing_block_domains">Заблокированные домены</string>
@@ -347,9 +358,6 @@
     <string name="subscription_refresh_summary">Подписка обновлена: узлов %1$d</string>
     <string name="subscription_refresh_summary_with_errors">Подписка обновлена: узлов %1$d, ошибок разбора %2$d</string>
     <string name="subscription_provider_fallback">Подписка</string>
-    <string name="subscriptions_summary_title">Подписки</string>
-    <string name="subscription_summary_line">%1$s: активных %2$d, удалённых %3$d</string>
-    <string name="subscription_summary_parse_errors">Ошибок разбора: %1$d</string>
     <string name="node_test_status_ok">ОК</string>
     <string name="node_test_status_tcp_ok">TCP ОК</string>
     <string name="node_test_status_tcp_error">TCP: %1$s</string>
@@ -388,6 +396,7 @@
     <string name="daemon_status_resetting">Сброс службы…</string>
     <string name="daemon_status_stopped">Остановлено</string>
     <string name="daemon_status_partial_reset">Частичный сброс</string>
+    <string name="daemon_status_no_nodes_first_setup">Серверы ещё не добавлены. Это нормально после первой установки — добавьте сервер, чтобы начать пользоваться RKNnoVPN.</string>
     <string name="daemon_status_running_with_core">Запущено (%1$s)</string>
     <string name="daemon_status_runtime_versions">daemon %1$s · module %2$s · core %3$s</string>
     <string name="daemon_status_running_degraded">Запущено (degraded: %1$s)</string>

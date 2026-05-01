@@ -109,6 +109,10 @@
     <string name="link_copied">Link copied</string>
     <string name="node_source_subscription">Subscription</string>
     <string name="node_source_subscription_stale">Removed from subscription</string>
+    <string name="node_section_manual_configs">Manual configs</string>
+    <string name="node_section_nodes_count">%1$d servers</string>
+    <string name="node_section_subscription_counts">Active %1$d, removed %2$d</string>
+    <string name="node_section_subscription_counts_with_errors">Active %1$d, removed %2$d, parse errors %3$d</string>
 
     <!-- Import sheet -->
     <string name="import_nodes">Import nodes</string>
@@ -131,9 +135,11 @@
     <string name="filter_system_apps">System apps</string>
     <string name="apps_empty">No apps found.\nInstall the daemon to enable per-app routing.</string>
     <string name="app_picker_title">Per-app proxy</string>
-    <string name="app_picker_banner">Selected apps route through proxy. Everything else connects directly.</string>
+    <string name="app_picker_banner">Selected apps are fully proxied as Android processes. Everything else connects directly.</string>
     <string name="app_picker_banner_bypass">Selected apps connect directly. Everything else routes through proxy.</string>
-    <string name="app_picker_banner_disabled">Per-app selection is inactive for the current routing mode. Switch Routing to Whitelist or Bypass in Settings.</string>
+    <string name="app_picker_banner_rules">Selected apps are forced through proxy before domain/IP rule-sets are evaluated.</string>
+    <string name="app_picker_banner_disabled">App process rules are inactive for the current routing mode. Enable app proxy mode or switch Routing to Rule-sets in Settings.</string>
+    <string name="enable_app_proxy_mode">Enable app proxy mode</string>
     <string name="template_browsers">Browsers</string>
     <string name="template_social">Social</string>
     <string name="template_streaming">Streaming</string>
@@ -154,13 +160,18 @@
 
     <!-- Settings -->
     <string name="settings_routing">Routing</string>
-    <string name="routing_global">Global</string>
-    <string name="routing_whitelist">Whitelist</string>
-    <string name="routing_bypass">Bypass</string>
-    <string name="routing_rules">Rules</string>
+    <string name="routing_mode_title">Routing mode</string>
+    <string name="routing_global">All apps</string>
+    <string name="routing_whitelist">Proxy apps</string>
+    <string name="routing_bypass">Direct apps</string>
+    <string name="routing_rules">Rule-sets</string>
     <string name="routing_direct">Direct</string>
-    <string name="routing_rule_editor">Domain and IP rules</string>
-    <string name="routing_rule_editor_desc">Add one value per line. Direct rules bypass the proxy, proxy rules force traffic through RKNnoVPN, and block rules reject traffic.</string>
+    <string name="app_process_proxy_title">Proxy apps as processes</string>
+    <string name="app_process_proxy_desc">Open the app list to choose Android packages that should be fully proxied.</string>
+    <string name="app_process_proxy_desc_rules">In Rule-sets mode, selected packages are forced through proxy before geo/domain/IP rules.</string>
+    <string name="app_process_proxy_open">Choose apps</string>
+    <string name="routing_rule_editor">Rule-sets and custom rules</string>
+    <string name="routing_rule_editor_desc">Rule-sets mode uses built-in geo/ad SRS rule-sets plus these custom domain/IP rules. Direct rules bypass the proxy, proxy rules force RKNnoVPN, and block rules reject traffic.</string>
     <string name="routing_direct_domains">Direct domains</string>
     <string name="routing_proxy_domains">Proxy domains</string>
     <string name="routing_block_domains">Blocked domains</string>
@@ -347,9 +358,6 @@
     <string name="subscription_refresh_summary">Subscription refreshed: %1$d nodes</string>
     <string name="subscription_refresh_summary_with_errors">Subscription refreshed: %1$d nodes, %2$d parse errors</string>
     <string name="subscription_provider_fallback">Subscription</string>
-    <string name="subscriptions_summary_title">Subscriptions</string>
-    <string name="subscription_summary_line">%1$s: active %2$d, removed %3$d</string>
-    <string name="subscription_summary_parse_errors">Parse errors: %1$d</string>
     <string name="node_test_status_ok">OK</string>
     <string name="node_test_status_tcp_ok">TCP OK</string>
     <string name="node_test_status_tcp_error">TCP: %1$s</string>
@@ -388,6 +396,7 @@
     <string name="daemon_status_resetting">Resetting backend…</string>
     <string name="daemon_status_stopped">Stopped</string>
     <string name="daemon_status_partial_reset">Partial reset</string>
+    <string name="daemon_status_no_nodes_first_setup">No servers added yet. This is normal after first setup — add a server to start using RKNnoVPN.</string>
     <string name="daemon_status_running_with_core">Running (%1$s)</string>
     <string name="daemon_status_runtime_versions">daemon %1$s · module %2$s · core %3$s</string>
     <string name="daemon_status_running_degraded">Running (degraded: %1$s)</string>

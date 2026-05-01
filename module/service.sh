@@ -109,7 +109,7 @@ rotate_logs_if_version_changed() {
     ARCHIVE_DIR="${LOG_ARCHIVE_DIR}/${FROM_VERSION}_to_${CURRENT_VERSION}_${STAMP}"
     MOVED=0
 
-    for name in daemon.log sing-box.log service.log rescue_reset.log net_change.log; do
+    for name in daemon.log sing-box.log xray.log service.log rescue_reset.log net_change.log; do
         src="${RKNNOVPN_DIR}/logs/${name}"
         if [ -s "$src" ]; then
             mkdir -p "$ARCHIVE_DIR" 2>/dev/null || continue
@@ -302,6 +302,7 @@ daemon_socket_exists() {
 has_orphan_runtime_processes() {
     first_pid_by_cmd_path "$DAEMON_BIN" >/dev/null 2>&1 && return 0
     first_pid_by_cmd_path "${RKNNOVPN_DIR}/bin/sing-box" >/dev/null 2>&1 && return 0
+    first_pid_by_cmd_path "${RKNNOVPN_DIR}/bin/xray" >/dev/null 2>&1 && return 0
     first_pid_by_cmd_path "${RKNNOVPN_DIR}/scripts/net_handler.sh" >/dev/null 2>&1 && return 0
     return 1
 }
@@ -398,7 +399,7 @@ restore_missing_binaries() {
         return 0
     fi
 
-    for bin_name in daemon daemonctl sing-box; do
+    for bin_name in daemon daemonctl sing-box xray; do
         target="${RKNNOVPN_DIR}/bin/${bin_name}"
         source="${SRC_BIN}/${bin_name}"
         if [ ! -x "$target" ] && [ -f "$source" ]; then
@@ -574,6 +575,11 @@ if [ "$LAUNCH_RESULT" -eq 0 ]; then
         if [ -n "$SINGBOX_PID" ] && [ -d "/proc/${SINGBOX_PID}" ]; then
             echo "$OOM_SCORE_ADJ" > "/proc/${SINGBOX_PID}/oom_score_adj" 2>/dev/null
             log_info "Set oom_score_adj=${OOM_SCORE_ADJ} for sing-box PID ${SINGBOX_PID}"
+        fi
+        XRAY_PID="$(first_pid_by_cmd_path "${RKNNOVPN_DIR}/bin/xray" 2>/dev/null)"
+        if [ -n "$XRAY_PID" ] && [ -d "/proc/${XRAY_PID}" ]; then
+            echo "$OOM_SCORE_ADJ" > "/proc/${XRAY_PID}/oom_score_adj" 2>/dev/null
+            log_info "Set oom_score_adj=${OOM_SCORE_ADJ} for xray PID ${XRAY_PID}"
         fi
     fi
 fi

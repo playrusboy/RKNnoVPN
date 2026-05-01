@@ -407,20 +407,21 @@ class DashboardViewModel @Inject constructor(
     }
 
     private fun formatActiveNodeName(status: DaemonStatus, profile: ProfileConfig?): String? {
-        status.activeNodeName?.trim()?.ifBlank { null }?.let { return it }
-        return when (effectiveActiveNodeMode(status, profile)) {
+        val mode = effectiveActiveNodeMode(status, profile)
+        return when (mode) {
             "auto_selector" -> messages.get(com.rknnovpn.panel.R.string.active_node_mode_auto)
             "manual_missing" -> null
-            else -> effectiveActiveNode(status, profile)?.name
+            "manual" -> configuredActiveNode(profile)?.name
+            else -> status.activeNodeName?.trim()?.ifBlank { null }
+                ?: effectiveActiveNode(status, profile)?.name
         }
     }
 
     private fun formatActiveNodeSubtitle(status: DaemonStatus, profile: ProfileConfig?): String? {
-        return when (effectiveActiveNodeMode(status, profile)) {
+        val mode = effectiveActiveNodeMode(status, profile)
+        return when (mode) {
             "auto_selector" -> null
-            "manual" -> status.activeNodeProtocol?.let {
-                messages.get(com.rknnovpn.panel.R.string.active_node_mode_manual, it)
-            } ?: effectiveActiveNode(status, profile)?.protocol?.name?.let {
+            "manual" -> configuredActiveNode(profile)?.protocol?.name?.let {
                 messages.get(com.rknnovpn.panel.R.string.active_node_mode_manual, it)
             }
             "manual_missing" -> messages.get(com.rknnovpn.panel.R.string.active_node_mode_missing)
@@ -445,9 +446,18 @@ class DashboardViewModel @Inject constructor(
     private fun effectiveActiveNode(status: DaemonStatus, profile: ProfileConfig?): Node? {
         val nodes = availableNodes(profile)
         if (nodes.isEmpty()) return null
-        val activeId = status.activeNodeId?.trim()?.ifBlank { null }
-            ?: profile?.activeNodeId?.trim()?.ifBlank { null }
+        val activeId = if (effectiveActiveNodeMode(status, profile) == "manual") {
+            profile?.activeNodeId?.trim()?.ifBlank { null }
+        } else {
+            status.activeNodeId?.trim()?.ifBlank { null }
+                ?: profile?.activeNodeId?.trim()?.ifBlank { null }
+        }
         return activeId?.let { id -> nodes.firstOrNull { it.id == id } } ?: nodes.firstOrNull()
+    }
+
+    private fun configuredActiveNode(profile: ProfileConfig?): Node? {
+        val activeId = profile?.activeNodeId?.trim()?.ifBlank { null } ?: return null
+        return availableNodes(profile).firstOrNull { it.id == activeId }
     }
 
     private fun availableNodes(profile: ProfileConfig?): List<Node> =

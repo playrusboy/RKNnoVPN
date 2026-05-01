@@ -83,6 +83,7 @@ kill_matching_processes() {
 
         case "$cmd" in
             *"$RKNNOVPN_DIR/bin/sing-box"*|\
+            *"$RKNNOVPN_DIR/bin/xray"*|\
             *"$RKNNOVPN_DIR/scripts/net_handler.sh"*|*"inotifyd"*"${RKNNOVPN_DIR}/scripts/net_handler.sh"*)
                 log "$signal $pid :: $cmd"
                 kill "-$signal" "$pid" 2>/dev/null
@@ -97,7 +98,7 @@ kill_matching_processes() {
     done
 }
 
-log "[2/8] killing orphan daemon/sing-box/net_handler processes"
+log "[2/8] killing orphan daemon/sing-box/xray/net_handler processes"
 kill_matching_processes TERM
 sleep 1
 kill_matching_processes KILL

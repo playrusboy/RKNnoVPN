@@ -44,6 +44,9 @@ object LinkParser {
         """^https?://[^\s]+(/sub|/api|/link|subscribe|token=|sub\?|clash\?)""",
         RegexOption.IGNORE_CASE
     )
+    private val SUPPORTED_V2RAY_TRANSPORTS = setOf(
+        "tcp", "ws", "grpc", "http", "h2", "quic", "httpupgrade", "xhttp",
+    )
 
     // ---------- public API ----------
 
@@ -129,6 +132,8 @@ object LinkParser {
      */
     private fun parseVless(uri: String): Node? {
         val parsed = parseStandardUri(uri, "vless") ?: return null
+        val tlsObj = parseTls(parsed.params)
+        val streamSettings = buildStreamSettings(parsed.params, tlsObj) ?: return null
 
         val outbound = buildJsonObject {
             put("protocol", "vless")
@@ -148,9 +153,7 @@ object LinkParser {
                     }
                 }
             }
-            val tlsObj = parseTls(parsed.params)
-            if (tlsObj != null) put("streamSettings", buildStreamSettings(parsed.params, tlsObj))
-            else put("streamSettings", buildStreamSettings(parsed.params, null))
+            put("streamSettings", streamSettings)
         }
 
         return Node(
@@ -213,6 +216,9 @@ object LinkParser {
             }
         }
 
+        val tlsObj = parseTls(params)
+        val streamSettings = buildStreamSettings(params, tlsObj) ?: return null
+
         val outbound = buildJsonObject {
             put("protocol", "vmess")
             putJsonObject("settings") {
@@ -230,8 +236,7 @@ object LinkParser {
                     }
                 }
             }
-            val tlsObj = parseTls(params)
-            put("streamSettings", buildStreamSettings(params, tlsObj))
+            put("streamSettings", streamSettings)
         }
 
         return Node(
@@ -250,6 +255,12 @@ object LinkParser {
      */
     private fun parseTrojan(uri: String): Node? {
         val parsed = parseStandardUri(uri, "trojan") ?: return null
+        val security = parsed.params["security"] ?: "tls"
+        val tlsParams = parsed.params.toMutableMap().apply {
+            putIfAbsent("security", security)
+        }
+        val tlsObj = parseTls(tlsParams)
+        val streamSettings = buildStreamSettings(tlsParams, tlsObj) ?: return null
 
         val outbound = buildJsonObject {
             put("protocol", "trojan")
@@ -263,12 +274,7 @@ object LinkParser {
                 }
             }
             // Trojan implies TLS by default.
-            val security = parsed.params["security"] ?: "tls"
-            val tlsParams = parsed.params.toMutableMap().apply {
-                putIfAbsent("security", security)
-            }
-            val tlsObj = parseTls(tlsParams)
-            put("streamSettings", buildStreamSettings(tlsParams, tlsObj))
+            put("streamSettings", streamSettings)
         }
 
         return Node(
@@ -604,9 +610,9 @@ object LinkParser {
     /**
      * Build the xray `streamSettings` object from query params and an optional TLS block.
      */
-    private fun buildStreamSettings(params: Map<String, String>, tlsObj: JsonObject?): JsonObject {
+    private fun buildStreamSettings(params: Map<String, String>, tlsObj: JsonObject?): JsonObject? {
+        val network = normalizedTransport(params) ?: return null
         return buildJsonObject {
-            val network = params["type"] ?: "tcp"
             put("network", network)
 
             // TLS / Reality.
@@ -633,6 +639,7 @@ object LinkParser {
                 "quic"       -> put("quicSettings", transportObj)
                 "http", "h2" -> put("httpSettings", transportObj)
                 "httpupgrade" -> put("httpupgradeSettings", transportObj)
+                "xhttp"      -> put("xhttpSettings", transportObj)
                 "splithttp"  -> put("splithttpSettings", transportObj)
             }
         }
@@ -642,7 +649,7 @@ object LinkParser {
      * Build transport-specific settings from query params.
      */
     private fun parseTransport(params: Map<String, String>): JsonObject = buildJsonObject {
-        when (params["type"] ?: "tcp") {
+        when (normalizedTransport(params) ?: "tcp") {
             "ws" -> {
                 put("path", params["path"] ?: "/")
                 putJsonObject("headers") {
@@ -705,12 +712,26 @@ object LinkParser {
                 val host = params["host"]
                 if (!host.isNullOrEmpty()) put("host", host)
             }
+            "xhttp" -> {
+                put("path", params["path"] ?: "/")
+                val host = params["host"]
+                if (!host.isNullOrEmpty()) put("host", host)
+                val mode = params["mode"]
+                if (!mode.isNullOrEmpty()) put("mode", mode)
+                val extra = params["extra"]
+                if (!extra.isNullOrEmpty()) put("extra", json.parseToJsonElement(extra))
+            }
             "splithttp" -> {
                 put("path", params["path"] ?: "/")
                 val host = params["host"]
                 if (!host.isNullOrEmpty()) put("host", host)
             }
         }
+    }
+
+    private fun normalizedTransport(params: Map<String, String>): String? {
+        val network = params["type"]?.trim()?.lowercase()?.ifEmpty { "tcp" } ?: "tcp"
+        return network.takeIf { it in SUPPORTED_V2RAY_TRANSPORTS }
     }
 
     /**

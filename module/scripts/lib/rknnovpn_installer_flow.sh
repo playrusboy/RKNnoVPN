@@ -187,6 +187,7 @@ prepare_install_logs() {
 
 preserve_existing_config() {
     CONFIG_FILE="${RKNNOVPN_DIR}/config/config.json"
+    PROFILE_FILE="${RKNNOVPN_DIR}/config/profile.json"
 
     if [ -f "$CONFIG_FILE" ]; then
         ui_print "  [*] Existing config.json found — preserving"
@@ -195,6 +196,10 @@ preserve_existing_config() {
     else
         PRESERVE_CONFIG=0
         ui_print "  [*] No existing config — will install defaults"
+    fi
+    if [ -f "$PROFILE_FILE" ]; then
+        ui_print "  [*] Existing profile.json found — preserving"
+        cp -f "$PROFILE_FILE" "${RKNNOVPN_DIR}/backup/profile.json.pre-upgrade" 2>/dev/null
     fi
 }
 
@@ -453,6 +458,7 @@ write_install_manifest() {
         bin/daemon \
         bin/daemonctl \
         bin/sing-box \
+        bin/xray \
         module/OWNERSHIP.md \
         module/module.prop \
         module/service.sh \
@@ -525,7 +531,7 @@ install_release_catalog() {
         return
     }
 
-    for bin_name in sing-box daemon daemonctl; do
+    for bin_name in sing-box xray daemon daemonctl; do
         copy_if_present "${RKNNOVPN_DIR}/bin/${bin_name}" "${release_dir}/bin/${bin_name}"
     done
     for name in OWNERSHIP.md module.prop service.sh post-fs-data.sh uninstall.sh customize.sh sepolicy.rule; do
@@ -570,7 +576,7 @@ set_capabilities() {
     ui_print "  [*] Setting capabilities with setcap..."
     CAPS="cap_net_admin,cap_net_raw,cap_net_bind_service+ep"
 
-    for bin_name in sing-box daemon; do
+    for bin_name in sing-box xray daemon; do
         bin_path="${RKNNOVPN_DIR}/bin/${bin_name}"
         if [ -f "$bin_path" ]; then
             $SETCAP "$CAPS" "$bin_path" 2>/dev/null
@@ -638,6 +644,7 @@ rknnovpn_installer_run() {
     ui_print "  Config file:    ${RKNNOVPN_DIR}/config/config.json"
     ui_print "  Daemon binary:  ${RKNNOVPN_DIR}/bin/daemon"
     ui_print "  Core binary:    ${RKNNOVPN_DIR}/bin/sing-box"
+    ui_print "  XHTTP core:     ${RKNNOVPN_DIR}/bin/xray"
     ui_print ""
     if [ "$PRESERVE_CONFIG" -eq 1 ]; then
         ui_print "  [*] Existing config was preserved."

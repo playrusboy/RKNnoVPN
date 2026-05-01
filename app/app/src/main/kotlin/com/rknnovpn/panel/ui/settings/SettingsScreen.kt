@@ -80,6 +80,7 @@ import java.util.zip.ZipOutputStream
 @Composable
 fun SettingsScreen(
     onNavigateToAudit: () -> Unit = {},
+    onNavigateToApps: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -166,6 +167,11 @@ fun SettingsScreen(
         RoutingModeSelector(
             currentMode = state.routingMode,
             onModeChange = viewModel::setRoutingMode,
+        )
+
+        AppProcessRoutingShortcut(
+            currentMode = state.routingMode,
+            onOpenApps = onNavigateToApps,
         )
 
         SettingsCard {
@@ -755,12 +761,44 @@ private fun SettingsCard(
     }
 }
 
+@Composable
+private fun AppProcessRoutingShortcut(
+    currentMode: RoutingMode,
+    onOpenApps: () -> Unit,
+) {
+    SettingsCard {
+        ListItem(
+            headlineContent = { Text(stringResource(R.string.app_process_proxy_title)) },
+            supportingContent = {
+                Text(
+                    text = stringResource(
+                        if (currentMode == RoutingMode.RULES) {
+                            R.string.app_process_proxy_desc_rules
+                        } else {
+                            R.string.app_process_proxy_desc
+                        },
+                    ),
+                )
+            },
+            trailingContent = {
+                FilledTonalButton(onClick = onOpenApps) {
+                    Icon(Icons.Filled.Apps, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.app_process_proxy_open))
+                }
+            },
+            colors = transparentListItemColors(),
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RoutingModeSelector(
     currentMode: RoutingMode,
     onModeChange: (RoutingMode) -> Unit,
 ) {
+    var expanded by remember { mutableStateOf(false) }
     val options = listOf(
         RoutingMode.GLOBAL to stringResource(R.string.routing_global),
         RoutingMode.WHITELIST to stringResource(R.string.routing_whitelist),
@@ -768,20 +806,33 @@ private fun RoutingModeSelector(
         RoutingMode.RULES to stringResource(R.string.routing_rules),
         RoutingMode.DIRECT to stringResource(R.string.routing_direct),
     )
+    val currentLabel = options.firstOrNull { it.first == currentMode }?.second.orEmpty()
 
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-        options.forEachIndexed { index, (mode, label) ->
-            SegmentedButton(
-                selected = currentMode == mode,
-                onClick = { onModeChange(mode) },
-                shape = SegmentedButtonDefaults.itemShape(
-                    index = index,
-                    count = options.size,
-                ),
-            ) {
-                Text(label)
-            }
-        }
+    SettingsCard {
+        ListItem(
+            headlineContent = { Text(stringResource(R.string.routing_mode_title)) },
+            supportingContent = { Text(currentLabel) },
+            trailingContent = {
+                TextButton(onClick = { expanded = true }) {
+                    Text(currentLabel)
+                }
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                ) {
+                    options.forEach { (mode, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = {
+                                expanded = false
+                                onModeChange(mode)
+                            },
+                        )
+                    }
+                }
+            },
+            colors = transparentListItemColors(),
+        )
     }
 }
 

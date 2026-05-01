@@ -152,7 +152,7 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 		return fmt.Errorf("mkdir backup: %w", err)
 	}
 
-	binaries := []string{"sing-box", "daemon", "daemonctl"}
+	binaries := []string{"sing-box", "xray", "daemon", "daemonctl"}
 	for _, name := range binaries {
 		src := filepath.Join(binDir, name)
 		if _, err := os.Stat(src); err == nil {
@@ -471,7 +471,7 @@ func validateModuleStaging(staging string, stagedBinDir string) error {
 		stagedBinDir = staging
 	}
 
-	for _, name := range []string{"sing-box", "daemon", "daemonctl"} {
+	for _, name := range []string{"sing-box", "xray", "daemon", "daemonctl"} {
 		path := filepath.Join(stagedBinDir, name)
 		info, err := os.Stat(path)
 		if err != nil {
@@ -584,7 +584,7 @@ func prepareVersionedRelease(staging string, stagedBinDir string, dataDir string
 	if err := os.MkdirAll(binDir, 0750); err != nil {
 		return "", fmt.Errorf("mkdir release bin: %w", err)
 	}
-	for _, name := range []string{"sing-box", "daemon", "daemonctl"} {
+	for _, name := range []string{"sing-box", "xray", "daemon", "daemonctl"} {
 		if err := copyFile(filepath.Join(stagedBinDir, name), filepath.Join(binDir, name), 0750); err != nil {
 			return "", fmt.Errorf("copy release binary %s: %w", name, err)
 		}

@@ -15,6 +15,8 @@ env:
   SINGBOX_GO_VERSION: "1.24.x"
   SINGBOX_VERSION: "1.13.0"
   SINGBOX_TAGS: "with_quic,with_wireguard,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0"
+  XRAY_GO_VERSION: "1.24.x"
+  XRAY_VERSION: "stable"
   ANDROID_API: "23"
   ANDROID_NDK_VERSION: "27.2.12479018"
 
@@ -286,12 +288,97 @@ jobs:
           retention-days: 1
 
   # ============================================================
-  # Job 4: Assemble Magisk module ZIP
+  # Job 4: Build Android Xray-core sidecar for VLESS/XHTTP only
+  # ============================================================
+  resolve-xray:
+    name: Resolve Xray-core release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      ref: ${{ steps.resolve.outputs.ref }}
+    steps:
+      - name: Resolve Xray-core release
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "${XRAY_VERSION}" in
+            stable|"")
+              VERSION="$(gh release view --repo XTLS/Xray-core --json tagName --jq .tagName)"
+              ;;
+            latest|alpha|prerelease)
+              VERSION="$(gh release list --repo XTLS/Xray-core --limit 1 --json tagName --jq '.[0].tagName')"
+              ;;
+            v*)
+              VERSION="${XRAY_VERSION}"
+              ;;
+            *)
+              VERSION="v${XRAY_VERSION#v}"
+              ;;
+          esac
+          if [[ -z "$VERSION" || "$VERSION" == "null" ]]; then
+            echo "Failed to resolve Xray-core release" >&2
+            exit 1
+          fi
+          echo "version=${VERSION#v}" >> "$GITHUB_OUTPUT"
+          echo "ref=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved Xray-core $VERSION"
+
+  build-xray:
+    name: Build Xray-core (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    needs: [resolve-xray]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            goarch: arm64
+            goarm: ""
+          - arch: armv7
+            goarch: arm
+            goarm: "7"
+    steps:
+      - name: Checkout Xray-core
+        uses: actions/checkout@v4
+        with:
+          repository: XTLS/Xray-core
+          ref: ${{ needs.resolve-xray.outputs.ref }}
+          path: xray-src
+
+      - name: Setup Go for Xray-core
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.XRAY_GO_VERSION }}
+          cache-dependency-path: xray-src/go.sum
+
+      - name: Build Android Xray-core
+        run: |
+          mkdir -p "out/${{ matrix.arch }}"
+          cd xray-src
+          CGO_ENABLED=0 GOOS=android GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} go build \
+            -trimpath \
+            -ldflags "-s -w -buildid=" \
+            -o "../out/${{ matrix.arch }}/xray" ./main
+          cd ..
+          chmod 755 "out/${{ matrix.arch }}/xray"
+          readelf -h "out/${{ matrix.arch }}/xray"
+          sha256sum "out/${{ matrix.arch }}/xray"
+
+      - name: Upload Xray-core artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xray-${{ matrix.arch }}
+          path: out/${{ matrix.arch }}/
+          retention-days: 1
+
+  # ============================================================
+  # Job 5: Assemble Magisk module ZIP
   # ============================================================
   build-module:
     name: Build Magisk Module
     runs-on: ubuntu-latest
-    needs: [resolve-singbox, build-daemon, build-singbox]
+    needs: [resolve-singbox, build-daemon, build-singbox, build-xray]
     outputs:
       singbox_version: ${{ needs.resolve-singbox.outputs.version }}
     steps:
@@ -319,6 +406,18 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: singbox-armv7
+          path: module/binaries/armv7/
+
+      - name: Download Xray-core binary
+        uses: actions/download-artifact@v4
+        with:
+          name: xray-arm64
+          path: module/binaries/arm64/
+
+      - name: Download Xray-core binary (armv7)
+        uses: actions/download-artifact@v4
+        with:
+          name: xray-armv7
           path: module/binaries/armv7/
 
       - name: Set permissions
@@ -565,6 +664,7 @@ jobs:
             - **Whitelist mode** - only selected apps go through proxy
             - **Full IPv4+IPv6** - mirrored iptables/ip6tables rules
             - **sing-box v${{ needs.build-module.outputs.singbox_version }}** - VLESS, Trojan, VMess, SS, SOCKS, Hysteria2, TUIC
+            - **Xray-core sidecar** - used only for VLESS/XHTTP profiles
             - **Auto-recovery** - health monitor + rescue on failure
           files: |
             release/rknnovpn-${{ steps.version.outputs.version }}-module.zip

@@ -2,6 +2,7 @@ package com.rknnovpn.panel.ui.nodes
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,10 +20,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -46,6 +51,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -138,21 +144,14 @@ fun NodeListScreen(
                 )
             }
 
-            if (state.subscriptions.isNotEmpty()) {
-                SubscriptionSummary(
-                    subscriptions = state.subscriptions,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            }
-
-            SortRow(
-                currentSort = state.sortMode,
-                onSortChange = viewModel::setSortMode,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
             val filteredNodes = state.nodes.filter { it.group == state.selectedGroup }
             val selectableNodes = state.nodes.filterNot { it.stale }
             val selectableFilteredNodes = filteredNodes.filterNot { it.stale }
+            val sections = buildNodeSections(
+                nodes = filteredNodes,
+                subscriptions = state.subscriptions,
+            )
+            val expandedSections = remember { mutableStateMapOf<String, Boolean>() }
             SelectionModeRow(
                 isAuto = state.activeNodeId.isNullOrBlank(),
                 hasNodes = selectableNodes.isNotEmpty(),
@@ -164,11 +163,16 @@ fun NodeListScreen(
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
             Row(
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
             ) {
+                SortMenuButton(
+                    currentSort = state.sortMode,
+                    onSortChange = viewModel::setSortMode,
+                )
                 TextButton(
                     onClick = viewModel::testAllNodes,
                     enabled = selectableNodes.isNotEmpty() && !state.isTestingNodes,
@@ -201,19 +205,33 @@ fun NodeListScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(filteredNodes, key = { it.id }) { node ->
-                        NodeCard(
-                            node = node,
-                            isActive = node.id == state.activeNodeId,
-                            onSelect = {
-                                if (!node.stale) {
-                                    viewModel.selectNode(node.id)
-                                }
-                            },
-                            onEdit = { nodeToEdit = node },
-                            onTestLatency = { viewModel.testLatency(node.id) },
-                            onDelete = { nodeToDelete = node },
-                        )
+                    sections.forEach { section ->
+                        val expanded = expandedSections[section.id] ?: true
+                        item(key = "section-${section.id}") {
+                            NodeSectionHeader(
+                                section = section,
+                                expanded = expanded,
+                                onToggle = {
+                                    expandedSections[section.id] = !expanded
+                                },
+                            )
+                        }
+                        if (expanded) {
+                            items(section.nodes, key = { it.id }) { node ->
+                                NodeCard(
+                                    node = node,
+                                    isActive = node.id == state.activeNodeId,
+                                    onSelect = {
+                                        if (!node.stale) {
+                                            viewModel.selectNode(node.id)
+                                        }
+                                    },
+                                    onEdit = { nodeToEdit = node },
+                                    onTestLatency = { viewModel.testLatency(node.id) },
+                                    onDelete = { nodeToDelete = node },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -271,48 +289,110 @@ fun NodeListScreen(
     }
 }
 
+private data class NodeSection(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val nodes: List<Node>,
+)
+
 @Composable
-private fun SubscriptionSummary(
+private fun buildNodeSections(
+    nodes: List<Node>,
     subscriptions: List<SubscriptionUiSummary>,
-    modifier: Modifier = Modifier,
+): List<NodeSection> {
+    val byProvider = subscriptions.associateBy { it.providerKey }
+    val sections = mutableListOf<NodeSection>()
+    val manualNodes = nodes.filter { it.source.type != NodeSourceType.SUBSCRIPTION }
+    if (manualNodes.isNotEmpty()) {
+        sections += NodeSection(
+            id = "manual",
+            title = stringResource(R.string.node_section_manual_configs),
+            subtitle = stringResource(R.string.node_section_nodes_count, manualNodes.size),
+            nodes = manualNodes,
+        )
+    }
+    nodes
+        .filter { it.source.type == NodeSourceType.SUBSCRIPTION }
+        .groupBy { it.source.providerKey.ifBlank { it.source.url.ifBlank { "subscription" } } }
+        .toSortedMap(
+            compareBy<String> { key -> byProvider[key]?.displayName ?: key }
+                .thenBy { it },
+        )
+        .forEach { (providerKey, providerNodes) ->
+            val summary = byProvider[providerKey]
+            val title = summary?.displayName ?: providerNodes.firstOrNull()?.source?.url
+                ?.let(::hostLabel)
+                ?.ifBlank { null }
+                ?: stringResource(R.string.subscription_provider_fallback)
+            val activeCount = summary?.activeNodeCount ?: providerNodes.count { !it.stale }
+            val staleCount = summary?.staleNodeCount ?: providerNodes.count { it.stale }
+            val parseFailures = summary?.parseFailures ?: 0
+            sections += NodeSection(
+                id = "subscription-$providerKey",
+                title = title,
+                subtitle = if (parseFailures > 0) {
+                    stringResource(
+                        R.string.node_section_subscription_counts_with_errors,
+                        activeCount,
+                        staleCount,
+                        parseFailures,
+                    )
+                } else {
+                    stringResource(
+                        R.string.node_section_subscription_counts,
+                        activeCount,
+                        staleCount,
+                    )
+                },
+                nodes = providerNodes,
+            )
+        }
+    return sections
+}
+
+private fun hostLabel(url: String): String =
+    runCatching { java.net.URI(url).host.orEmpty().removePrefix("www.") }.getOrDefault("")
+
+@Composable
+private fun NodeSectionHeader(
+    section: NodeSection,
+    expanded: Boolean,
+    onToggle: () -> Unit,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         shape = MaterialTheme.shapes.small,
-        modifier = modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle),
     ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
-            Text(
-                text = stringResource(R.string.subscriptions_summary_title),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+            Icon(
+                imageVector = if (expanded) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            subscriptions.forEach { subscription ->
-                Column {
-                    Text(
-                        text = stringResource(
-                            R.string.subscription_summary_line,
-                            subscription.displayName,
-                            subscription.activeNodeCount,
-                            subscription.staleNodeCount,
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    if (subscription.parseFailures > 0) {
-                        Text(
-                            text = stringResource(
-                                R.string.subscription_summary_parse_errors,
-                                subscription.parseFailures,
-                            ),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                }
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = section.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = section.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
@@ -384,34 +464,53 @@ private fun SelectionModeRow(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SortRow(
+private fun SortMenuButton(
     currentSort: NodeSortMode,
     onSortChange: (NodeSortMode) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    SingleChoiceSegmentedButtonRow(modifier = modifier.fillMaxWidth()) {
-        val options = listOf(
-            NodeSortMode.NAME to stringResource(R.string.sort_by_name),
-            NodeSortMode.LATENCY to stringResource(R.string.sort_by_latency),
-            NodeSortMode.THROUGHPUT to stringResource(R.string.sort_by_throughput),
-            NodeSortMode.COUNTRY to stringResource(R.string.sort_by_country),
-        )
-        options.forEachIndexed { index, (mode, label) ->
-            SegmentedButton(
-                selected = currentSort == mode,
-                onClick = { onSortChange(mode) },
-                shape = SegmentedButtonDefaults.itemShape(
-                    index = index,
-                    count = options.size,
-                ),
-            ) {
-                Text(label)
+    var expanded by remember { mutableStateOf(false) }
+    val options = nodeSortOptions()
+    Box {
+        TextButton(onClick = { expanded = true }) {
+            Icon(Icons.Filled.Tune, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = options.firstOrNull { it.first == currentSort }?.second.orEmpty(),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            options.forEach { (mode, label) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    leadingIcon = {
+                        if (mode == currentSort) {
+                            Icon(Icons.Filled.Check, contentDescription = null)
+                        }
+                    },
+                    onClick = {
+                        expanded = false
+                        onSortChange(mode)
+                    },
+                )
             }
         }
     }
 }
+
+@Composable
+private fun nodeSortOptions(): List<Pair<NodeSortMode, String>> =
+    listOf(
+        NodeSortMode.NAME to stringResource(R.string.sort_by_name),
+        NodeSortMode.LATENCY to stringResource(R.string.sort_by_latency),
+        NodeSortMode.THROUGHPUT to stringResource(R.string.sort_by_throughput),
+        NodeSortMode.COUNTRY to stringResource(R.string.sort_by_country),
+    )
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable

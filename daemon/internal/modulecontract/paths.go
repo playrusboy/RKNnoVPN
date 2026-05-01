@@ -22,6 +22,7 @@ const (
 	ManualFlagName      = "manual"
 	DaemonPIDFileName   = "daemon.pid"
 	SingBoxPIDFileName  = "singbox.pid"
+	XrayPIDFileName     = "xray.pid"
 	DaemonSocketName    = "daemon.sock"
 	NetChangeLockName   = "net_change.lock"
 	EnvSnapshotName     = "env.sh"
@@ -81,6 +82,7 @@ func (p Paths) ActiveFile() string     { return filepath.Join(p.RunDir(), Active
 func (p Paths) ManualFlag() string     { return filepath.Join(p.ConfigDir(), ManualFlagName) }
 func (p Paths) DaemonPIDFile() string  { return filepath.Join(p.RunDir(), DaemonPIDFileName) }
 func (p Paths) SingBoxPIDFile() string { return filepath.Join(p.RunDir(), SingBoxPIDFileName) }
+func (p Paths) XrayPIDFile() string    { return filepath.Join(p.RunDir(), XrayPIDFileName) }
 func (p Paths) DaemonSocket() string   { return filepath.Join(p.RunDir(), DaemonSocketName) }
 
 func (p Paths) RescueResetScript() string {
@@ -96,6 +98,7 @@ func (p Paths) RoutingScript() string { return filepath.Join(p.ScriptsDir(), Rou
 func (p Paths) RuntimeSnapshotFiles() []string {
 	return []string{
 		p.SingBoxPIDFile(),
+		p.XrayPIDFile(),
 		p.ActiveFile(),
 		filepath.Join(p.RunDir(), NetChangeLockName),
 		filepath.Join(p.RunDir(), IPTablesRulesName),
@@ -114,8 +117,9 @@ func (p Paths) BootCleanupMarkers() []string {
 		p.ResetLock(),
 		p.DaemonPIDFile(),
 		p.SingBoxPIDFile(),
+		p.XrayPIDFile(),
 		p.DaemonSocket(),
-	}, p.RuntimeSnapshotFiles()[2:]...)
+	}, p.RuntimeSnapshotFiles()[3:]...)
 }
 
 func (p Paths) DaemonRuntimeFiles() []string {

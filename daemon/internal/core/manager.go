@@ -264,13 +264,16 @@ type coreNetstack interface {
 // CoreManager owns the sing-box child process and the iptables / DNS
 // rules that make transparent proxying work.
 type CoreManager struct {
-	config  *config.Config
-	process *os.Process
-	exitCh  <-chan error
-	pid     int
-	state   State
-	dataDir string
-	logger  *log.Logger
+	config      *config.Config
+	process     *os.Process
+	exitCh      <-chan error
+	pid         int
+	xrayProcess *os.Process
+	xrayExitCh  <-chan error
+	xrayPID     int
+	state       State
+	dataDir     string
+	logger      *log.Logger
 
 	activeProfile     string
 	startedAt         time.Time
@@ -333,11 +336,15 @@ func (m *CoreManager) ResetState() {
 	m.process = nil
 	m.exitCh = nil
 	m.pid = 0
+	m.xrayProcess = nil
+	m.xrayExitCh = nil
+	m.xrayPID = 0
 	m.activeProfile = ""
 	m.startedAt = time.Time{}
 	m.state = StateStopped
 	paths := modulecontract.NewPaths(m.dataDir)
 	_ = os.Remove(paths.SingBoxPIDFile())
+	_ = os.Remove(paths.XrayPIDFile())
 	_ = os.Remove(paths.ActiveFile())
 }
 
@@ -370,8 +377,27 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	m.state = StateStarting
 	m.logger.Printf("starting sing-box for profile %q", profile.Protocol)
 
-	// 1. Render the sing-box JSON config.
+	// 1. Render and validate optional Xray sidecar config for VLESS/XHTTP.
 	paths := modulecontract.NewPaths(m.dataDir)
+	xrayConfigPath := filepath.Join(paths.RenderedConfigDir(), "xray-xhttp.json")
+	needsXray, err := m.prepareXraySidecar(profile, xrayConfigPath)
+	if err != nil {
+		m.logger.Printf("render xray sidecar config failed: %v", err)
+		m.state = StateStopped
+		return failStage("render-xray-config", "render xray config", "CONFIG_RENDER_FAILED", err, false)
+	}
+	if needsXray {
+		recordStage("render-xray-config", "ok", "", xrayConfigPath, false)
+		m.logger.Printf("checking xray sidecar config %s", xrayConfigPath)
+		if err := m.checkXrayConfig(xrayConfigPath); err != nil {
+			m.logger.Printf("xray sidecar config check failed: %v", err)
+			m.state = StateStopped
+			return failStage("xray-config-check", "xray config check", "CONFIG_CHECK_FAILED", err, false)
+		}
+		recordStage("xray-config-check", "ok", "", xrayConfigPath, false)
+	}
+
+	// 2. Render the sing-box JSON config.
 	configPath := filepath.Join(paths.RenderedConfigDir(), "singbox.json")
 	m.logger.Printf("rendering sing-box config to %s", configPath)
 	if err := renderConfig(m.config, profile, configPath); err != nil {
@@ -389,15 +415,37 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	m.logger.Printf("sing-box config check passed")
 	recordStage("config-check", "ok", "", configPath, false)
 
-	// 2. Spawn sing-box.
+	// 3. Spawn optional Xray sidecar before sing-box starts routing traffic.
+	if needsXray {
+		process, exitCh, pid, logPath, err := m.spawnXraySidecar(xrayConfigPath)
+		if err != nil {
+			m.state = StateStopped
+			return failStage("spawn-xray-sidecar", "spawn xray sidecar", "XRAY_SIDECAR_SPAWN_FAILED", err, false)
+		}
+		m.xrayProcess = process
+		m.xrayExitCh = exitCh
+		m.xrayPID = pid
+		_ = writeSingBoxPIDFile(paths.XrayPIDFile(), pid)
+		recordStage("spawn-xray-sidecar", "ok", "", fmt.Sprintf("pid=%d", pid), false)
+		if err := m.waitForPortOrExit(config.XraySidecarSocksPort, 10*time.Second, exitCh, logPath); err != nil {
+			_ = m.stopXraySidecar()
+			m.state = StateStopped
+			return failStage("wait-xray-sidecar", "wait xray sidecar socks port", "XRAY_SIDECAR_PORT_DOWN", err, true)
+		}
+		recordStage("wait-xray-sidecar", "ok", "", fmt.Sprintf("port=%d", config.XraySidecarSocksPort), false)
+	}
+
+	// 4. Spawn sing-box.
 	binPath := filepath.Join(paths.BinDir(), "sing-box")
 	cmd := exec.Command(binPath, "run", "-c", configPath)
 	if err := m.prepareSingBoxCommand(cmd); err != nil {
+		_ = m.stopXraySidecar()
 		m.state = StateStopped
 		return failStage("spawn-core", "prepare sing-box", "CORE_SPAWN_FAILED", err, false)
 	}
 	logFile, logPath, err := m.openSingBoxLog()
 	if err != nil {
+		_ = m.stopXraySidecar()
 		m.state = StateStopped
 		return failStage("open-core-log", "open sing-box log", "CORE_LOG_OPEN_FAILED", err, false)
 	}
@@ -408,6 +456,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
+		_ = m.stopXraySidecar()
 		m.state = StateStopped
 		return failStage("spawn-core", "spawn sing-box", "CORE_SPAWN_FAILED", err, false)
 	}
@@ -440,6 +489,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 		m.startedAt = time.Time{}
 		m.state = StateStopped
 		_ = os.Remove(pidPath)
+		_ = m.stopXraySidecar()
 	}
 
 	m.logger.Printf("sing-box spawned, pid=%d", m.pid)
@@ -552,14 +602,21 @@ func (m *CoreManager) stopWithMode(forceCleanup bool) error {
 	} else if err := m.killTrackedSingBox(); err != nil && firstErr == nil {
 		firstErr = err
 	}
+	if err := m.stopXraySidecar(); err != nil && firstErr == nil {
+		firstErr = err
+	}
 
 	// 4. Clean PID file.
 	pidPath := paths.SingBoxPIDFile()
 	_ = os.Remove(pidPath)
+	_ = os.Remove(paths.XrayPIDFile())
 
 	m.process = nil
 	m.exitCh = nil
 	m.pid = 0
+	m.xrayProcess = nil
+	m.xrayExitCh = nil
+	m.xrayPID = 0
 	m.activeProfile = ""
 	m.startedAt = time.Time{}
 	m.state = StateStopped
@@ -605,6 +662,18 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	paths := modulecontract.NewPaths(m.dataDir)
 	configPath := filepath.Join(paths.RenderedConfigDir(), "singbox.json")
 	newConfigPath := filepath.Join(paths.RenderedConfigDir(), "singbox.hotswap.json")
+	xrayConfigPath := filepath.Join(paths.RenderedConfigDir(), "xray-xhttp.json")
+	needsXray, err := m.prepareXraySidecar(profile, xrayConfigPath)
+	if err != nil {
+		return failStage("render-xray-config", "hot-swap render xray config", "CONFIG_RENDER_FAILED", err, false)
+	}
+	if needsXray {
+		recordStage("render-xray-config", "ok", "", xrayConfigPath, false)
+		if err := m.checkXrayConfig(xrayConfigPath); err != nil {
+			return failStage("xray-config-check", "hot-swap xray config check", "CONFIG_CHECK_FAILED", err, false)
+		}
+		recordStage("xray-config-check", "ok", "", xrayConfigPath, false)
+	}
 	_ = os.Remove(newConfigPath)
 	defer os.Remove(newConfigPath)
 	if err := renderConfig(m.config, profile, newConfigPath); err != nil {
@@ -633,6 +702,7 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 		m.startedAt = time.Time{}
 		m.state = StateDegraded
 		_ = os.Remove(pidPath)
+		_ = m.stopXraySidecar()
 		_ = os.Remove(paths.ActiveFile())
 	}
 
@@ -649,6 +719,31 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 		recordStage("stop-old-core", "already_clean", "", "no tracked process", false)
 	}
 	m.state = StateStarting
+
+	if needsXray {
+		if err := m.stopXraySidecar(); err != nil {
+			cleanupAndDegrade()
+			return failStage("stop-old-xray-sidecar", "hot-swap stop old xray sidecar", "XRAY_SIDECAR_STOP_FAILED", err, true)
+		}
+		process, exitCh, pid, logPath, err := m.spawnXraySidecar(xrayConfigPath)
+		if err != nil {
+			cleanupAndDegrade()
+			return failStage("spawn-xray-sidecar", "hot-swap spawn xray sidecar", "XRAY_SIDECAR_SPAWN_FAILED", err, true)
+		}
+		m.xrayProcess = process
+		m.xrayExitCh = exitCh
+		m.xrayPID = pid
+		_ = writeSingBoxPIDFile(paths.XrayPIDFile(), pid)
+		recordStage("spawn-xray-sidecar", "ok", "", fmt.Sprintf("pid=%d", pid), false)
+		if err := m.waitForPortOrExit(config.XraySidecarSocksPort, 10*time.Second, exitCh, logPath); err != nil {
+			cleanupAndDegrade()
+			return failStage("wait-xray-sidecar", "hot-swap wait xray sidecar socks port", "XRAY_SIDECAR_PORT_DOWN", err, true)
+		}
+		recordStage("wait-xray-sidecar", "ok", "", fmt.Sprintf("port=%d", config.XraySidecarSocksPort), false)
+	} else if err := m.stopXraySidecar(); err != nil {
+		cleanupAndDegrade()
+		return failStage("stop-old-xray-sidecar", "hot-swap stop old xray sidecar", "XRAY_SIDECAR_STOP_FAILED", err, true)
+	}
 
 	// 3. Spawn new sing-box with the fresh config.
 	process, exitCh, pid, logPath, err := m.spawnSingBox(newConfigPath)
@@ -1215,6 +1310,7 @@ func (m *CoreManager) scriptEnv() map[string]string {
 		"API_PORT":               strconv.Itoa(apiPort),
 		"SOCKS_PORT":             strconv.Itoa(profileInbounds.SocksPort),
 		"HTTP_PORT":              strconv.Itoa(profileInbounds.HTTPPort),
+		"XRAY_SIDECAR_PORT":      strconv.Itoa(config.XraySidecarSocksPort),
 		"CHAIN_PROXY_PORTS":      chainProxyPorts,
 		"CHAIN_PROXY_UIDS":       chainProxyUIDs,
 		"CHAIN_PROXY_RULES":      chainProxyRules,

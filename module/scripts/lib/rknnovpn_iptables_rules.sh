@@ -14,6 +14,10 @@ api_port_enabled() {
     [ "${API_PORT:-0}" -gt 0 ] 2>/dev/null
 }
 
+xray_sidecar_port_enabled() {
+    [ "${XRAY_SIDECAR_PORT:-0}" -gt 0 ] 2>/dev/null
+}
+
 emit_api_port_protection() {
     ps_emit_chain="$1"
     if api_port_enabled; then
@@ -38,6 +42,14 @@ emit_socks_port_protection() {
     fi
 }
 
+emit_xray_sidecar_port_protection() {
+    ps_emit_chain="$1"
+    if xray_sidecar_port_enabled; then
+        echo "-A ${ps_emit_chain} -o lo -p tcp --dport ${XRAY_SIDECAR_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
+        echo "-A ${ps_emit_chain} -o lo -p tcp --dport ${XRAY_SIDECAR_PORT} -j RETURN"
+    fi
+}
+
 emit_input_tcp_drop_if_enabled() {
     ps_emit_chain="$1"
     ps_emit_port="$2"
@@ -57,7 +69,7 @@ emit_input_udp_drop_if_enabled() {
 chain_proxy_port_reserved() {
     ps_reserved_port="$1"
     ps_reserved_value=""
-    for ps_reserved_value in "${TPROXY_PORT}" "${DNS_PORT}" "${API_PORT}" "${SOCKS_PORT}" "${HTTP_PORT}"; do
+    for ps_reserved_value in "${TPROXY_PORT}" "${DNS_PORT}" "${API_PORT}" "${SOCKS_PORT}" "${HTTP_PORT}" "${XRAY_SIDECAR_PORT}"; do
         if [ -n "${ps_reserved_value}" ] && [ "${ps_reserved_value}" -gt 0 ] 2>/dev/null && [ "${ps_reserved_port}" = "${ps_reserved_value}" ]; then
             return 0
         fi
@@ -280,6 +292,7 @@ fi)
 $(emit_api_port_protection "${CHAIN_OUT}")
 $(emit_socks_port_protection "${CHAIN_OUT}")
 $(emit_http_port_protection "${CHAIN_OUT}")
+$(emit_xray_sidecar_port_protection "${CHAIN_OUT}")
 $(emit_chain_proxy_port_protection "${CHAIN_OUT}")
 
 $(for uid in ${BYPASS_UIDS}; do
@@ -312,6 +325,7 @@ $(emit_input_udp_drop_if_enabled "${CHAIN_IN}" "${DNS_PORT}")
 $(emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${API_PORT}")
 $(emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${SOCKS_PORT}")
 $(emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${HTTP_PORT}")
+$(emit_input_tcp_drop_if_enabled "${CHAIN_IN}" "${XRAY_SIDECAR_PORT}")
 $(if [ -n "${CHAIN_PROXY_PORTS}" ]; then
     for ps_proxy_port in ${CHAIN_PROXY_PORTS}; do
         case "${ps_proxy_port}" in
