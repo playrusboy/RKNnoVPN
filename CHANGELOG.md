@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.2.4
+
+- Fixed HTTPS URL checks on Android by loading system and user-added CA roots in daemon transparent probes.
+- Made selected-node URL checks use the active transparent route even when multiple nodes are stored and Clash API is disabled.
+- Fixed diagnostics so URL/TLS failures are not masked as DNS bootstrap failures.
+- Fixed runtime status after profile apply so applied state follows the newly selected active node.
+- Sped up node switching by skipping unnecessary netstack reapply during hot-swap when runtime env is unchanged.
+- Synchronized app, daemon, daemonctl, module, update feed, and bundled script version metadata to `v2.2.4`.
+
 ## v2.2.3
 
 - Fixed first-run daemon repair waits so the APK can survive slow rooted daemon startup before importing keys.
