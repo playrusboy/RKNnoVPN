@@ -7,6 +7,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -767,28 +768,41 @@ private fun AppProcessRoutingShortcut(
     onOpenApps: () -> Unit,
 ) {
     SettingsCard {
-        ListItem(
-            headlineContent = { Text(stringResource(R.string.app_process_proxy_title)) },
-            supportingContent = {
-                Text(
-                    text = stringResource(
-                        if (currentMode == RoutingMode.RULES) {
-                            R.string.app_process_proxy_desc_rules
-                        } else {
-                            R.string.app_process_proxy_desc
-                        },
-                    ),
-                )
-            },
-            trailingContent = {
-                FilledTonalButton(onClick = onOpenApps) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.app_process_proxy_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(
+                    if (currentMode == RoutingMode.RULES) {
+                        R.string.app_process_proxy_desc_rules
+                    } else {
+                        R.string.app_process_proxy_desc
+                    },
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                FilledTonalButton(
+                    onClick = onOpenApps,
+                ) {
                     Icon(Icons.Filled.Apps, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(stringResource(R.string.app_process_proxy_open))
                 }
-            },
-            colors = transparentListItemColors(),
-        )
+            }
+        }
     }
 }
 
@@ -1143,12 +1157,25 @@ private fun FallbackPolicyPicker(
         FallbackPolicy.AUTO_RESET_ROOTED -> stringResource(R.string.fallback_auto_reset)
     }
 
-    ListItem(
-        headlineContent = { Text(stringResource(R.string.backend_fallback_policy)) },
-        supportingContent = { Text(currentLabel) },
-        trailingContent = {
-            TextButton(onClick = { expanded = true }) {
-                Text(currentLabel)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.backend_fallback_policy),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Box {
+            TextButton(
+                onClick = { expanded = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = currentLabel,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
             }
             DropdownMenu(
                 expanded = expanded,
@@ -1169,9 +1196,8 @@ private fun FallbackPolicyPicker(
                     )
                 }
             }
-        },
-        colors = transparentListItemColors(),
-    )
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

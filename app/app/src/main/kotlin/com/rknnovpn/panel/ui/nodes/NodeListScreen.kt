@@ -506,6 +506,7 @@ private fun SortMenuButton(
 @Composable
 private fun nodeSortOptions(): List<Pair<NodeSortMode, String>> =
     listOf(
+        NodeSortMode.SOURCE_ORDER to stringResource(R.string.sort_by_source_order),
         NodeSortMode.NAME to stringResource(R.string.sort_by_name),
         NodeSortMode.LATENCY to stringResource(R.string.sort_by_latency),
         NodeSortMode.THROUGHPUT to stringResource(R.string.sort_by_throughput),

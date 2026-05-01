@@ -24,8 +24,12 @@ type UpdateHandlers struct {
 	Logf                          func(format string, args ...interface{})
 }
 
+type updateVersionRequest struct {
+	CurrentVersion string `json:"current_version"`
+}
+
 func (h UpdateHandlers) UpdateCheck(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	info, err := updater.CheckForUpdate(updater.NormalizeVersionTag(h.Version))
+	info, err := updater.CheckForUpdate(h.currentUpdateVersion(params))
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInternalError,
@@ -40,7 +44,7 @@ func (h UpdateHandlers) UpdateDownload(params *json.RawMessage) (interface{}, *i
 		return nil, rpcErr
 	}
 	downloaded, err := updater.RunDownloadTransaction(updater.DownloadTransaction{
-		CurrentVersion: h.Version,
+		CurrentVersion: h.currentUpdateVersion(params),
 		DataDir:        h.DataDir,
 		Logf:           h.logf,
 	})
@@ -121,6 +125,16 @@ func (h UpdateHandlers) logf(format string, args ...interface{}) {
 		return
 	}
 	log.Printf("[updater] "+format, args...)
+}
+
+func (h UpdateHandlers) currentUpdateVersion(params *json.RawMessage) string {
+	if params != nil && len(*params) > 0 && string(*params) != "null" {
+		var req updateVersionRequest
+		if err := json.Unmarshal(*params, &req); err == nil && req.CurrentVersion != "" {
+			return updater.NormalizeVersionTag(req.CurrentVersion)
+		}
+	}
+	return updater.NormalizeVersionTag(h.Version)
 }
 
 func updateDownloadResult(downloaded *updater.DownloadedUpdate) map[string]interface{} {

@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.2.2
+
+- Fixed remote sing-box rule-set downloads so startup does not depend on the selected proxy node while fetching GitHub SRS files.
+- Fixed updater and subscription TLS on Android by sharing Android system and user-added CA certificate loading.
+- Restored subscription server ordering: refreshed providers follow the subscription order, while stale removed nodes stay at the end.
+- Made the server list default to source order and added an explicit sort option for the subscription order.
+- Fixed Settings text wrapping in app process routing and recovery policy cards.
+- Passed the APK version to daemon update checks/downloads so update status compares against the installed panel version.
+- Made APK daemonctl calls namespace-aware so update/recovery operations can reach the active daemon environment.
+- Synchronized app, daemon, daemonctl, module, update feed, and bundled script version metadata to `v2.2.2`.
+
 ## v2.2.1
 
 - Added collapsible server sections grouped by subscription and manual configs.

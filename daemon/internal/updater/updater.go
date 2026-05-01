@@ -7,6 +7,7 @@ package updater
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/rootcerts"
 )
 
 const (
@@ -407,6 +410,9 @@ func newHTTPClient(timeout time.Duration) *http.Client {
 		KeepAlive: 30 * time.Second,
 		Resolver:  newBootstrapResolver(),
 	}).DialContext
+	if roots := rootcerts.AndroidSystemPool(); roots != nil {
+		transport.TLSClientConfig = &tls.Config{RootCAs: roots}
+	}
 	return &http.Client{Timeout: timeout, Transport: transport}
 }
 

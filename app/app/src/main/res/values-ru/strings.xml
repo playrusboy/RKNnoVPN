@@ -78,6 +78,7 @@
     <string name="add_node">Добавить сервер</string>
     <string name="node_selector_auto">Авто</string>
     <string name="node_selector_manual">Вручную</string>
+    <string name="sort_by_source_order">Порядок</string>
     <string name="sort_by_name">Имя</string>
     <string name="sort_by_latency">Задержка</string>
     <string name="sort_by_throughput">Скорость</string>

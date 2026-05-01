@@ -54,6 +54,7 @@ func xrayOutbound(profile *NodeProfile) (map[string]interface{}, error) {
 		if !streamUsesXHTTP(outbound) {
 			return nil, fmt.Errorf("xray sidecar: stored outbound is not XHTTP")
 		}
+		stripXHTTPVisionFlow(outbound)
 		return outbound, nil
 	}
 
@@ -67,7 +68,7 @@ func xrayOutbound(profile *NodeProfile) (map[string]interface{}, error) {
 		"id":         profile.UUID,
 		"encryption": "none",
 	}
-	if profile.Flow != "" {
+	if profile.Flow != "" && !strings.EqualFold(strings.TrimSpace(profile.Transport), "xhttp") {
 		user["flow"] = profile.Flow
 	}
 	stream := map[string]interface{}{
@@ -128,6 +129,44 @@ func streamUsesXHTTP(outbound map[string]interface{}) bool {
 	}
 	network, _ := stream["network"].(string)
 	return strings.EqualFold(strings.TrimSpace(network), "xhttp")
+}
+
+func stripXHTTPVisionFlow(outbound map[string]interface{}) {
+	if outbound == nil {
+		return
+	}
+	protocol, _ := outbound["protocol"].(string)
+	if !strings.EqualFold(strings.TrimSpace(protocol), "vless") {
+		return
+	}
+	settings, ok := outbound["settings"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	vnext, ok := settings["vnext"].([]interface{})
+	if !ok {
+		return
+	}
+	for _, rawServer := range vnext {
+		server, ok := rawServer.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		users, ok := server["users"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, rawUser := range users {
+			user, ok := rawUser.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			flow, _ := user["flow"].(string)
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(flow)), "xtls-rprx-vision") {
+				delete(user, "flow")
+			}
+		}
+	}
 }
 
 func buildXHTTPSettings(profile *NodeProfile) map[string]interface{} {

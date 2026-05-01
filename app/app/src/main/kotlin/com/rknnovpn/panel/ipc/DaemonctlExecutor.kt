@@ -146,11 +146,7 @@ class DaemonctlExecutor @Inject constructor() {
         val paramsJson = params.toString()
         val useStdin = params.isNotEmpty() &&
             paramsJson.toByteArray(StandardCharsets.UTF_8).size > INLINE_PARAMS_LIMIT
-        val commandString = when {
-            params.isEmpty() -> "$daemonctlPath $method"
-            useStdin -> "RKNNOVPN_STDIN_PARAMS=1 $daemonctlPath $method"
-            else -> "$daemonctlPath $method ${shellQuote(paramsJson)}"
-        }
+        val commandString = buildDaemonctlCommand(method, paramsJson, useStdin, params.isEmpty())
         Log.d(
             TAG,
             ">>> daemonctl method=$method params=${if (params.isEmpty()) "none" else "redacted"}"
@@ -162,6 +158,33 @@ class DaemonctlExecutor @Inject constructor() {
             method = method,
         )
     }
+
+    private fun buildDaemonctlCommand(
+        method: String,
+        paramsJson: String,
+        useStdin: Boolean,
+        paramsEmpty: Boolean,
+    ): String {
+        val prelude = namespaceAwareDaemonctlPrelude()
+        val ctl = daemonctlShellRef()
+        return when {
+            paramsEmpty -> "$prelude $ctl ${shellQuote(method)}"
+            useStdin -> "$prelude RKNNOVPN_STDIN_PARAMS=1 $ctl ${shellQuote(method)}"
+            else -> "$prelude $ctl ${shellQuote(method)} ${shellQuote(paramsJson)}"
+        }
+    }
+
+    private fun namespaceAwareDaemonctlPrelude(): String {
+        val dollar = "$"
+        return "ctl=${shellQuote(daemonctlPath)}; " +
+            "pid=${dollar}(pidof daemon 2>/dev/null); " +
+            "pid=${dollar}{pid%% *}; " +
+            "if [ -n \"${dollar}pid\" ] && [ -x \"/proc/${dollar}pid/root$daemonctlPath\" ]; then " +
+            "ctl=\"/proc/${dollar}pid/root$daemonctlPath\"; " +
+            "fi;"
+    }
+
+    private fun daemonctlShellRef(): String = "\"\$ctl\""
 
     private suspend fun executeRootCommandWithFallbacks(
         commandString: String,

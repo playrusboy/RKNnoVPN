@@ -514,8 +514,11 @@ func buildProxyOutbound(profile *NodeProfile) (map[string]interface{}, error) {
 			return nil, fmt.Errorf("renderer: vless uuid is empty")
 		}
 		out["uuid"] = profile.UUID
-		if profile.Flow != "" {
-			out["flow"] = profile.Flow
+		if flow := singBoxVLESSFlow(profile.Flow); flow != "" {
+			out["flow"] = flow
+		}
+		if encoding := vlessPacketEncoding(profile); encoding != "" {
+			out["packet_encoding"] = encoding
 		}
 		if tls := buildTLS(profile, false); tls != nil {
 			out["tls"] = tls
@@ -838,6 +841,7 @@ func profileFromStoredNode(raw json.RawMessage, index int) (*NodeProfile, error)
 	}
 
 	applyStreamSettings(profile, mapFromMap(outbound, "streamSettings"))
+	normalizeVLESSProfileFlow(profile)
 	applyProfileLinkFallback(profile, node.Link)
 	return profile, nil
 }
@@ -869,6 +873,57 @@ func renderableProfileNodes(cfg *Config, profiles []*NodeProfile) ([]*NodeProfil
 		return nil, fmt.Errorf("renderer: no usable profile nodes; skipped %d invalid node(s)", skipped)
 	}
 	return renderable, nil
+}
+
+func normalizeVLESSProfileFlow(profile *NodeProfile) {
+	if profile == nil || profile.Protocol != "vless" {
+		return
+	}
+	flow := strings.TrimSpace(profile.Flow)
+	switch strings.ToLower(flow) {
+	case "":
+		profile.Flow = ""
+	case "xtls-rprx-vision":
+		profile.Flow = "xtls-rprx-vision"
+	case "xtls-rprx-vision-udp443":
+		profile.Flow = "xtls-rprx-vision"
+		if profile.Extra == nil {
+			profile.Extra = map[string]string{}
+		}
+		if strings.TrimSpace(profile.Extra["packet_encoding"]) == "" {
+			profile.Extra["packet_encoding"] = "xudp"
+		}
+	default:
+		profile.Flow = flow
+	}
+	if strings.EqualFold(strings.TrimSpace(profile.Transport), "xhttp") && strings.HasPrefix(strings.ToLower(profile.Flow), "xtls-rprx-vision") {
+		profile.Flow = ""
+	}
+}
+
+func singBoxVLESSFlow(flow string) string {
+	switch strings.ToLower(strings.TrimSpace(flow)) {
+	case "xtls-rprx-vision", "xtls-rprx-vision-udp443":
+		return "xtls-rprx-vision"
+	default:
+		return strings.TrimSpace(flow)
+	}
+}
+
+func vlessPacketEncoding(profile *NodeProfile) string {
+	if profile == nil || profile.Protocol != "vless" {
+		return ""
+	}
+	if profile.Extra == nil {
+		return ""
+	}
+	packetEncoding := strings.ToLower(strings.TrimSpace(profile.Extra["packet_encoding"]))
+	switch packetEncoding {
+	case "xudp", "packetaddr":
+		return packetEncoding
+	default:
+		return ""
+	}
 }
 
 func applyProfileLinkFallback(profile *NodeProfile, link string) {
@@ -1787,30 +1842,30 @@ func buildRuleSets(cfg *Config) []map[string]interface{} {
 	var sets []map[string]interface{}
 
 	if cfg.Routing.BypassRussia {
-		sets = append(sets, remoteRuleSet("geoip-ru", "SagerNet/sing-geoip", "proxy"))
+		sets = append(sets, remoteRuleSet("geoip-ru", "SagerNet/sing-geoip", "direct"))
 	}
 
 	if cfg.Routing.BypassChina {
 		sets = append(sets,
-			remoteRuleSet("geoip-cn", "SagerNet/sing-geoip", "proxy"),
-			remoteRuleSet("geosite-cn", "SagerNet/sing-geosite", "proxy"),
+			remoteRuleSet("geoip-cn", "SagerNet/sing-geoip", "direct"),
+			remoteRuleSet("geosite-cn", "SagerNet/sing-geosite", "direct"),
 		)
 	}
 
 	if cfg.Routing.BlockAds {
-		sets = append(sets, remoteRuleSet("geosite-category-ads-all", "SagerNet/sing-geosite", "proxy"))
+		sets = append(sets, remoteRuleSet("geosite-category-ads-all", "SagerNet/sing-geosite", "direct"))
 	}
 
 	return sets
 }
 
-func remoteRuleSet(tag string, repository string, downloadDetour string) map[string]interface{} {
+func remoteRuleSet(tag string, repository string, detour string) map[string]interface{} {
 	return map[string]interface{}{
 		"type":            "remote",
 		"tag":             tag,
 		"format":          "binary",
 		"url":             fmt.Sprintf("https://raw.githubusercontent.com/%s/rule-set/%s.srs", repository, tag),
-		"download_detour": downloadDetour,
+		"download_detour": detour,
 		"update_interval": "24h",
 	}
 }

@@ -24,7 +24,7 @@ import javax.inject.Inject
 
 private const val TAG = "NodeListViewModel"
 
-enum class NodeSortMode { NAME, LATENCY, THROUGHPUT, COUNTRY }
+enum class NodeSortMode { SOURCE_ORDER, NAME, LATENCY, THROUGHPUT, COUNTRY }
 enum class ImportSheetTab { PASTE_URI, SCAN_QR, SUBSCRIPTION }
 
 data class NodeListUiState(
@@ -33,7 +33,7 @@ data class NodeListUiState(
     val nodes: List<Node> = emptyList(),
     val subscriptions: List<SubscriptionUiSummary> = emptyList(),
     val activeNodeId: String? = null,
-    val sortMode: NodeSortMode = NodeSortMode.NAME,
+    val sortMode: NodeSortMode = NodeSortMode.SOURCE_ORDER,
     val showImportSheet: Boolean = false,
     val importSheetTab: ImportSheetTab = ImportSheetTab.PASTE_URI,
     val importInitialText: String = "",
@@ -614,6 +614,7 @@ class NodeListViewModel @Inject constructor(
     }
 
     private fun sortNodes(nodes: List<Node>, mode: NodeSortMode): List<Node> = when (mode) {
+        NodeSortMode.SOURCE_ORDER -> nodes
         NodeSortMode.NAME -> nodes.sortedBy { it.name.lowercase() }
         NodeSortMode.LATENCY -> nodes.sortedWith(
             compareBy<Node> { it.responseMs == null }

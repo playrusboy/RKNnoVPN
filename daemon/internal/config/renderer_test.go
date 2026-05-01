@@ -188,8 +188,11 @@ func TestRenderRouteUsesRuleActionsAndRemoteRuleSets(t *testing.T) {
 		if !strings.HasSuffix(set["url"].(string), "/"+tag+".srs") {
 			t.Fatalf("rule-set %s must point at its .srs artifact: %#v", tag, set)
 		}
-		if set["download_detour"] != "proxy" {
-			t.Fatalf("rule-set %s should download through proxy: %#v", tag, set)
+		if set["download_detour"] != "direct" {
+			t.Fatalf("rule-set %s should use direct legacy download detour: %#v", tag, set)
+		}
+		if _, ok := set["http_client"]; ok {
+			t.Fatalf("rule-set %s must stay compatible with bundled sing-box 1.13 and not render http_client: %#v", tag, set)
 		}
 	}
 	if byTag["geosite-ru"] != nil {
@@ -615,6 +618,116 @@ func TestRenderXHTTPProfileUsesXraySidecarSocksOutbound(t *testing.T) {
 	stream := xrayOutbound["streamSettings"].(map[string]any)
 	if stream["network"] != "xhttp" {
 		t.Fatalf("xray outbound must preserve xhttp stream: %#v", stream)
+	}
+}
+
+func TestRenderVLESSVisionUDP443NormalizesForSingBox(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = ""
+	cfg.Node.UUID = ""
+	cfg.Profile.ActiveNodeID = "vision-node"
+	cfg.Profile.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"vision-node",
+			"name":"Vision UDP443",
+			"protocol":"VLESS",
+			"server":"example.com",
+			"port":443,
+			"outbound":{
+				"protocol":"vless",
+				"settings":{
+					"vnext":[{
+						"address":"example.com",
+						"port":443,
+						"users":[{
+							"id":"00000000-0000-0000-0000-000000000000",
+							"encryption":"none",
+							"flow":"xtls-rprx-vision-udp443"
+						}]
+					}]
+				},
+				"streamSettings":{
+					"network":"tcp",
+					"security":"reality",
+					"realitySettings":{
+						"serverName":"www.example.com",
+						"fingerprint":"chrome",
+						"publicKey":"public-key",
+						"shortId":""
+					}
+				}
+			}
+		}`),
+	}
+
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	var rendered map[string]any
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	outbound := rendered["outbounds"].([]any)[0].(map[string]any)
+	if outbound["flow"] != "xtls-rprx-vision" {
+		t.Fatalf("sing-box flow must be normalized, got %#v", outbound)
+	}
+	if outbound["packet_encoding"] != "xudp" {
+		t.Fatalf("udp443 vision flow must enable xudp packet encoding, got %#v", outbound)
+	}
+}
+
+func TestRenderXHTTPProfileDropsVisionFlowForXraySidecar(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = ""
+	cfg.Node.UUID = ""
+	cfg.Profile.ActiveNodeID = "xhttp-node"
+	cfg.Profile.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"xhttp-node",
+			"name":"XHTTP Vision",
+			"protocol":"VLESS",
+			"server":"example.com",
+			"port":443,
+			"outbound":{
+				"protocol":"vless",
+				"settings":{
+					"vnext":[{
+						"address":"example.com",
+						"port":443,
+						"users":[{
+							"id":"00000000-0000-0000-0000-000000000000",
+							"encryption":"none",
+							"flow":"xtls-rprx-vision"
+						}]
+					}]
+				},
+				"streamSettings":{
+					"network":"xhttp",
+					"security":"reality",
+					"realitySettings":{"publicKey":"public-key"},
+					"xhttpSettings":{"path":"/api","mode":"auto"}
+				}
+			}
+		}`),
+	}
+
+	profile := cfg.ResolveProfile()
+	if profile.Flow != "" {
+		t.Fatalf("xhttp profile must drop vision flow before xray render, got %#v", profile)
+	}
+	xrayData, err := RenderXraySidecarConfig(profile, XraySidecarSocksPort)
+	if err != nil {
+		t.Fatalf("render xray sidecar: %v", err)
+	}
+	var xray map[string]any
+	if err := json.Unmarshal(xrayData, &xray); err != nil {
+		t.Fatalf("unmarshal xray config: %v", err)
+	}
+	settings := xray["outbounds"].([]any)[0].(map[string]any)["settings"].(map[string]any)
+	user := settings["vnext"].([]any)[0].(map[string]any)["users"].([]any)[0].(map[string]any)
+	if _, ok := user["flow"]; ok {
+		t.Fatalf("xhttp xray sidecar user must not include vision flow: %#v", user)
 	}
 }
 

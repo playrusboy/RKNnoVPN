@@ -4,17 +4,15 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/rootcerts"
 )
 
 const maxBodyBytes = 4 * 1024 * 1024
@@ -25,12 +23,6 @@ var fetchBootstrapDNSServers = []string{
 	"1.1.1.1:53",
 	"8.8.8.8:53",
 	"9.9.9.9:53",
-}
-
-var androidRootCAPaths = []string{
-	"/apex/com.android.conscrypt/cacerts",
-	"/system/etc/security/cacerts",
-	"/data/misc/keychain/certs-added",
 }
 
 type ErrorKind string
@@ -241,57 +233,7 @@ func FetchURL(rawURL string) (FetchResult, error) {
 }
 
 func subscriptionRootCAPool() *x509.CertPool {
-	pool, _ := x509.SystemCertPool()
-	return rootCAPoolFromDirs(pool, androidRootCAPaths)
-}
-
-func rootCAPoolFromDirs(pool *x509.CertPool, dirs []string) *x509.CertPool {
-	if pool == nil {
-		pool = x509.NewCertPool()
-	}
-	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
-			if err != nil {
-				continue
-			}
-			appendCertsFromPEMOrDER(pool, data)
-		}
-	}
-	if len(pool.Subjects()) == 0 {
-		return nil
-	}
-	return pool
-}
-
-func appendCertsFromPEMOrDER(pool *x509.CertPool, data []byte) {
-	if pool.AppendCertsFromPEM(data) {
-		return
-	}
-	if cert, err := x509.ParseCertificate(data); err == nil {
-		pool.AddCert(cert)
-		return
-	}
-	for {
-		var block *pem.Block
-		block, data = pem.Decode(data)
-		if block == nil {
-			return
-		}
-		if block.Type != "CERTIFICATE" {
-			continue
-		}
-		if cert, err := x509.ParseCertificate(block.Bytes); err == nil {
-			pool.AddCert(cert)
-		}
-	}
+	return rootcerts.AndroidSystemPool()
 }
 
 func ValidateFetchURL(rawURL string) error {

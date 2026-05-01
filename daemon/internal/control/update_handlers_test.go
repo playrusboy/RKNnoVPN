@@ -1,6 +1,7 @@
 package control
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -22,5 +23,23 @@ func TestUpdateDownloadRejectsActiveRuntimeOperation(t *testing.T) {
 
 	if _, rpcErr := handlers.UpdateDownload(nil); rpcErr == nil || rpcErr.Code != ipc.CodeRuntimeBusy {
 		t.Fatalf("expected update-download to reject active runtime operation, got %#v", rpcErr)
+	}
+}
+
+func TestCurrentUpdateVersionUsesAPKProvidedVersion(t *testing.T) {
+	raw := json.RawMessage(`{"current_version":"2.2.0"}`)
+	handlers := UpdateHandlers{Version: "v2.2.1"}
+
+	if got := handlers.currentUpdateVersion(&raw); got != "v2.2.0" {
+		t.Fatalf("currentUpdateVersion = %q, want v2.2.0", got)
+	}
+}
+
+func TestCurrentUpdateVersionFallsBackToDaemonVersion(t *testing.T) {
+	raw := json.RawMessage(`{"current_version":""}`)
+	handlers := UpdateHandlers{Version: "2.2.1"}
+
+	if got := handlers.currentUpdateVersion(&raw); got != "v2.2.1" {
+		t.Fatalf("currentUpdateVersion = %q, want v2.2.1", got)
 	}
 }

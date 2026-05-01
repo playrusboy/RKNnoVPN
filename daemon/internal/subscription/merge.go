@@ -19,6 +19,7 @@ func MergeSubscriptionNodes(current profiledoc.Document, subscription profiledoc
 		incoming[i].Source.URL = subscription.URL
 	}
 	next, stats := profiledoc.MergeNodes(current, incoming)
+	incomingOrder := orderedNodeMatchKeys(incoming)
 	seenIncoming := map[string]bool{}
 	for _, node := range incoming {
 		if key := profiledoc.NodeMatchKey(node); key != "" {
@@ -37,10 +38,88 @@ func MergeSubscriptionNodes(current profiledoc.Document, subscription profiledoc
 		}
 		next.Nodes[i].Stale = true
 	}
+	next.Nodes = reorderProviderNodes(next.Nodes, subscription.ProviderKey, incomingOrder)
 	if activeNodeIsStaleOrMissing(next.Nodes, next.ActiveNodeID) {
 		next.ActiveNodeID = firstLiveNodeID(next.Nodes)
 	}
 	return next, stats
+}
+
+func orderedNodeMatchKeys(nodes []profiledoc.Node) []string {
+	keys := make([]string, 0, len(nodes))
+	seen := map[string]bool{}
+	for _, node := range nodes {
+		key := profiledoc.NodeMatchKey(node)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func reorderProviderNodes(nodes []profiledoc.Node, providerKey string, incomingOrder []string) []profiledoc.Node {
+	if providerKey == "" {
+		return nodes
+	}
+	providerByKey := map[string]profiledoc.Node{}
+	hasProviderNodes := false
+	for _, node := range nodes {
+		if !isProviderNode(node, providerKey) {
+			continue
+		}
+		hasProviderNodes = true
+		if key := profiledoc.NodeMatchKey(node); key != "" {
+			providerByKey[key] = node
+		}
+	}
+	if !hasProviderNodes {
+		return nodes
+	}
+
+	orderedProvider := make([]profiledoc.Node, 0, len(providerByKey))
+	used := map[string]bool{}
+	for _, key := range incomingOrder {
+		node, ok := providerByKey[key]
+		if !ok {
+			continue
+		}
+		orderedProvider = append(orderedProvider, node)
+		used[key] = true
+	}
+	for _, node := range nodes {
+		if !isProviderNode(node, providerKey) {
+			continue
+		}
+		key := profiledoc.NodeMatchKey(node)
+		if key != "" && used[key] {
+			continue
+		}
+		orderedProvider = append(orderedProvider, node)
+	}
+
+	return replaceProviderNodes(nodes, providerKey, orderedProvider)
+}
+
+func replaceProviderNodes(nodes []profiledoc.Node, providerKey string, orderedProvider []profiledoc.Node) []profiledoc.Node {
+	result := make([]profiledoc.Node, 0, len(nodes))
+	inserted := false
+	for _, node := range nodes {
+		if isProviderNode(node, providerKey) {
+			if !inserted {
+				result = append(result, orderedProvider...)
+				inserted = true
+			}
+			continue
+		}
+		result = append(result, node)
+	}
+	return result
+}
+
+func isProviderNode(node profiledoc.Node, providerKey string) bool {
+	return strings.EqualFold(node.Source.Type, "SUBSCRIPTION") && node.Source.ProviderKey == providerKey
 }
 
 func activeNodeIsStaleOrMissing(nodes []profiledoc.Node, activeNodeID string) bool {

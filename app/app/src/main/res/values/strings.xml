@@ -78,6 +78,7 @@
     <string name="add_node">Add node</string>
     <string name="node_selector_auto">Auto</string>
     <string name="node_selector_manual">Manual</string>
+    <string name="sort_by_source_order">Subscription order</string>
     <string name="sort_by_name">Name</string>
     <string name="sort_by_latency">Latency</string>
     <string name="sort_by_throughput">Speed</string>
