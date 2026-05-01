@@ -92,12 +92,19 @@ func configureProcess(opts daemonOptions) (func(), error) {
 	}
 
 	if opts.PIDFile != "" {
-		if err := writePID(opts.PIDFile); err != nil {
+		pid := os.Getpid()
+		if err := writePID(opts.PIDFile, pid); err != nil {
 			cleanupAll()
 			return nil, fmt.Errorf("write pid: %w", err)
 		}
+		pidRefresh := time.AfterFunc(6*time.Second, func() {
+			if err := refreshPIDIfMissingOrOwned(opts.PIDFile, pid); err != nil {
+				log.Printf("refresh pid warning: %v", err)
+			}
+		})
 		cleanup = append(cleanup, func() {
-			_ = os.Remove(opts.PIDFile)
+			pidRefresh.Stop()
+			_ = removePIDIfOwned(opts.PIDFile, pid)
 		})
 	}
 

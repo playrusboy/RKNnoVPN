@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
@@ -84,11 +85,41 @@ func (d *daemon) dumpState() {
 	log.Printf("STATE DUMP:\n%s", string(data))
 }
 
-func writePID(path string) error {
+func writePID(path string, pid int) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0644)
+	return os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n"), 0644)
+}
+
+func removePIDIfOwned(path string, pid int) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	current, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || current != pid {
+		return nil
+	}
+	return os.Remove(path)
+}
+
+func refreshPIDIfMissingOrOwned(path string, pid int) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return writePID(path, pid)
+		}
+		return err
+	}
+	current, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err == nil && current != pid {
+		return nil
+	}
+	return writePID(path, pid)
 }
 
 func fileMissing(path string) bool {

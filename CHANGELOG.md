@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.1.6
+
+- Hardened no-reboot in-app module updates so the old daemon cannot remove the new daemon PID file during live handoff.
+- Added regression coverage for daemon PID ownership during live daemon replacement.
+- Synchronized app, daemon, daemonctl, module, and update feed metadata to `v2.1.6`.
+
 ## v2.1.5
 
 - Fixed sing-box config rendering for imported VLESS/Trojan/VMess gRPC nodes by omitting Xray-only gRPC fields (`mode` and `authority`) that sing-box rejects.
