@@ -4,8 +4,10 @@
 package health
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"net"
 	neturl "net/url"
 	"os"
 	"os/exec"
@@ -432,16 +434,38 @@ func (h *HealthMonitor) checkDNSListener() CheckResult {
 	return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS listener %s:%d открыт", host, port)}
 }
 
-// checkDNS intentionally does not send a standalone query to the local DNS
-// port. DNS readiness is represented by listener and iptables hook checks; the
-// data-plane is covered by the outbound URL probe, which exercises the selected
-// proxy route instead of a synthetic root-originated lookup.
 func (h *HealthMonitor) checkDNS() CheckResult {
 	port := h.dnsPort
 	if port <= 0 {
 		port = 10856
 	}
-	return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS listener 127.0.0.1:%d проверяется без standalone lookup", port)}
+	timeout := h.dnsTimeout
+	if timeout <= 0 {
+		timeout = 3 * time.Second
+	}
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			dialer := &net.Dialer{Timeout: timeout}
+			return dialer.DialContext(ctx, network, net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		},
+	}
+	var lastErr error
+	for _, host := range h.dnsHosts {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		addrs, err := resolver.LookupHost(ctx, host)
+		cancel()
+		if err == nil && len(addrs) > 0 {
+			return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS listener 127.0.0.1:%d resolved %s", port, host)}
+		}
+		if err != nil {
+			lastErr = err
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no DNS probe hosts configured")
+	}
+	return CheckResult{Pass: false, Detail: fmt.Sprintf("DNS listener 127.0.0.1:%d lookup failed: %v", port, lastErr), Code: "DNS_LOOKUP_TIMEOUT"}
 }
 
 // --------------------------------------------------------------------------

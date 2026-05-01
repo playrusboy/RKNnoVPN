@@ -152,6 +152,13 @@ type HealthCheckSnapshot struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+type TrafficStats struct {
+	TXBytes int64 `json:"txBytes"`
+	RXBytes int64 `json:"rxBytes"`
+	TXRate  int64 `json:"txRate"`
+	RXRate  int64 `json:"rxRate"`
+}
+
 type ReadinessStatus struct {
 	Ready              bool `json:"ready"`
 	OperationalHealthy bool `json:"operationalHealthy"`
@@ -259,6 +266,8 @@ type Status struct {
 	AppliedState    AppliedState        `json:"appliedState"`
 	Canonical       CanonicalStatus     `json:"canonical"`
 	Health          HealthSnapshot      `json:"health"`
+	UptimeSeconds   int64               `json:"uptimeSeconds,omitempty"`
+	Traffic         TrafficStats        `json:"traffic,omitempty"`
 	Capabilities    []BackendCapability `json:"capabilities"`
 	Compatibility   CompatibilityStatus `json:"compatibility"`
 	ActiveOperation *OperationStatus    `json:"activeOperation,omitempty"`

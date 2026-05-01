@@ -123,7 +123,7 @@ func TestRunOnceCanPromoteDNSProbeToHardReadiness(t *testing.T) {
 	}
 }
 
-func TestCheckDNSSkipsStandaloneProbe(t *testing.T) {
+func TestCheckDNSReportsLookupFailure(t *testing.T) {
 	cfg := config.DefaultConfig()
 	manager := core.NewCoreManager(cfg, t.TempDir(), log.New(os.Stderr, "", 0))
 	monitor := NewHealthMonitor(
@@ -139,14 +139,14 @@ func TestCheckDNSSkipsStandaloneProbe(t *testing.T) {
 	)
 
 	result := monitor.checkDNS()
-	if !result.Pass {
-		t.Fatalf("standalone DNS probe should be skipped as healthy diagnostic: %#v", result)
+	if result.Pass {
+		t.Fatalf("DNS probe should fail when the local listener is absent: %#v", result)
 	}
-	if result.Code != "" {
-		t.Fatalf("skipped DNS probe should not emit a failure code: %#v", result)
+	if result.Code != "DNS_LOOKUP_TIMEOUT" {
+		t.Fatalf("DNS probe should emit lookup failure code: %#v", result)
 	}
-	if !strings.Contains(result.Detail, "standalone lookup") {
-		t.Fatalf("detail should explain why the lookup was skipped: %#v", result)
+	if !strings.Contains(result.Detail, "lookup failed") {
+		t.Fatalf("detail should explain lookup failure: %#v", result)
 	}
 }
 

@@ -33,5 +33,6 @@ func (d *daemon) resetRuntimeMetrics() {
 	d.metricsMu.Lock()
 	defer d.metricsMu.Unlock()
 	d.latency = latencySnapshot{}
+	d.traffic = trafficSnapshot{}
 	d.healthKick = time.Time{}
 }

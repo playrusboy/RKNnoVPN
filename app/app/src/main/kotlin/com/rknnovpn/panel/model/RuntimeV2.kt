@@ -194,6 +194,8 @@ data class BackendStatusV2(
     val appliedState: AppliedStateV2 = AppliedStateV2(),
     val canonical: CanonicalRuntimeStatus? = null,
     val health: BackendHealthSnapshot = BackendHealthSnapshot(),
+    val uptimeSeconds: Long = 0L,
+    val traffic: TrafficStats = TrafficStats(),
     val capabilities: List<BackendCapability> = emptyList(),
     val compatibility: RuntimeCompatibilityStatus? = null,
     val activeOperation: RuntimeOperationStatus? = null,

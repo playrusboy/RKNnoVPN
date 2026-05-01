@@ -47,7 +47,8 @@ internal fun BackendStatusV2.toDaemonStatus(
     return DaemonStatus(
         state = connectionState,
         activeNodeId = effectiveCanonical?.activeProfileId ?: desiredState.activeProfileId,
-        uptime = 0L,
+        uptime = uptimeSeconds.takeIf { it > 0L } ?: appliedState.startedAt?.let(::elapsedSecondsSince) ?: 0L,
+        traffic = traffic,
         health = HealthResult(
             healthy = effectiveCanonical?.readiness?.ready ?: effectiveHealth.healthy,
             coreRunning = effectiveCanonical?.readiness?.coreReady ?: effectiveHealth.coreReady,
@@ -87,3 +88,9 @@ internal fun BackendStatusV2.toDaemonStatus(
 
 private fun epochSeconds(raw: String): Long =
     runCatching { java.time.Instant.parse(raw).epochSecond }.getOrDefault(0L)
+
+private fun elapsedSecondsSince(raw: String): Long =
+    runCatching {
+        val startedAt = java.time.Instant.parse(raw)
+        java.time.Duration.between(startedAt, java.time.Instant.now()).seconds.coerceAtLeast(0L)
+    }.getOrDefault(0L)

@@ -15,6 +15,7 @@ func (d *daemon) runtimeControlHandlers() control.RuntimeHandlers {
 		RefreshCompatibility:  d.refreshRuntimeV2Compatibility,
 		RefreshActiveProgress: d.runtimeV2.RefreshActiveProgress,
 		Status:                d.runtimeV2.Status,
+		RuntimeStats:          d.currentRuntimeTrafficStats,
 		IsRunningOrDegraded:   d.isRuntimeRunningOrDegraded,
 		CurrentHealth:         d.runtimeV2.CurrentHealth,
 		RefreshHealth:         d.runtimeV2.RefreshHealth,

@@ -98,16 +98,28 @@ func TestRenderSingboxConfigAvoidsRemovedSingBox113Fields(t *testing.T) {
 	if _, ok := rendered["route"].(map[string]any)["auto_detect_interface"]; ok {
 		t.Fatalf("route should not require default interface during service start: %#v", rendered["route"])
 	}
-	if rules[0].(map[string]any)["action"] != "sniff" {
-		t.Fatalf("first route rule should sniff tproxy traffic: %#v", rules[0])
+	if rules[0].(map[string]any)["action"] != "hijack-dns" {
+		t.Fatalf("DNS inbound route rule should use hijack-dns action: %#v", rules[0])
 	}
-	if got := rules[0].(map[string]any)["inbound"].([]any); len(got) != 2 || got[0] != "tproxy-in" || got[1] != "dns-in" {
-		t.Fatalf("sniff rule should cover tproxy and DNS redirect inbounds: %#v", rules[0])
+	if got := rules[0].(map[string]any)["inbound"].([]any); len(got) != 1 || got[0] != "dns-in" {
+		t.Fatalf("DNS inbound route rule should force hijack-dns: %#v", rules[0])
 	}
-	if rules[1].(map[string]any)["action"] != "hijack-dns" {
-		t.Fatalf("DNS route rule should use hijack-dns action: %#v", rules[1])
+	if rules[1].(map[string]any)["action"] != "hijack-dns" || rules[1].(map[string]any)["port"] != float64(53) {
+		t.Fatalf("port 53 route rule should force hijack-dns: %#v", rules[1])
 	}
-	localRule := rules[2].(map[string]any)
+	if got := rules[1].(map[string]any)["network"].([]any); len(got) != 2 || got[0] != "udp" || got[1] != "tcp" {
+		t.Fatalf("port 53 DNS route rule should cover UDP and TCP: %#v", rules[1])
+	}
+	if rules[2].(map[string]any)["action"] != "sniff" {
+		t.Fatalf("tproxy route rule should sniff remaining traffic: %#v", rules[2])
+	}
+	if got := rules[2].(map[string]any)["inbound"].([]any); len(got) != 1 || got[0] != "tproxy-in" {
+		t.Fatalf("sniff rule should only cover tproxy inbound: %#v", rules[2])
+	}
+	if rules[3].(map[string]any)["action"] != "hijack-dns" {
+		t.Fatalf("sniffed DNS route rule should use hijack-dns action: %#v", rules[3])
+	}
+	localRule := rules[4].(map[string]any)
 	if localRule["action"] != "reject" {
 		t.Fatalf("local TPROXY route should reject instead of looping: %#v", localRule)
 	}

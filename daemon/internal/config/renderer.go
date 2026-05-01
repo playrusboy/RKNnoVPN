@@ -1625,7 +1625,16 @@ func buildTransport(profile *NodeProfile) (map[string]interface{}, error) {
 func buildRoute(cfg *Config) map[string]interface{} {
 	rules := []map[string]interface{}{
 		{
-			"inbound": []string{"tproxy-in", "dns-in"},
+			"inbound": []string{"dns-in"},
+			"action":  "hijack-dns",
+		},
+		{
+			"network": []string{"udp", "tcp"},
+			"port":    53,
+			"action":  "hijack-dns",
+		},
+		{
+			"inbound": []string{"tproxy-in"},
 			"action":  "sniff",
 		},
 		{

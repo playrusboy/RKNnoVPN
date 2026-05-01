@@ -16,6 +16,7 @@ type RuntimeHandlers struct {
 	RefreshCompatibility  func()
 	RefreshActiveProgress func() runtimev2.Status
 	Status                func() runtimev2.Status
+	RuntimeStats          func(runtimev2.Status) runtimev2.TrafficStats
 	IsRunningOrDegraded   func() bool
 	CurrentHealth         func() runtimev2.HealthSnapshot
 	RefreshHealth         func() runtimev2.HealthSnapshot
@@ -36,7 +37,7 @@ func (h RuntimeHandlers) BackendStatus(params *json.RawMessage) (interface{}, *i
 	}
 	status := h.refreshActiveProgress()
 	if status.ActiveOperation != nil {
-		return h.statusWithUpdateInstallState(status), nil
+		return h.finalizeStatus(status), nil
 	}
 	if h.IsRunningOrDegraded != nil && h.IsRunningOrDegraded() {
 		healthSnapshot := h.currentHealth()
@@ -44,7 +45,7 @@ func (h RuntimeHandlers) BackendStatus(params *json.RawMessage) (interface{}, *i
 			go h.refreshHealth()
 		}
 	}
-	return h.statusWithUpdateInstallState(h.status()), nil
+	return h.finalizeStatus(h.status()), nil
 }
 
 func (h RuntimeHandlers) BackendApplyDesiredState(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -65,7 +66,7 @@ func (h RuntimeHandlers) BackendApplyDesiredState(params *json.RawMessage) (inte
 	if err != nil {
 		return nil, DesiredStateApplyRPCError(err)
 	}
-	return status, nil
+	return h.finalizeStatus(status), nil
 }
 
 func (h RuntimeHandlers) BackendStart(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -81,7 +82,7 @@ func (h RuntimeHandlers) BackendStart(params *json.RawMessage) (interface{}, *ip
 	if err != nil {
 		return nil, RuntimeRPCError(err)
 	}
-	return status, nil
+	return h.finalizeStatus(status), nil
 }
 
 func (h RuntimeHandlers) BackendStop(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -92,7 +93,7 @@ func (h RuntimeHandlers) BackendStop(params *json.RawMessage) (interface{}, *ipc
 	if err != nil {
 		return nil, RuntimeRPCError(err)
 	}
-	return status, nil
+	return h.finalizeStatus(status), nil
 }
 
 func (h RuntimeHandlers) BackendRestart(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -108,7 +109,7 @@ func (h RuntimeHandlers) BackendRestart(params *json.RawMessage) (interface{}, *
 	if err != nil {
 		return nil, RuntimeRPCError(err)
 	}
-	return status, nil
+	return h.finalizeStatus(status), nil
 }
 
 func (h RuntimeHandlers) BackendReset(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -119,7 +120,20 @@ func (h RuntimeHandlers) BackendReset(params *json.RawMessage) (interface{}, *ip
 	if err != nil {
 		return nil, RuntimeRPCError(err)
 	}
-	return status, nil
+	return h.finalizeStatus(status), nil
+}
+
+func (h RuntimeHandlers) finalizeStatus(status runtimev2.Status) runtimev2.Status {
+	if status.AppliedState.Phase != runtimev2.PhaseStopped && !status.AppliedState.StartedAt.IsZero() {
+		status.UptimeSeconds = int64(time.Since(status.AppliedState.StartedAt).Seconds())
+		if status.UptimeSeconds < 0 {
+			status.UptimeSeconds = 0
+		}
+	}
+	if h.RuntimeStats != nil {
+		status.Traffic = h.RuntimeStats(status)
+	}
+	return h.statusWithUpdateInstallState(status)
 }
 
 func (h RuntimeHandlers) statusWithUpdateInstallState(status runtimev2.Status) runtimev2.Status {

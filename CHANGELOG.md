@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.2.11
+
+- Fixed classic DNS interception so redirected `dns-in` traffic is always handled by sing-box DNS instead of falling through to the selected proxy node.
+- Added an explicit TCP/UDP port 53 `hijack-dns` route for DNS that reaches the shared TPROXY inbound.
+- Made runtime DNS health checks perform a real lookup through the local DNS listener.
+- Fixed Dashboard uptime and TX/RX traffic counters so runtime status no longer stays at `00:00` and `0 B`.
+- Synchronized app, daemon, daemonctl, module, update feed, and bundled script version metadata to `v2.2.11`.
+
 ## v2.2.10
 
 - Removed duplicate Android ABI binary directories from the Magisk module ZIP so release size returns to the compact two-architecture layout.

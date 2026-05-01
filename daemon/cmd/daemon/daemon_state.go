@@ -35,6 +35,7 @@ type daemon struct {
 	runtimeDesiredRunning bool
 	runtimeOpEpoch        uint64
 	latency               latencySnapshot
+	traffic               trafficSnapshot
 	healthKick            time.Time
 	lastReloadReport      core.RuntimeStageReport
 
@@ -42,6 +43,12 @@ type daemon struct {
 }
 
 type latencySnapshot = rootruntime.EgressProbeState
+
+type trafficSnapshot struct {
+	txBytes   int64
+	rxBytes   int64
+	checkedAt time.Time
+}
 
 func (d *daemon) currentConfig() *config.Config {
 	d.mu.Lock()
