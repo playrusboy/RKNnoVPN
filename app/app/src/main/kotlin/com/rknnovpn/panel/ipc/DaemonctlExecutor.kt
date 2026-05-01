@@ -93,13 +93,18 @@ class DaemonctlExecutor @Inject constructor() {
     suspend fun execute(
         method: String,
         params: JsonObject = emptyJsonObject(),
-        timeoutMs: Long = DEFAULT_TIMEOUT_MS
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+        allowModuleRepair: Boolean = true
     ): DaemonctlResult = withContext(Dispatchers.IO) {
         try {
             val result = withTimeoutOrNull(timeoutMs) {
                 executeRaw(method, params)
             }
-            if (result is DaemonctlResult.DaemonUnavailable && triggerModuleDaemonRepair(result.reason)) {
+            if (
+                allowModuleRepair &&
+                result is DaemonctlResult.DaemonUnavailable &&
+                triggerModuleDaemonRepair(result.reason)
+            ) {
                 return@withContext retryAfterModuleDaemonRepair(method, params, timeoutMs)
             }
             result ?: DaemonctlResult.Timeout(timeoutMs, method)

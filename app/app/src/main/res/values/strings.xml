@@ -154,7 +154,18 @@
     <string name="routing_global">Global</string>
     <string name="routing_whitelist">Whitelist</string>
     <string name="routing_bypass">Bypass</string>
+    <string name="routing_rules">Rules</string>
     <string name="routing_direct">Direct</string>
+    <string name="routing_rule_editor">Domain and IP rules</string>
+    <string name="routing_rule_editor_desc">Add one value per line. Direct rules bypass the proxy, proxy rules force traffic through RKNnoVPN, and block rules reject traffic.</string>
+    <string name="routing_direct_domains">Direct domains</string>
+    <string name="routing_proxy_domains">Proxy domains</string>
+    <string name="routing_block_domains">Blocked domains</string>
+    <string name="routing_direct_ips">Direct IPs/CIDRs</string>
+    <string name="routing_proxy_ips">Proxy IPs/CIDRs</string>
+    <string name="routing_block_ips">Blocked IPs/CIDRs</string>
+    <string name="routing_domain_hint">Example: example.com</string>
+    <string name="routing_ip_hint">Example: 203.0.113.10 or 203.0.113.0/24</string>
     <string name="bypass_russia">Russian sites direct</string>
     <string name="bypass_russia_desc">Keep this enabled: if disabled, Russian sites and services may detect VPN use and see the server IP.</string>
     <string name="vpn_detection_url">https://rks.global/ru/research/vpn-detection/</string>
@@ -193,6 +204,7 @@
     <string name="urltest_url">URL test endpoint</string>
     <string name="always_direct_apps">Always-direct apps</string>
     <string name="always_direct_apps_desc">These apps bypass TPROXY and DNS interception before routing.</string>
+    <string name="always_direct_picker_warning">Choose an app installed on this device. It will fully bypass RKNnoVPN: its traffic and classic DNS requests will not go through the proxy. Add only apps that really need a direct Russian route.</string>
     <string name="always_direct_system_apps">System apps direct</string>
     <string name="always_direct_system_apps_desc">Route Android system and service apps outside RKNnoVPN.</string>
     <string name="sharing_mode">Hotspot sharing</string>
@@ -210,7 +222,7 @@
     <string name="runtime_logs_desc">Shows /data/adb/modules/rknnovpn/logs/daemon.log and /data/adb/modules/rknnovpn/logs/sing-box.log.</string>
     <string name="show_logs">Show logs</string>
     <string name="loading_logs">Loading…</string>
-    <string name="share_logs_telegram">Send to Telegram</string>
+    <string name="share_logs_telegram">Create ZIP and open Telegram</string>
     <string name="copy_diagnostic_report">Copy report</string>
     <string name="copy_report_copied">Report copied</string>
     <string name="logs_share_no_app">No app found to send logs</string>

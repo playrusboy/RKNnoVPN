@@ -18,6 +18,7 @@ DAEMON_SOCKET="${RKNNOVPN_DIR}/run/daemon.sock"
 CONFIG_FILE="${RKNNOVPN_DIR}/config/config.json"
 MANUAL_FLAG="${RKNNOVPN_DIR}/config/manual"
 LOG_FILE="${RKNNOVPN_DIR}/logs/service.log"
+PROFILE_FILE="${RKNNOVPN_DIR}/config/profile.json"
 MODULE_PROP="${MODDIR}/module.prop"
 LOG_VERSION_FILE="${RKNNOVPN_DIR}/logs/.version"
 LOG_ARCHIVE_DIR="${RKNNOVPN_DIR}/logs/archive"
@@ -344,12 +345,32 @@ stop_daemon_process_only() {
 }
 
 if [ -f "$MANUAL_FLAG" ]; then
-    log_info "Manual flag detected at ${MANUAL_FLAG} — daemon will start, proxy autostart stays disabled"
+    log_info "Manual flag detected at ${MANUAL_FLAG} — proxy autostart stays disabled"
 fi
 
 # ============================================================================
 # 4. Pre-launch validation
 # ============================================================================
+
+has_runtime_profile() {
+    if command -v rknnovpn_has_runtime_profile >/dev/null 2>&1; then
+        rknnovpn_has_runtime_profile "$PROFILE_FILE"
+        return $?
+    fi
+
+    if [ -f "$PROFILE_FILE" ]; then
+        compact="$(tr -d '\n\r\t ' < "$PROFILE_FILE" 2>/dev/null)"
+        case "$compact" in
+            *'"nodes":[{'*) return 0 ;;
+        esac
+    fi
+    return 1
+}
+
+if [ "$APP_REPAIR" != "1" ] && ! has_runtime_profile; then
+    log_info "No configured proxy nodes/keys; daemon launch skipped until the app imports a server"
+    exit 0
+fi
 
 detect_arch_dir() {
     ABI="$(getprop ro.product.cpu.abi 2>/dev/null)"

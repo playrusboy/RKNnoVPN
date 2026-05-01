@@ -1,16 +1,21 @@
 package config
 
 import (
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 )
+
+//go:embed russian_service_direct_cidrs.txt
+var russianServiceDirectCIDRsText string
 
 type storedProfileNode struct {
 	ID           string          `json:"id"`
@@ -28,6 +33,18 @@ type storedProfileNode struct {
 // RenderSingboxConfig generates a complete sing-box configuration JSON
 // from the canonical Config and a resolved NodeProfile.
 func RenderSingboxConfig(cfg *Config, profile *NodeProfile) ([]byte, error) {
+	return renderSingboxConfig(cfg, profile, "")
+}
+
+func RenderSingboxConfigForDataDir(cfg *Config, profile *NodeProfile, dataDir string) ([]byte, error) {
+	cachePath := ""
+	if strings.TrimSpace(dataDir) != "" {
+		cachePath = filepath.Join(dataDir, "data", "cache.db")
+	}
+	return renderSingboxConfig(cfg, profile, cachePath)
+}
+
+func renderSingboxConfig(cfg *Config, profile *NodeProfile, cacheFilePath string) ([]byte, error) {
 	route := buildRoute(cfg)
 	sbCfg := map[string]interface{}{
 		"log": map[string]interface{}{
@@ -39,9 +56,13 @@ func RenderSingboxConfig(cfg *Config, profile *NodeProfile) ([]byte, error) {
 		"route":    route,
 	}
 	if _, ok := route["rule_set"]; ok {
-		ensureExperimental(sbCfg)["cache_file"] = map[string]interface{}{
+		cacheFile := map[string]interface{}{
 			"enabled": true,
 		}
+		if strings.TrimSpace(cacheFilePath) != "" {
+			cacheFile["path"] = cacheFilePath
+		}
+		ensureExperimental(sbCfg)["cache_file"] = cacheFile
 	}
 	if cfg.Proxy.APIPort > 0 {
 		secret := strings.TrimSpace(cfg.Proxy.APISecret)
@@ -79,6 +100,15 @@ func buildDNS(cfg *Config) map[string]interface{} {
 	}
 
 	rules := []map[string]interface{}{}
+
+	endpointDomains, _ := proxyEndpointRules(cfg)
+	if len(endpointDomains) > 0 {
+		rules = append(rules, map[string]interface{}{
+			"domain": endpointDomains,
+			"action": "route",
+			"server": "direct-dns",
+		})
+	}
 
 	if cfg.Routing.BlockAds {
 		rules = append(rules, map[string]interface{}{
@@ -1379,6 +1409,22 @@ func buildRoute(cfg *Config) map[string]interface{} {
 		},
 	}
 
+	endpointDomains, endpointCIDRs := proxyEndpointRules(cfg)
+	if len(endpointDomains) > 0 {
+		rules = append(rules, map[string]interface{}{
+			"domain":   endpointDomains,
+			"action":   "route",
+			"outbound": "direct",
+		})
+	}
+	if len(endpointCIDRs) > 0 {
+		rules = append(rules, map[string]interface{}{
+			"ip_cidr":  endpointCIDRs,
+			"action":   "route",
+			"outbound": "direct",
+		})
+	}
+
 	// Bypass private/LAN ranges.
 	if cfg.Routing.BypassLAN {
 		rules = append(rules, map[string]interface{}{
@@ -1406,6 +1452,7 @@ func buildRoute(cfg *Config) map[string]interface{} {
 			"outbound": "direct",
 			"rules": []map[string]interface{}{
 				{"rule_set": []string{"geoip-ru"}},
+				{"ip_cidr": russianServiceDirectCIDRs()},
 				{"domain_suffix": russianDomainSuffixes()},
 			},
 		})
@@ -1499,6 +1546,66 @@ func buildRoute(cfg *Config) map[string]interface{} {
 	}
 
 	return route
+}
+
+func proxyEndpointRules(cfg *Config) (domains []string, cidrs []string) {
+	seenDomains := map[string]struct{}{}
+	seenCIDRs := map[string]struct{}{}
+
+	addAddress := func(address string) {
+		address = endpointHost(address)
+		if address == "" {
+			return
+		}
+		if ip := net.ParseIP(address); ip != nil {
+			bits := 32
+			if ip.To4() == nil {
+				bits = 128
+			}
+			seenCIDRs[fmt.Sprintf("%s/%d", ip.String(), bits)] = struct{}{}
+			return
+		}
+		seenDomains[strings.ToLower(address)] = struct{}{}
+	}
+
+	for _, profile := range ProfilesFromConfigNodes(cfg) {
+		addAddress(profile.Address)
+	}
+	if len(seenDomains) == 0 && len(seenCIDRs) == 0 {
+		if profile := cfg.ResolveProfile(); profile != nil {
+			addAddress(profile.Address)
+		}
+	}
+
+	domains = make([]string, 0, len(seenDomains))
+	for domain := range seenDomains {
+		domains = append(domains, domain)
+	}
+	sort.Strings(domains)
+
+	cidrs = make([]string, 0, len(seenCIDRs))
+	for cidr := range seenCIDRs {
+		cidrs = append(cidrs, cidr)
+	}
+	sort.Strings(cidrs)
+
+	return domains, cidrs
+}
+
+func endpointHost(address string) string {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return ""
+	}
+	if strings.Contains(address, "://") {
+		if parsed, err := url.Parse(address); err == nil {
+			address = parsed.Host
+		}
+	}
+	if host, _, err := net.SplitHostPort(address); err == nil {
+		address = host
+	}
+	return strings.Trim(strings.TrimSpace(address), "[]")
 }
 
 func buildAppGroupRouteRules(cfg *Config) []map[string]interface{} {
@@ -1614,6 +1721,18 @@ func remoteRuleSet(tag string, repository string, downloadDetour string) map[str
 
 func russianDomainSuffixes() []string {
 	return []string{".ru", ".su", ".xn--p1ai"}
+}
+
+func russianServiceDirectCIDRs() []string {
+	var cidrs []string
+	for _, line := range strings.Split(russianServiceDirectCIDRsText, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		cidrs = append(cidrs, line)
+	}
+	return cidrs
 }
 
 func ensureExperimental(sbCfg map[string]interface{}) map[string]interface{} {

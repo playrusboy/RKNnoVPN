@@ -128,9 +128,9 @@ class DaemonClient @Inject constructor(
     // ---- Profile ----
 
     /** Get the daemon-owned profile document. */
-    suspend fun profileGet(): DaemonClientResult<ProfileConfig> {
-        requireCompatible("profile.get")?.let { return it.asFailure() }
-        return call("profile.get") {
+    suspend fun profileGet(allowModuleRepair: Boolean = false): DaemonClientResult<ProfileConfig> {
+        requireCompatible("profile.get", allowModuleRepair = allowModuleRepair)?.let { return it.asFailure() }
+        return call("profile.get", allowModuleRepair = allowModuleRepair) {
             json.decodeFromJsonElement(ProfileConfig.serializer(), it)
         }
     }
@@ -140,7 +140,7 @@ class DaemonClient @Inject constructor(
         config: ProfileConfig,
         reload: Boolean = true,
     ): DaemonClientResult<ConfigMutationInfo> {
-        requireCompatible("profile.apply")?.let { return it.asFailure() }
+        requireCompatible("profile.apply", allowModuleRepair = true)?.let { return it.asFailure() }
         return callConfigMutation(
             "profile.apply",
             buildJsonObject {
@@ -154,7 +154,7 @@ class DaemonClient @Inject constructor(
         nodes: List<Node>,
         reload: Boolean = true,
     ): DaemonClientResult<ConfigMutationInfo> {
-        requireCompatible("profile.importNodes")?.let { return it.asFailure() }
+        requireCompatible("profile.importNodes", allowModuleRepair = true)?.let { return it.asFailure() }
         return callConfigMutation(
             "profile.importNodes",
             buildJsonObject {
@@ -168,7 +168,7 @@ class DaemonClient @Inject constructor(
         nodeId: String,
         reload: Boolean = true,
     ): DaemonClientResult<ConfigMutationInfo> {
-        requireCompatible("profile.setActiveNode")?.let { return it.asFailure() }
+        requireCompatible("profile.setActiveNode", allowModuleRepair = true)?.let { return it.asFailure() }
         return callConfigMutation(
             "profile.setActiveNode",
             buildJsonObject {
@@ -185,15 +185,15 @@ class DaemonClient @Inject constructor(
     }
 
     suspend fun subscriptionPreview(url: String): DaemonClientResult<SubscriptionPreviewInfo> {
-        requireCompatible("subscription.preview")?.let { return it.asFailure() }
+        requireCompatible("subscription.preview", allowModuleRepair = true)?.let { return it.asFailure() }
         val params = buildJsonObject { put("url", url) }
-        return call("subscription.preview", params, timeoutMs = 60_000L) { element ->
+        return call("subscription.preview", params, timeoutMs = 60_000L, allowModuleRepair = true) { element ->
             json.decodeFromJsonElement(SubscriptionPreviewInfo.serializer(), element)
         }
     }
 
     suspend fun subscriptionRefresh(url: String): DaemonClientResult<ConfigMutationInfo> {
-        requireCompatible("subscription.refresh")?.let { return it.asFailure() }
+        requireCompatible("subscription.refresh", allowModuleRepair = true)?.let { return it.asFailure() }
         val params = buildJsonObject { put("url", url) }
         return callConfigMutation("subscription.refresh", params)
     }
@@ -221,8 +221,8 @@ class DaemonClient @Inject constructor(
         call("backend.status") { json.decodeFromJsonElement(BackendStatusV2.serializer(), it) }
 
     suspend fun backendStart(): DaemonClientResult<BackendStatusV2> {
-        requireCompatible("backend.start", "backend.status")?.let { return it.asFailure() }
-        return call("backend.start", timeoutMs = ACCEPT_TIMEOUT_MS) {
+        requireCompatible("backend.start", "backend.status", allowModuleRepair = true)?.let { return it.asFailure() }
+        return call("backend.start", timeoutMs = ACCEPT_TIMEOUT_MS, allowModuleRepair = true) {
             json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
         }
     }
@@ -235,25 +235,26 @@ class DaemonClient @Inject constructor(
     }
 
     suspend fun backendRestart(): DaemonClientResult<BackendStatusV2> {
-        requireCompatible("backend.restart", "backend.status")?.let { return it.asFailure() }
-        return call("backend.restart", timeoutMs = ACCEPT_TIMEOUT_MS) {
+        requireCompatible("backend.restart", "backend.status", allowModuleRepair = true)?.let { return it.asFailure() }
+        return call("backend.restart", timeoutMs = ACCEPT_TIMEOUT_MS, allowModuleRepair = true) {
             json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
         }
     }
 
     suspend fun backendReset(): DaemonClientResult<BackendStatusV2> {
-        requireCompatible("backend.reset", "backend.status")?.let { return it.asFailure() }
-        return call("backend.reset", timeoutMs = ACCEPT_TIMEOUT_MS) {
+        requireCompatible("backend.reset", "backend.status", allowModuleRepair = true)?.let { return it.asFailure() }
+        return call("backend.reset", timeoutMs = ACCEPT_TIMEOUT_MS, allowModuleRepair = true) {
             json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
         }
     }
 
     suspend fun backendApplyDesiredState(desiredState: DesiredStateV2): DaemonClientResult<BackendStatusV2> {
-        requireCompatible("backend.applyDesiredState", "backend.status")?.let { return it.asFailure() }
+        requireCompatible("backend.applyDesiredState", "backend.status", allowModuleRepair = true)?.let { return it.asFailure() }
         return call(
             method = "backend.applyDesiredState",
             params = json.encodeToJsonElement(DesiredStateV2.serializer(), desiredState).jsonObject,
             timeoutMs = 15_000L,
+            allowModuleRepair = true,
         ) {
             json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
         }
@@ -378,13 +379,13 @@ class DaemonClient @Inject constructor(
 
     // ---- Meta ----
 
-    suspend fun ipcContract(): DaemonClientResult<IpcContractInfo> =
-        call("ipc.contract") { element ->
+    suspend fun ipcContract(allowModuleRepair: Boolean = false): DaemonClientResult<IpcContractInfo> =
+        call("ipc.contract", allowModuleRepair = allowModuleRepair) { element ->
             json.decodeFromJsonElement(IpcContractInfo.serializer(), element)
         }
 
-    suspend fun version(): DaemonClientResult<VersionInfo> =
-        call("version", transform = ::parseVersionInfo)
+    suspend fun version(allowModuleRepair: Boolean = false): DaemonClientResult<VersionInfo> =
+        call("version", allowModuleRepair = allowModuleRepair, transform = ::parseVersionInfo)
 
     // ---- Internal helpers ----
 
@@ -392,16 +393,18 @@ class DaemonClient @Inject constructor(
         method: String,
         params: JsonObject = emptyJsonObject(),
         timeoutMs: Long = 5_000L,
+        allowModuleRepair: Boolean = false,
         transform: (JsonElement) -> T
     ): DaemonClientResult<T> {
-        return executor.execute(method, params, timeoutMs).toDaemonClientResult(transform)
+        return executor.execute(method, params, timeoutMs, allowModuleRepair)
+            .toDaemonClientResult(transform)
     }
 
     private suspend fun callConfigMutation(
         method: String,
         params: JsonObject,
     ): DaemonClientResult<ConfigMutationInfo> {
-        return executor.execute(method, params, timeoutMs = 60_000L)
+        return executor.execute(method, params, timeoutMs = 60_000L, allowModuleRepair = true)
             .toDaemonClientResultEnvelope { element ->
                 val info = json.parseConfigMutationInfo(element)
                 if (!info.ok) {
@@ -416,8 +419,11 @@ class DaemonClient @Inject constructor(
             }
     }
 
-    private suspend fun requireCompatible(vararg requiredMethods: String): DaemonClientResult<Unit>? {
-        return when (val result = version()) {
+    private suspend fun requireCompatible(
+        vararg requiredMethods: String,
+        allowModuleRepair: Boolean = false,
+    ): DaemonClientResult<Unit>? {
+        return when (val result = version(allowModuleRepair)) {
             is DaemonClientResult.Ok -> {
                 val info = result.data
                 if ("ipc.contract" !in info.supportedMethods) {
@@ -426,7 +432,7 @@ class DaemonClient @Inject constructor(
                         "APK и модуль несовместимы: daemon не рекламирует IPC contract",
                     )
                 }
-                val contract = when (val contractResult = ipcContract()) {
+                val contract = when (val contractResult = ipcContract(allowModuleRepair)) {
                     is DaemonClientResult.Ok -> contractResult.data
                     is DaemonClientResult.DaemonError -> return DaemonClientResult.DaemonError(
                         DaemonClientErrorCodes.COMPATIBILITY,

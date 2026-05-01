@@ -9,24 +9,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.rknnovpn.panel.repository.ProfileRepository
-import com.rknnovpn.panel.repository.StatusRepository
 import com.rknnovpn.panel.ui.navigation.BottomNavBar
 import com.rknnovpn.panel.ui.navigation.NavGraph
 import com.rknnovpn.panel.ui.navigation.TopLevelRoute
 import com.rknnovpn.panel.ui.theme.RKNnoVPNTheme
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-    @Inject lateinit var profileRepository: ProfileRepository
-    @Inject lateinit var statusRepository: StatusRepository
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -61,18 +53,5 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        statusRepository.startPolling()
-        lifecycleScope.launch {
-            profileRepository.refresh()
-        }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        statusRepository.stopPolling()
     }
 }

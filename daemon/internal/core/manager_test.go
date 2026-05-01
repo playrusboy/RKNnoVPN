@@ -359,6 +359,12 @@ func TestSingBoxHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_SINGBOX_HELPER") != "1" {
 		return
 	}
+	if path := os.Getenv("FAKE_PWD_FILE"); path != "" {
+		if err := os.WriteFile(path, []byte(mustGetwd()), 0644); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
 	args := os.Args
 	for len(args) > 0 && args[0] != "--" {
 		args = args[1:]
@@ -398,13 +404,67 @@ func TestSingBoxConfigCheckTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := runSingBoxConfigCheck(singBoxPath, filepath.Join(dataDir, "singbox.json"), 100*time.Millisecond)
+	err := runSingBoxConfigCheck(singBoxPath, filepath.Join(dataDir, "singbox.json"), "", 100*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected config check timeout")
 	}
 	if !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("expected timeout error, got %v", err)
 	}
+}
+
+func TestStartRunsSingBoxFromRunDir(t *testing.T) {
+	dataDir := t.TempDir()
+	binDir := filepath.Join(dataDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	tproxyPort := freeTCPPort(t)
+	dnsPort := freeTCPPort(t)
+	pwdFile := filepath.Join(dataDir, "singbox.pwd")
+	singBoxPath := filepath.Join(binDir, "sing-box")
+	script := fmt.Sprintf(
+		"#!/bin/sh\nGO_WANT_SINGBOX_HELPER=1 FAKE_TPROXY_PORT=%d FAKE_DNS_PORT=%d FAKE_PWD_FILE=%s exec %s -test.run=TestSingBoxHelperProcess -- \"$@\"\n",
+		tproxyPort,
+		dnsPort,
+		strconv.Quote(pwdFile),
+		strconv.Quote(os.Args[0]),
+	)
+	if err := os.WriteFile(singBoxPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Node.Address = "example.com"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	cfg.Proxy.TProxyPort = tproxyPort
+	cfg.Proxy.DNSPort = dnsPort
+	cfg.Proxy.APIPort = 0
+	cfg.Proxy.GID = os.Getegid()
+	manager := NewCoreManager(cfg, dataDir, nil)
+	manager.disableCoreCredentialForTest = true
+	manager.netstackFactory = func() coreNetstack { return &fakeCoreNetstack{} }
+
+	if err := manager.Start(cfg.ResolveProfile()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.Stop() }()
+
+	pwdBytes, err := os.ReadFile(pwdFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(pwdBytes), filepath.Join(dataDir, "run"); got != want {
+		t.Fatalf("sing-box workdir mismatch: got %q want %q", got, want)
+	}
+}
+
+func mustGetwd() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+	return wd
 }
 
 func TestScriptEnvIncludesLocalHelperPorts(t *testing.T) {

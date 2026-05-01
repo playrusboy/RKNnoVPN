@@ -152,6 +152,7 @@ fun AppPackageListItem(
 @Composable
 fun AppPackagePickerDialog(
     title: String,
+    warningText: String? = null,
     onDismiss: () -> Unit,
     onSelect: (String) -> Unit,
 ) {
@@ -184,6 +185,13 @@ fun AppPackagePickerDialog(
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (!warningText.isNullOrBlank()) {
+                    Text(
+                        text = warningText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },

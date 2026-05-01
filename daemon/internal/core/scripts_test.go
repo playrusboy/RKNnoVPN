@@ -246,6 +246,41 @@ ang.hiddify.com 10131 0 /data/user/0/ang.hiddify.com default
 	}
 }
 
+func TestRequestedRussianServiceAppsAreBuiltInAlwaysDirect(t *testing.T) {
+	for _, packageName := range []string{
+		"ru.fourpda.client",
+		"ru.aliexpress.buyer",
+		"ru.aviasales",
+		"ru.burgerking",
+		"ru.bestprice.fixprice",
+		"ru.more.play",
+		"ru.pepper",
+		"ru.kfc.kfc_delivery",
+		"com.apegroup.mcdonaldsrussia",
+		"ru.rutube.app",
+		"com.sevensky.app",
+		"com.punicapp.whoosh",
+		"ru.rt.video.app.mobile",
+		"ru.gazprombank.android.mobilebank.app",
+		"ru.letobank.Prometheus",
+		"ru.dodopizza.app",
+		"ru.ivi.client",
+		"com.icemobile.lenta.prod",
+		"ru.rzd.pass",
+		"club.chizhik",
+	} {
+		if !IsBuiltInAlwaysDirectPackage(packageName) {
+			t.Fatalf("%s must be built-in always-direct", packageName)
+		}
+	}
+}
+
+func TestClashRoyaleIsNotBuiltInAlwaysDirect(t *testing.T) {
+	if IsBuiltInAlwaysDirectPackage("com.supercell.clashroyale") {
+		t.Fatal("Clash Royale must not be direct only because it contains the word clash")
+	}
+}
+
 func TestBuildAppRoutingEnvCanHardBypassSystemApps(t *testing.T) {
 	withPackageResolverTestEnv(t, `
 com.example.app 10123 0 /data/user/0/com.example.app default

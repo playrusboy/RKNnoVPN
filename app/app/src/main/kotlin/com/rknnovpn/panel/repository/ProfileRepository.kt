@@ -191,7 +191,7 @@ class ProfileRepository @Inject constructor(
             _error.value = null
             _notice.value = null
             try {
-                val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
+                val current = _profile.value ?: refreshUnlockedOrNull(allowModuleRepair = true) ?: run {
                     if (_error.value.isNullOrBlank()) {
                         _error.value = messages.get(com.rknnovpn.panel.R.string.error_no_profile_loaded)
                     }
@@ -215,7 +215,7 @@ class ProfileRepository @Inject constructor(
             _error.value = null
             _notice.value = null
             try {
-                val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
+                val current = _profile.value ?: refreshUnlockedOrNull(allowModuleRepair = true) ?: run {
                     if (_error.value.isNullOrBlank()) {
                         _error.value = messages.get(com.rknnovpn.panel.R.string.error_no_profile_loaded)
                     }
@@ -235,7 +235,7 @@ class ProfileRepository @Inject constructor(
                 _error.value = null
                 _notice.value = null
                 try {
-                    val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
+                    val current = _profile.value ?: refreshUnlockedOrNull(allowModuleRepair = true) ?: run {
                         if (_error.value.isNullOrBlank()) {
                             _error.value = messages.get(com.rknnovpn.panel.R.string.error_no_profile_loaded)
                         }
@@ -399,8 +399,8 @@ class ProfileRepository @Inject constructor(
         return false
     }
 
-    private suspend fun refreshUnlockedOrNull(): ProfileConfig? {
-        return when (val result = client.profileGet()) {
+    private suspend fun refreshUnlockedOrNull(allowModuleRepair: Boolean = false): ProfileConfig? {
+        return when (val result = client.profileGet(allowModuleRepair = allowModuleRepair)) {
             is DaemonClientResult.Ok -> {
                 _profile.value = result.data
                 result.data

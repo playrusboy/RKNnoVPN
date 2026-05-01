@@ -2,8 +2,6 @@ package com.rknnovpn.panel.ui.settings
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -23,7 +21,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Dns
@@ -67,12 +64,17 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.rknnovpn.panel.R
 import com.rknnovpn.panel.model.DnsIpv6Mode
 import com.rknnovpn.panel.model.FallbackPolicy
 import com.rknnovpn.panel.ui.common.AppPackageListItem
 import com.rknnovpn.panel.ui.common.AppPackagePickerDialog
+import java.io.File
+import java.io.FileOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -95,33 +97,38 @@ fun SettingsScreen(
     LaunchedEffect(state.shareLogsEventId) {
         val logs = state.shareLogsText
         if (state.shareLogsEventId > 0 && logs != null) {
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_SUBJECT, context.getString(R.string.logs_share_subject))
-                putExtra(Intent.EXTRA_TEXT, logs)
+            val zipFile = try {
+                createRuntimeLogsZip(context, logs)
+            } catch (_: Exception) {
+                Toast.makeText(context, R.string.logs_share_no_app, Toast.LENGTH_LONG).show()
+                viewModel.clearSharedLogs()
+                return@LaunchedEffect
             }
-            val chooser = Intent.createChooser(intent, context.getString(R.string.logs_share_chooser))
-            if (context !is Activity) {
-                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                zipFile,
+            )
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/zip"
+                putExtra(Intent.EXTRA_SUBJECT, context.getString(R.string.logs_share_subject))
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             try {
-                context.startActivity(chooser)
+                startTelegramShare(context, intent)
             } catch (_: ActivityNotFoundException) {
-                Toast.makeText(context, R.string.logs_share_no_app, Toast.LENGTH_LONG).show()
+                val chooser = Intent.createChooser(intent, context.getString(R.string.logs_share_chooser))
+                if (context !is Activity) {
+                    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                try {
+                    context.startActivity(chooser)
+                } catch (_: ActivityNotFoundException) {
+                    Toast.makeText(context, R.string.logs_share_no_app, Toast.LENGTH_LONG).show()
+                }
             }
             viewModel.clearSharedLogs()
-        }
-    }
-
-    LaunchedEffect(state.copyReportEventId) {
-        val report = state.copyReportText
-        if (state.copyReportEventId > 0 && report != null) {
-            val clipboard = context.getSystemService(ClipboardManager::class.java)
-            clipboard?.setPrimaryClip(
-                ClipData.newPlainText(context.getString(R.string.copy_diagnostic_report), report)
-            )
-            Toast.makeText(context, R.string.copy_report_copied, Toast.LENGTH_SHORT).show()
-            viewModel.clearCopiedReport()
         }
     }
 
@@ -177,6 +184,22 @@ fun SettingsScreen(
                 colors = transparentListItemColors(),
             )
         }
+
+        RoutingRulesCard(
+            directDomains = state.directDomainsText,
+            proxyDomains = state.proxyDomainsText,
+            blockDomains = state.blockDomainsText,
+            directIps = state.directIpsText,
+            proxyIps = state.proxyIpsText,
+            blockIps = state.blockIpsText,
+            onDirectDomainsChange = viewModel::setDirectDomainsText,
+            onProxyDomainsChange = viewModel::setProxyDomainsText,
+            onBlockDomainsChange = viewModel::setBlockDomainsText,
+            onDirectIpsChange = viewModel::setDirectIpsText,
+            onProxyIpsChange = viewModel::setProxyIpsText,
+            onBlockIpsChange = viewModel::setBlockIpsText,
+            onApply = viewModel::applyRoutingRules,
+        )
 
         Spacer(modifier = Modifier.height(20.dp))
 
@@ -446,18 +469,6 @@ fun SettingsScreen(
                                 )
                                 Text(stringResource(R.string.share_logs_telegram))
                             }
-                            FilledTonalButton(
-                                onClick = viewModel::copyDiagnosticReport,
-                                enabled = !state.isLoadingLogs,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Icon(
-                                    Icons.Filled.ContentCopy,
-                                    contentDescription = null,
-                                    modifier = Modifier.padding(end = 4.dp),
-                                )
-                                Text(stringResource(R.string.copy_diagnostic_report))
-                            }
                         }
                         if (state.logsText.isNotBlank()) {
                             SelectionContainer {
@@ -557,6 +568,7 @@ fun SettingsScreen(
     if (showAlwaysDirectAppPicker) {
         AppPackagePickerDialog(
             title = stringResource(R.string.choose_app),
+            warningText = stringResource(R.string.always_direct_picker_warning),
             onDismiss = { showAlwaysDirectAppPicker = false },
             onSelect = viewModel::addAlwaysDirectPackage,
         )
@@ -622,6 +634,39 @@ fun SettingsScreen(
     }
 }
 
+private fun createRuntimeLogsZip(context: android.content.Context, logs: String): File {
+    val dir = File(context.cacheDir, "shared_logs")
+    dir.mkdirs()
+    dir.listFiles()?.forEach { file ->
+        if (file.isFile) file.delete()
+    }
+    val zipFile = File(dir, "rknnovpn-logs-${System.currentTimeMillis()}.zip")
+    ZipOutputStream(FileOutputStream(zipFile)).use { zip ->
+        zip.putNextEntry(ZipEntry("diagnostic-report.txt"))
+        zip.write(logs.toByteArray(Charsets.UTF_8))
+        zip.closeEntry()
+    }
+    return zipFile
+}
+
+private fun startTelegramShare(context: android.content.Context, baseIntent: Intent) {
+    val packages = listOf("org.telegram.messenger", "org.telegram.messenger.web")
+    var lastFailure: ActivityNotFoundException? = null
+    for (packageName in packages) {
+        val telegramIntent = Intent(baseIntent).setPackage(packageName)
+        if (context !is Activity) {
+            telegramIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            context.startActivity(telegramIntent)
+            return
+        } catch (e: ActivityNotFoundException) {
+            lastFailure = e
+        }
+    }
+    throw lastFailure ?: ActivityNotFoundException()
+}
+
 // ---- Section helper composables ----
 
 private fun parsePackageSelection(raw: String): List<String> =
@@ -674,6 +719,7 @@ private fun RoutingModeSelector(
         RoutingMode.GLOBAL to stringResource(R.string.routing_global),
         RoutingMode.WHITELIST to stringResource(R.string.routing_whitelist),
         RoutingMode.BYPASS to stringResource(R.string.routing_bypass),
+        RoutingMode.RULES to stringResource(R.string.routing_rules),
         RoutingMode.DIRECT to stringResource(R.string.routing_direct),
     )
 
@@ -691,6 +737,102 @@ private fun RoutingModeSelector(
             }
         }
     }
+}
+
+@Composable
+private fun RoutingRulesCard(
+    directDomains: String,
+    proxyDomains: String,
+    blockDomains: String,
+    directIps: String,
+    proxyIps: String,
+    blockIps: String,
+    onDirectDomainsChange: (String) -> Unit,
+    onProxyDomainsChange: (String) -> Unit,
+    onBlockDomainsChange: (String) -> Unit,
+    onDirectIpsChange: (String) -> Unit,
+    onProxyIpsChange: (String) -> Unit,
+    onBlockIpsChange: (String) -> Unit,
+    onApply: () -> Unit,
+) {
+    SettingsCard {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.routing_rule_editor),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = stringResource(R.string.routing_rule_editor_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            RoutingRuleTextField(
+                value = directDomains,
+                onValueChange = onDirectDomainsChange,
+                label = stringResource(R.string.routing_direct_domains),
+                hint = stringResource(R.string.routing_domain_hint),
+            )
+            RoutingRuleTextField(
+                value = proxyDomains,
+                onValueChange = onProxyDomainsChange,
+                label = stringResource(R.string.routing_proxy_domains),
+                hint = stringResource(R.string.routing_domain_hint),
+            )
+            RoutingRuleTextField(
+                value = blockDomains,
+                onValueChange = onBlockDomainsChange,
+                label = stringResource(R.string.routing_block_domains),
+                hint = stringResource(R.string.routing_domain_hint),
+            )
+            RoutingRuleTextField(
+                value = directIps,
+                onValueChange = onDirectIpsChange,
+                label = stringResource(R.string.routing_direct_ips),
+                hint = stringResource(R.string.routing_ip_hint),
+            )
+            RoutingRuleTextField(
+                value = proxyIps,
+                onValueChange = onProxyIpsChange,
+                label = stringResource(R.string.routing_proxy_ips),
+                hint = stringResource(R.string.routing_ip_hint),
+            )
+            RoutingRuleTextField(
+                value = blockIps,
+                onValueChange = onBlockIpsChange,
+                label = stringResource(R.string.routing_block_ips),
+                hint = stringResource(R.string.routing_ip_hint),
+            )
+            TextButton(
+                onClick = onApply,
+                modifier = Modifier.align(Alignment.Start),
+            ) {
+                Text(stringResource(R.string.apply))
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoutingRuleTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    hint: String,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        supportingText = { Text(hint) },
+        minLines = 2,
+        maxLines = 4,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable

@@ -392,6 +392,10 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	// 2. Spawn sing-box.
 	binPath := filepath.Join(paths.BinDir(), "sing-box")
 	cmd := exec.Command(binPath, "run", "-c", configPath)
+	if err := m.prepareSingBoxCommand(cmd); err != nil {
+		m.state = StateStopped
+		return failStage("spawn-core", "prepare sing-box", "CORE_SPAWN_FAILED", err, false)
+	}
 	logFile, logPath, err := m.openSingBoxLog()
 	if err != nil {
 		m.state = StateStopped
@@ -694,6 +698,9 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 func (m *CoreManager) spawnSingBox(configPath string) (*os.Process, <-chan error, int, string, error) {
 	binPath := filepath.Join(modulecontract.NewPaths(m.dataDir).BinDir(), "sing-box")
 	cmd := exec.Command(binPath, "run", "-c", configPath)
+	if err := m.prepareSingBoxCommand(cmd); err != nil {
+		return nil, nil, 0, "", err
+	}
 	logFile, logPath, err := m.openSingBoxLog()
 	if err != nil {
 		return nil, nil, 0, "", err
@@ -739,14 +746,21 @@ func (m *CoreManager) openSingBoxLog() (*os.File, string, error) {
 
 func (m *CoreManager) checkSingBoxConfig(configPath string) error {
 	binPath := filepath.Join(modulecontract.NewPaths(m.dataDir).BinDir(), "sing-box")
-	return runSingBoxConfigCheck(binPath, configPath, singBoxCheckTimeout)
+	workDir, err := m.ensureSingBoxWorkDir()
+	if err != nil {
+		return err
+	}
+	return runSingBoxConfigCheck(binPath, configPath, workDir, singBoxCheckTimeout)
 }
 
-func runSingBoxConfigCheck(binPath string, configPath string, timeout time.Duration) error {
+func runSingBoxConfigCheck(binPath string, configPath string, workDir string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, binPath, "check", "-c", configPath)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
 	outBytes, err := cmd.CombinedOutput()
 	out := strings.TrimSpace(string(outBytes))
 	if ctx.Err() == context.DeadlineExceeded {
@@ -761,6 +775,27 @@ func runSingBoxConfigCheck(binPath string, configPath string, timeout time.Durat
 		}
 		return fmt.Errorf("sing-box check failed: %w", err)
 	}
+	return nil
+}
+
+func (m *CoreManager) singBoxWorkDir() string {
+	return modulecontract.NewPaths(m.dataDir).RunDir()
+}
+
+func (m *CoreManager) ensureSingBoxWorkDir() (string, error) {
+	workDir := m.singBoxWorkDir()
+	if err := os.MkdirAll(workDir, 0750); err != nil {
+		return "", fmt.Errorf("mkdir sing-box workdir %s: %w", workDir, err)
+	}
+	return workDir, nil
+}
+
+func (m *CoreManager) prepareSingBoxCommand(cmd *exec.Cmd) error {
+	workDir, err := m.ensureSingBoxWorkDir()
+	if err != nil {
+		return err
+	}
+	cmd.Dir = workDir
 	return nil
 }
 
@@ -1230,7 +1265,7 @@ func renderConfig(cfg *config.Config, profile *config.NodeProfile, path string) 
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 
-	data, err := config.RenderSingboxConfig(cfg, profile)
+	data, err := config.RenderSingboxConfigForDataDir(cfg, profile, filepath.Dir(filepath.Dir(filepath.Dir(path))))
 	if err != nil {
 		return fmt.Errorf("render: %w", err)
 	}

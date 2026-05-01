@@ -37,7 +37,7 @@ class PollingStatusSource @Inject constructor(
     companion object {
         private const val TAG = "PollingStatusSource"
         private const val FAST_INTERVAL_MS = 2_000L
-        private const val SLOW_INTERVAL_MS = 10_000L
+        private const val SLOW_INTERVAL_MS = 30_000L
         /** After this many consecutive failures we switch to slow polling. */
         private const val FAILURE_THRESHOLD = 3
     }

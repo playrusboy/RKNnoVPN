@@ -7,6 +7,26 @@ package com.rknnovpn.panel.advisor
 object AlwaysDirectApps {
     private val exactPackages = setOf(
         "ru.oneme.app",
+        "ru.fourpda.client",
+        "ru.aliexpress.buyer",
+        "ru.aviasales",
+        "ru.burgerking",
+        "ru.bestprice.fixprice",
+        "ru.more.play",
+        "ru.pepper",
+        "ru.kfc.kfc_delivery",
+        "com.apegroup.mcdonaldsrussia",
+        "ru.rutube.app",
+        "com.sevensky.app",
+        "com.punicapp.whoosh",
+        "ru.rt.video.app.mobile",
+        "ru.gazprombank.android.mobilebank.app",
+        "ru.letobank.Prometheus",
+        "ru.dodopizza.app",
+        "ru.ivi.client",
+        "com.icemobile.lenta.prod",
+        "ru.rzd.pass",
+        "club.chizhik",
         "ru.yandex.searchplugin",
         "com.yandex.browser",
         "ru.yandex.browser",
@@ -105,6 +125,10 @@ object AlwaysDirectApps {
         "com.yourvpndead",
     )
 
+    private val excludedPackages = setOf(
+        "com.supercell.clashroyale",
+    )
+
     private val prefixes = listOf(
         "ru.yandex.",
         "com.yandex.",
@@ -184,6 +208,7 @@ object AlwaysDirectApps {
 
     fun matches(packageName: String, manualPackages: Set<String> = emptySet()): Boolean {
         if (packageName in manualPackages || packageName in exactPackages) return true
+        if (packageName in excludedPackages) return false
         if (prefixes.any(packageName::startsWith)) return true
         val lower = packageName.lowercase()
         return keywords.any(lower::contains)

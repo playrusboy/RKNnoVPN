@@ -144,12 +144,31 @@ func TestRenderRouteUsesRuleActionsAndRemoteRuleSets(t *testing.T) {
 	}
 
 	route := rendered["route"].(map[string]any)
-	assertRouteRulesUseActions(t, route["rules"].([]any))
+	routeRules := route["rules"].([]any)
+	assertRouteRulesUseActions(t, routeRules)
+	if !hasRouteRuleCIDR(routeRules, "84.201.128.0/18", "direct") {
+		t.Fatalf("Yandex ASN prefixes should be routed directly with Russian bypass: %#v", routeRules)
+	}
+	if !hasRouteRuleCIDR(routeRules, "87.240.128.0/18", "direct") {
+		t.Fatalf("VK prefixes should be routed directly with Russian bypass: %#v", routeRules)
+	}
 
 	experimental := rendered["experimental"].(map[string]any)
 	cacheFile := experimental["cache_file"].(map[string]any)
 	if cacheFile["enabled"] != true {
 		t.Fatalf("remote rule sets require cache_file.enabled=true, got %#v", experimental)
+	}
+	dataWithPath, err := RenderSingboxConfigForDataDir(cfg, cfg.ResolveProfile(), "/data/adb/modules/rknnovpn")
+	if err != nil {
+		t.Fatalf("render config with data dir: %v", err)
+	}
+	var renderedWithPath map[string]any
+	if err := json.Unmarshal(dataWithPath, &renderedWithPath); err != nil {
+		t.Fatalf("unmarshal config with data dir: %v", err)
+	}
+	cacheFileWithPath := renderedWithPath["experimental"].(map[string]any)["cache_file"].(map[string]any)
+	if cacheFileWithPath["path"] != "/data/adb/modules/rknnovpn/data/cache.db" {
+		t.Fatalf("cache_file.path must be writable module data path, got %#v", cacheFileWithPath)
 	}
 
 	sets := route["rule_set"].([]any)
@@ -176,6 +195,155 @@ func TestRenderRouteUsesRuleActionsAndRemoteRuleSets(t *testing.T) {
 	if byTag["geosite-ru"] != nil {
 		t.Fatalf("geosite-ru is not a canonical SagerNet rule-set and must not be rendered: %#v", sets)
 	}
+}
+
+func TestRenderRoutesProxyEndpointsDirectly(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = "fallback.example"
+	cfg.Node.Port = 443
+	cfg.Node.Protocol = "vless"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	cfg.Profile.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"yandex-cloud-node",
+			"name":"Yandex Cloud node",
+			"protocol":"VLESS",
+			"server":"84.201.148.180",
+			"port":443,
+			"outbound":{
+				"protocol":"vless",
+				"settings":{"vnext":[{"address":"84.201.148.180","port":443,"users":[{"id":"11111111-1111-1111-1111-111111111111","encryption":"none"}]}]}
+			}
+		}`),
+		json.RawMessage(`{
+			"id":"domain-node",
+			"name":"Domain node",
+			"protocol":"Trojan",
+			"server":"Proxy.Example",
+			"port":443,
+			"outbound":{
+				"protocol":"trojan",
+				"settings":{"servers":[{"address":"Proxy.Example","port":443,"password":"secret"}]}
+			}
+		}`),
+		json.RawMessage(`{
+			"id":"stale-node",
+			"name":"Stale node",
+			"protocol":"VLESS",
+			"server":"stale.example",
+			"port":443,
+			"stale":true,
+			"outbound":{
+				"protocol":"vless",
+				"settings":{"vnext":[{"address":"stale.example","port":443,"users":[{"id":"22222222-2222-2222-2222-222222222222","encryption":"none"}]}]}
+			}
+		}`),
+	}
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	routeRules := rendered["route"].(map[string]any)["rules"].([]any)
+	if !hasRouteRuleCIDR(routeRules, "84.201.148.180/32", "direct") {
+		t.Fatalf("proxy server IP must be routed directly before final proxy: %#v", routeRules)
+	}
+	if !hasRouteRuleDomain(routeRules, "proxy.example", "direct") {
+		t.Fatalf("proxy server domain must be routed directly before final proxy: %#v", routeRules)
+	}
+	if hasRouteRuleDomain(routeRules, "stale.example", "direct") {
+		t.Fatalf("stale proxy endpoint must not be rendered as a live direct rule: %#v", routeRules)
+	}
+
+	dnsRules := rendered["dns"].(map[string]any)["rules"].([]any)
+	if !hasDNSRuleDomainServer(dnsRules, "proxy.example", "direct-dns") {
+		t.Fatalf("proxy server domain must resolve through direct DNS: %#v", dnsRules)
+	}
+}
+
+func hasRouteRuleCIDR(rules []any, cidr string, outbound string) bool {
+	return hasRouteRuleCIDRWithOutbound(rules, cidr, outbound, "")
+}
+
+func hasRouteRuleCIDRWithOutbound(rules []any, cidr string, outbound string, inheritedOutbound string) bool {
+	for _, rawRule := range rules {
+		rule := rawRule.(map[string]any)
+		effectiveOutbound := inheritedOutbound
+		if value, ok := rule["outbound"].(string); ok && value != "" {
+			effectiveOutbound = value
+		}
+		if effectiveOutbound == outbound {
+			for _, rawCIDR := range ruleList(rule["ip_cidr"]) {
+				if rawCIDR == cidr {
+					return true
+				}
+			}
+		}
+		if nested, ok := rule["rules"].([]any); ok && hasRouteRuleCIDRWithOutbound(nested, cidr, outbound, effectiveOutbound) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRouteRuleDomain(rules []any, domain string, outbound string) bool {
+	return hasRouteRuleDomainWithOutbound(rules, domain, outbound, "")
+}
+
+func hasRouteRuleDomainWithOutbound(rules []any, domain string, outbound string, inheritedOutbound string) bool {
+	for _, rawRule := range rules {
+		rule := rawRule.(map[string]any)
+		effectiveOutbound := inheritedOutbound
+		if value, ok := rule["outbound"].(string); ok && value != "" {
+			effectiveOutbound = value
+		}
+		if effectiveOutbound == outbound {
+			for _, rawDomain := range ruleList(rule["domain"]) {
+				if rawDomain == domain {
+					return true
+				}
+			}
+		}
+		if nested, ok := rule["rules"].([]any); ok && hasRouteRuleDomainWithOutbound(nested, domain, outbound, effectiveOutbound) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDNSRuleDomainServer(rules []any, domain string, server string) bool {
+	for _, rawRule := range rules {
+		rule := rawRule.(map[string]any)
+		if rule["server"] != server {
+			continue
+		}
+		for _, rawDomain := range ruleList(rule["domain"]) {
+			if rawDomain == domain {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func ruleList(value any) []string {
+	rawValues, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	values := make([]string, 0, len(rawValues))
+	for _, rawValue := range rawValues {
+		value, ok := rawValue.(string)
+		if ok {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func assertRouteRulesUseActions(t *testing.T, rules []any) {

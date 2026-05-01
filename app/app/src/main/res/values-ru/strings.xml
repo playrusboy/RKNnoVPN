@@ -154,7 +154,18 @@
     <string name="routing_global">Глобально</string>
     <string name="routing_whitelist">Белый список</string>
     <string name="routing_bypass">Исключения</string>
+    <string name="routing_rules">Правила</string>
     <string name="routing_direct">Напрямую</string>
+    <string name="routing_rule_editor">Правила доменов и IP</string>
+    <string name="routing_rule_editor_desc">Добавляйте по одному значению в строке. Правила «напрямую» обходят прокси, правила «через прокси» принудительно ведут трафик через RKNnoVPN, а правила блокировки отклоняют трафик.</string>
+    <string name="routing_direct_domains">Домены напрямую</string>
+    <string name="routing_proxy_domains">Домены через прокси</string>
+    <string name="routing_block_domains">Заблокированные домены</string>
+    <string name="routing_direct_ips">IP/CIDR напрямую</string>
+    <string name="routing_proxy_ips">IP/CIDR через прокси</string>
+    <string name="routing_block_ips">Заблокированные IP/CIDR</string>
+    <string name="routing_domain_hint">Например: example.com</string>
+    <string name="routing_ip_hint">Например: 203.0.113.10 или 203.0.113.0/24</string>
     <string name="bypass_russia">Российские сайты напрямую</string>
     <string name="bypass_russia_desc">Важно держать включенным: если выключить, российские сайты и сервисы могут определить VPN и увидеть IP сервера.</string>
     <string name="vpn_detection_url">https://rks.global/ru/research/vpn-detection/</string>
@@ -193,6 +204,7 @@
     <string name="urltest_url">URL для проверки</string>
     <string name="always_direct_apps">Всегда напрямую</string>
     <string name="always_direct_apps_desc">Эти приложения обходят TPROXY и DNS-перехват до маршрутизации.</string>
+    <string name="always_direct_picker_warning">Выберите приложение из установленных на этом устройстве. Оно будет полностью обходить RKNnoVPN: трафик и обычные DNS-запросы не попадут в прокси. Добавляйте сюда только приложения, которым действительно нужен прямой российский выход.</string>
     <string name="always_direct_system_apps">Служебные приложения напрямую</string>
     <string name="always_direct_system_apps_desc">Системные и служебные приложения Android обходят RKNnoVPN.</string>
     <string name="sharing_mode">Раздача через RKNnoVPN</string>
@@ -210,7 +222,7 @@
     <string name="runtime_logs_desc">Показывает /data/adb/modules/rknnovpn/logs/daemon.log и /data/adb/modules/rknnovpn/logs/sing-box.log.</string>
     <string name="show_logs">Показать логи</string>
     <string name="loading_logs">Загрузка…</string>
-    <string name="share_logs_telegram">Отправить в Telegram</string>
+    <string name="share_logs_telegram">Создать ZIP и открыть Telegram</string>
     <string name="copy_diagnostic_report">Скопировать отчёт</string>
     <string name="copy_report_copied">Отчёт скопирован</string>
     <string name="logs_share_no_app">Не найдено приложение для отправки логов</string>

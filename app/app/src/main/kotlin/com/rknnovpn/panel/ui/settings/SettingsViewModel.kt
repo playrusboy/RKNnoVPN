@@ -8,12 +8,6 @@ import com.rknnovpn.panel.i18n.UserMessageFormatter
 import com.rknnovpn.panel.ipc.DaemonClient
 import com.rknnovpn.panel.ipc.DaemonClientResult
 import com.rknnovpn.panel.ipc.GeneratedDaemonContract
-import com.rknnovpn.panel.ipc.apkRequiredMethodMismatches
-import com.rknnovpn.panel.ipc.contractSurfaceMismatches
-import com.rknnovpn.panel.ipc.currentReleaseWarning
-import com.rknnovpn.panel.ipc.missingRequiredMethods
-import com.rknnovpn.panel.ipc.releaseMismatch
-import com.rknnovpn.panel.ipc.runtimePreflightWarning
 import com.rknnovpn.panel.model.ConnectionState
 import com.rknnovpn.panel.model.DaemonStatus
 import com.rknnovpn.panel.model.DnsIpv6Mode
@@ -47,7 +41,7 @@ private val APPLYING_OPERATION_KINDS = GeneratedDaemonContract.OPERATION_POLICIE
     .filterValues { policy -> APPLYING_OPERATION_REQUIRED_STAGES.all { it in policy.stages } }
     .keys
 
-enum class RoutingMode { GLOBAL, WHITELIST, BYPASS, DIRECT }
+enum class RoutingMode { GLOBAL, WHITELIST, BYPASS, RULES, DIRECT }
 
 enum class DnsPreset(
     val remoteUrl: String,
@@ -87,6 +81,12 @@ data class SettingsUiState(
     // Routing
     val routingMode: RoutingMode = RoutingMode.GLOBAL,
     val bypassRussia: Boolean = true,
+    val directDomainsText: String = "",
+    val proxyDomainsText: String = "",
+    val blockDomainsText: String = "",
+    val directIpsText: String = "",
+    val proxyIpsText: String = "",
+    val blockIpsText: String = "",
     // DNS
     val dnsPreset: DnsPreset = DnsPreset.CLOUDFLARE,
     val remoteDnsUrl: String = DnsPreset.CLOUDFLARE.remoteUrl,
@@ -118,8 +118,6 @@ data class SettingsUiState(
     val isLoadingLogs: Boolean = false,
     val shareLogsText: String? = null,
     val shareLogsEventId: Long = 0L,
-    val copyReportText: String? = null,
-    val copyReportEventId: Long = 0L,
 )
 
 @HiltViewModel
@@ -141,7 +139,6 @@ class SettingsViewModel @Inject constructor(
     init {
         observeProfile()
         observeRuntimeStatus()
-        loadVersionInfo()
     }
 
     // ---- Public actions ----
@@ -170,6 +167,7 @@ class SettingsViewModel @Inject constructor(
                 RoutingMode.GLOBAL -> com.rknnovpn.panel.model.RoutingMode.PROXY_ALL
                 RoutingMode.WHITELIST -> com.rknnovpn.panel.model.RoutingMode.PER_APP
                 RoutingMode.BYPASS -> com.rknnovpn.panel.model.RoutingMode.PER_APP_BYPASS
+                RoutingMode.RULES -> com.rknnovpn.panel.model.RoutingMode.RULES
                 RoutingMode.DIRECT -> com.rknnovpn.panel.model.RoutingMode.DIRECT
             }
             val ok = profileRepository.updateConfig { config ->
@@ -331,6 +329,54 @@ class SettingsViewModel @Inject constructor(
                 Log.w(TAG, "Failed to save Russian direct routing setting: $err")
                 profileRepository.refresh()
                 _uiState.update { it.copy(bypassRussia = previous, errorMessage = err) }
+            }
+        }
+    }
+
+    fun setDirectDomainsText(value: String) {
+        _uiState.update { it.copy(directDomainsText = value, errorMessage = null) }
+    }
+
+    fun setProxyDomainsText(value: String) {
+        _uiState.update { it.copy(proxyDomainsText = value, errorMessage = null) }
+    }
+
+    fun setBlockDomainsText(value: String) {
+        _uiState.update { it.copy(blockDomainsText = value, errorMessage = null) }
+    }
+
+    fun setDirectIpsText(value: String) {
+        _uiState.update { it.copy(directIpsText = value, errorMessage = null) }
+    }
+
+    fun setProxyIpsText(value: String) {
+        _uiState.update { it.copy(proxyIpsText = value, errorMessage = null) }
+    }
+
+    fun setBlockIpsText(value: String) {
+        _uiState.update { it.copy(blockIpsText = value, errorMessage = null) }
+    }
+
+    fun applyRoutingRules() {
+        val state = _uiState.value
+        viewModelScope.launch {
+            val ok = profileRepository.updateConfig { config ->
+                config.copy(
+                    routing = config.routing.copy(
+                        directDomains = parseRuleList(state.directDomainsText),
+                        proxyDomains = parseRuleList(state.proxyDomainsText),
+                        blockDomains = parseRuleList(state.blockDomainsText),
+                        directIps = parseRuleList(state.directIpsText),
+                        proxyIps = parseRuleList(state.proxyIpsText),
+                        blockIps = parseRuleList(state.blockIpsText),
+                    ),
+                )
+            }
+            if (!ok) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Failed to save routing rules: $err")
+                profileRepository.refresh()
+                _uiState.update { it.copy(errorMessage = err) }
             }
         }
     }
@@ -575,40 +621,8 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun copyDiagnosticReport() {
-        _uiState.update { it.copy(isLoadingLogs = true, errorMessage = null) }
-        viewModelScope.launch {
-            when (val result = daemonClient.diagnosticBundle(lines = 220)) {
-                is DaemonClientResult.Ok -> {
-                    _uiState.update {
-                        it.copy(
-                            logsText = result.data,
-                            copyReportText = result.data,
-                            copyReportEventId = it.copyReportEventId + 1,
-                            isLoadingLogs = false,
-                        )
-                    }
-                }
-                else -> {
-                    val message = formatUpdateError(result)
-                    Log.w(TAG, "Failed to copy diagnostic report: $message")
-                    _uiState.update {
-                        it.copy(
-                            isLoadingLogs = false,
-                            errorMessage = message,
-                        )
-                    }
-                }
-            }
-        }
-    }
-
     fun clearSharedLogs() {
         _uiState.update { it.copy(shareLogsText = null) }
-    }
-
-    fun clearCopiedReport() {
-        _uiState.update { it.copy(copyReportText = null) }
     }
 
     // ---- Update actions ----
@@ -832,7 +846,7 @@ class SettingsViewModel @Inject constructor(
             com.rknnovpn.panel.model.RoutingMode.PER_APP -> RoutingMode.WHITELIST
             com.rknnovpn.panel.model.RoutingMode.PER_APP_BYPASS -> RoutingMode.BYPASS
             com.rknnovpn.panel.model.RoutingMode.DIRECT -> RoutingMode.DIRECT
-            com.rknnovpn.panel.model.RoutingMode.RULES -> RoutingMode.DIRECT
+            com.rknnovpn.panel.model.RoutingMode.RULES -> RoutingMode.RULES
         }
 
         val dnsPreset = DnsPreset.entries.find {
@@ -847,6 +861,12 @@ class SettingsViewModel @Inject constructor(
                 fallbackPolicy = config.runtime.fallbackPolicy,
                 routingMode = routingMode,
                 bypassRussia = config.routing.bypassRussia,
+                directDomainsText = config.routing.directDomains.joinToString("\n"),
+                proxyDomainsText = config.routing.proxyDomains.joinToString("\n"),
+                blockDomainsText = config.routing.blockDomains.joinToString("\n"),
+                directIpsText = config.routing.directIps.joinToString("\n"),
+                proxyIpsText = config.routing.proxyIps.joinToString("\n"),
+                blockIpsText = config.routing.blockIps.joinToString("\n"),
                 dnsPreset = dnsPreset,
                 remoteDnsUrl = config.dns.remoteDns,
                 directDnsUrl = config.dns.directDns,
@@ -860,131 +880,6 @@ class SettingsViewModel @Inject constructor(
                 sharingEnabled = config.sharing.enabled,
                 sharingInterfacesText = config.sharing.interfaces.joinToString("\n"),
             )
-        }
-    }
-
-    /**
-     * Fetch daemon and core version strings.
-     */
-    private fun loadVersionInfo() {
-        viewModelScope.launch {
-            when (val result = daemonClient.version()) {
-                is DaemonClientResult.Ok -> {
-                    val info = result.data
-                    val missingMethods = info.missingRequiredMethods(DaemonClient.REQUIRED_METHODS)
-                    val requiredMethodMismatches = info.apkRequiredMethodMismatches(DaemonClient.REQUIRED_METHODS)
-                    val contractSurfaceMismatches = info.contractSurfaceMismatches(DaemonClient.REQUIRED_METHODS)
-                    val releaseMismatch = info.releaseMismatch(BuildConfig.VERSION_NAME)
-                    val currentReleaseWarning = info.currentReleaseWarning()
-                    val runtimePreflightWarning = info.runtimePreflightWarning()
-                    val compatibilityWarning = when {
-                        releaseMismatch != null -> releaseMismatch
-                        currentReleaseWarning != null -> currentReleaseWarning
-                        runtimePreflightWarning != null -> runtimePreflightWarning
-                        requiredMethodMismatches.isNotEmpty() ->
-                            "APK и модуль несовместимы: daemon APK required methods не совпадают (${requiredMethodMismatches.joinToString(", ")})"
-                        contractSurfaceMismatches.isNotEmpty() ->
-                            "APK и модуль несовместимы: IPC contract не совпадает (${contractSurfaceMismatches.joinToString("; ")})"
-                        info.controlProtocolVersion in 1 until DaemonClient.MIN_CONTROL_PROTOCOL_VERSION ->
-                            messages.get(
-                                com.rknnovpn.panel.R.string.daemon_status_incompatible_protocol,
-                                info.controlProtocolVersion,
-                                DaemonClient.MIN_CONTROL_PROTOCOL_VERSION,
-                            )
-                        missingMethods.isNotEmpty() ->
-                            messages.get(
-                                com.rknnovpn.panel.R.string.daemon_status_missing_methods,
-                                missingMethods.joinToString(", "),
-                            )
-                        !info.singBoxAvailable ->
-                            messages.get(
-                                com.rknnovpn.panel.R.string.daemon_status_sing_box_unavailable,
-                                info.singBoxError.ifBlank { "unknown" },
-                            )
-                        else -> null
-                    }
-                    _uiState.update {
-                        it.copy(
-                            moduleVersion = info.moduleVersion.ifBlank { info.daemonVersion },
-                            daemonStatusText = compatibilityWarning
-                                ?: messages.get(
-                                    com.rknnovpn.panel.R.string.daemon_status_running_with_core,
-                                    messages.get(
-                                        com.rknnovpn.panel.R.string.daemon_status_runtime_versions,
-                                        info.daemonVersion,
-                                        info.moduleVersion.ifBlank { "unknown" },
-                                        info.coreVersion,
-                                    ),
-                                ),
-                            errorMessage = compatibilityWarning,
-                        )
-                    }
-                    _updateState.update {
-                        it.copy(currentVersion = BuildConfig.VERSION_NAME)
-                    }
-                    when (val statusResult = daemonClient.status()) {
-                        is DaemonClientResult.Ok -> {
-                            _uiState.update {
-                                it.copy(
-                                    daemonStatusText = formatRuntimeStatus(
-                                        statusResult.data,
-                                        it.daemonStatusText,
-                                    ),
-                                )
-                            }
-                        }
-                        else -> Unit
-                    }
-                }
-                is DaemonClientResult.DaemonNotFound -> {
-                    _uiState.update {
-                        it.copy(
-                            daemonStatusText = messages.get(
-                                com.rknnovpn.panel.R.string.daemon_status_module_not_installed
-                            )
-                        )
-                    }
-                }
-                is DaemonClientResult.DaemonUnavailable -> {
-                    _uiState.update {
-                        it.copy(
-                            daemonStatusText = messages.get(
-                                com.rknnovpn.panel.R.string.error_daemon_not_running
-                            ),
-                            errorMessage = messages.get(
-                                com.rknnovpn.panel.R.string.error_daemon_not_running
-                            ),
-                        )
-                    }
-                }
-                is DaemonClientResult.RootDenied -> {
-                    _uiState.update {
-                        it.copy(
-                            daemonStatusText = messages.get(
-                                com.rknnovpn.panel.R.string.daemon_status_root_denied
-                            )
-                        )
-                    }
-                }
-                is DaemonClientResult.Timeout -> {
-                    _uiState.update {
-                        it.copy(
-                            daemonStatusText = messages.get(
-                                com.rknnovpn.panel.R.string.daemon_status_not_responding
-                            )
-                        )
-                    }
-                }
-                else -> {
-                    _uiState.update {
-                        it.copy(
-                            daemonStatusText = messages.get(
-                                com.rknnovpn.panel.R.string.daemon_status_unknown_text
-                            )
-                        )
-                    }
-                }
-            }
         }
     }
 
@@ -1080,6 +975,12 @@ class SettingsViewModel @Inject constructor(
     }
 
     private fun parsePackageList(raw: String): List<String> =
+        raw.split('\n', ',', ';', ' ', '\t')
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+
+    private fun parseRuleList(raw: String): List<String> =
         raw.split('\n', ',', ';', ' ', '\t')
             .map(String::trim)
             .filter(String::isNotBlank)

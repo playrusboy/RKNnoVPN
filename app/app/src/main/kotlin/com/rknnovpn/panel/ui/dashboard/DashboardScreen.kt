@@ -31,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +52,13 @@ fun DashboardScreen(
     viewModel: DashboardViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+
+    DisposableEffect(viewModel) {
+        viewModel.startStatusPolling()
+        onDispose {
+            viewModel.stopStatusPolling()
+        }
+    }
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -106,7 +114,7 @@ fun DashboardScreen(
             // -- Connect / Disconnect button --
             ConnectButton(
                 connectionState = state.connectionState,
-                hasActiveNode = !state.activeNodeName.isNullOrBlank(),
+                hasActiveNode = state.hasAvailableNode,
                 runtimeActionActive = state.runtimeActionActive,
                 onClick = viewModel::toggleConnection,
             )
@@ -115,6 +123,7 @@ fun DashboardScreen(
 
             RestartBackendButton(
                 runtimeActionActive = state.runtimeActionActive,
+                hasActiveNode = state.hasAvailableNode,
                 onClick = viewModel::restartBackend,
             )
 
@@ -171,11 +180,12 @@ fun DashboardScreen(
 @Composable
 private fun RestartBackendButton(
     runtimeActionActive: Boolean,
+    hasActiveNode: Boolean,
     onClick: () -> Unit,
 ) {
     FilledTonalButton(
         onClick = onClick,
-        enabled = !runtimeActionActive,
+        enabled = !runtimeActionActive && hasActiveNode,
         modifier = Modifier
             .fillMaxWidth()
             .height(48.dp),

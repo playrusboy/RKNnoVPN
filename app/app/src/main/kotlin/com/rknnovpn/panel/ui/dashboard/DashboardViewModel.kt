@@ -31,6 +31,7 @@ data class DashboardUiState(
     val runtimePhase: BackendPhase = BackendPhase.STOPPED,
     val activeNodeName: String? = null,
     val activeNodeProtocol: String? = null,
+    val hasAvailableNode: Boolean = false,
     val traffic: TrafficStats = TrafficStats(),
     /** Ring buffer of normalized RX rate samples for the sparkline (0..1). */
     val trafficHistory: List<Float> = emptyList(),
@@ -77,13 +78,20 @@ class DashboardViewModel @Inject constructor(
         observeDaemonConnectionState()
         observePollErrors()
         observeProfile()
-        statusRepository.startPolling()
         viewModelScope.launch {
             profileRepository.getOrLoad()
         }
     }
 
     // ---- Public actions ----
+
+    fun startStatusPolling() {
+        statusRepository.startPolling()
+    }
+
+    fun stopStatusPolling() {
+        statusRepository.stopPolling()
+    }
 
     fun toggleConnection() {
         if (_uiState.value.runtimeActionActive) return
@@ -110,6 +118,16 @@ class DashboardViewModel @Inject constructor(
 
     fun restartBackend() {
         if (_uiState.value.runtimeActionActive) return
+        if (!_uiState.value.hasAvailableNode) {
+            _uiState.update {
+                it.copy(
+                    connectionState = ConnectionState.DISCONNECTED,
+                    errorMessage = messages.get(com.rknnovpn.panel.R.string.no_nodes),
+                    statusMessage = null,
+                )
+            }
+            return
+        }
         _uiState.update {
             it.copy(
                 runtimeActionActive = true,
@@ -289,6 +307,7 @@ class DashboardViewModel @Inject constructor(
                     it.copy(
                         activeNodeName = formatActiveNodeName(status, profile),
                         activeNodeProtocol = formatActiveNodeSubtitle(status, profile),
+                        hasAvailableNode = availableNodes(profile).isNotEmpty(),
                     )
                 }
             }
@@ -339,6 +358,7 @@ class DashboardViewModel @Inject constructor(
                 runtimePhase = status.health.phase,
                 activeNodeName = formatActiveNodeName(status, profileRepository.profile.value),
                 activeNodeProtocol = formatActiveNodeSubtitle(status, profileRepository.profile.value),
+                hasAvailableNode = availableNodes(profileRepository.profile.value).isNotEmpty(),
                 egressIp = status.egressIp,
                 countryFlag = status.countryFlag,
                 latencyMs = status.latencyMs,

@@ -24,10 +24,10 @@ import javax.inject.Singleton
  * - [connectionState]: Panel-to-daemon connectivity (StateFlow)
  * - One-shot operations: [start], [stop], [reload], [health], [audit]
  *
- * The polling lifecycle is driven by the UI layer:
+ * The polling lifecycle is driven by visible screens:
  * ```
- * onResume  -> statusRepository.startPolling()
- * onPause   -> statusRepository.stopPolling()
+ * Dashboard enters -> statusRepository.startPolling()
+ * Dashboard leaves -> statusRepository.stopPolling()
  * ```
  */
 @Singleton

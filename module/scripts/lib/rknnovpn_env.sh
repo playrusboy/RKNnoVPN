@@ -176,6 +176,25 @@ rknnovpn_is_active() {
     [ -f "$ACTIVE_FILE" ]
 }
 
+rknnovpn_compact_json_file() {
+    _file="$1"
+    [ -f "$_file" ] || return 1
+    tr -d '\n\r\t ' < "$_file" 2>/dev/null
+}
+
+rknnovpn_has_runtime_profile() {
+    _profile_file="${1:-${CONFIG_DIR}/profile.json}"
+
+    _profile_json="$(rknnovpn_compact_json_file "$_profile_file" 2>/dev/null)"
+    case "$_profile_json" in
+        *'"nodes":[{'*)
+            return 0
+            ;;
+    esac
+
+    return 1
+}
+
 rknnovpn_has_boot_cleanup_markers() {
     for _marker in \
         "$ACTIVE_FILE" \
