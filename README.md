@@ -1,5 +1,5 @@
 ## RKNnoVPN (Роскомнадзор, Нет ВПН!)
-<img width="3339" height="1516" alt="image" src="https://github.com/user-attachments/assets/430f3f0a-2f14-40b2-9a82-7f30adb8c058" />
+<img width="3339" height="1516" alt="image" src="https://github.com/user-attachments/assets/3edf3387-5c72-42ed-bb7a-35461b991e65" />
 
 Прозрачный прокси для rooted Android без `VpnService`, TUN-интерфейса и VPN-иконки.
 
