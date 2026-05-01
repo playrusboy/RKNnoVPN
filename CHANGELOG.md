@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.1.3
+
+- Show a reboot-required state when KernelSU/APatch has staged the module install or update but has not applied it yet.
+- Keep daemon auto-repair for repairable IPC outages, but skip it for staged updates, disabled modules, removal markers, and incomplete installs.
+- Create install, service, daemon, and sing-box log files during module installation so the logs directory is not empty before first boot service launch.
+- Synchronized app, daemon, daemonctl, module, and update feed metadata to `v2.1.3`.
+
 ## v2.1.2
 
 - Fixed daemon-side update checks and update downloads so GitHub requests use bootstrap DNS instead of a stale system resolver such as `[::1]:53`.
