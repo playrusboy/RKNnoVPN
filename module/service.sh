@@ -398,14 +398,14 @@ if [ "$APP_REPAIR" != "1" ] && ! has_runtime_profile; then
     exit 0
 fi
 
-detect_arch_dir() {
+detect_arch_dirs() {
     ABI="$(getprop ro.product.cpu.abi 2>/dev/null)"
     case "$ABI" in
         arm64-v8a|arm64*)
-            echo "arm64"
+            echo "arm64-v8a arm64"
             ;;
         armeabi-v7a|armeabi|armv7*|arm*)
-            echo "armv7"
+            echo "armeabi-v7a armv7 arm"
             ;;
         *)
             echo ""
@@ -414,13 +414,19 @@ detect_arch_dir() {
 }
 
 restore_missing_binaries() {
-    ARCH_DIR="$(detect_arch_dir)"
-    if [ -z "$ARCH_DIR" ]; then
+    ARCH_DIRS="$(detect_arch_dirs)"
+    if [ -z "$ARCH_DIRS" ]; then
         log_warn "Cannot determine CPU ABI for binary restore"
         return 0
     fi
-    SRC_BIN="${RKNNOVPN_DIR}/binaries/${ARCH_DIR}"
-    if [ ! -d "$SRC_BIN" ]; then
+    SRC_BIN=""
+    for arch_dir in $ARCH_DIRS; do
+        if [ -d "${RKNNOVPN_DIR}/binaries/${arch_dir}" ]; then
+            SRC_BIN="${RKNNOVPN_DIR}/binaries/${arch_dir}"
+            break
+        fi
+    done
+    if [ -z "$SRC_BIN" ]; then
         return 0
     fi
 

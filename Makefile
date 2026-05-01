@@ -113,8 +113,11 @@ module: check-version daemon singbox
 	@mkdir -p $(MODULE_DIR)/binaries/arm64 $(MODULE_DIR)/binaries/armv7
 	cp $(OUT_DIR)/arm64/daemon $(OUT_DIR)/arm64/daemonctl $(OUT_DIR)/arm64/sing-box $(MODULE_DIR)/binaries/arm64/
 	cp $(OUT_DIR)/armv7/daemon $(OUT_DIR)/armv7/daemonctl $(OUT_DIR)/armv7/sing-box $(MODULE_DIR)/binaries/armv7/
-	chmod 755 $(MODULE_DIR)/binaries/arm64/*
-	chmod 755 $(MODULE_DIR)/binaries/armv7/*
+	rm -rf $(MODULE_DIR)/binaries/arm64-v8a $(MODULE_DIR)/binaries/armeabi-v7a
+	cp -a $(MODULE_DIR)/binaries/arm64 $(MODULE_DIR)/binaries/arm64-v8a
+	cp -a $(MODULE_DIR)/binaries/armv7 $(MODULE_DIR)/binaries/armeabi-v7a
+	chmod 755 $(MODULE_DIR)/binaries/arm64/* $(MODULE_DIR)/binaries/arm64-v8a/*
+	chmod 755 $(MODULE_DIR)/binaries/armv7/* $(MODULE_DIR)/binaries/armeabi-v7a/*
 	sed -i "s/^version=.*/version=$(VERSION)/" $(MODULE_DIR)/module.prop
 	sed -i "s/^versionCode=.*/versionCode=$(VERSION_CODE)/" $(MODULE_DIR)/module.prop
 	cd $(MODULE_DIR) && zip -r ../$(OUT_DIR)/rknnovpn-$(VERSION)-module.zip . \

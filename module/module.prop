@@ -1,7 +1,7 @@
 id=rknnovpn
 name=RKNnoVPN
-version=v2.2.8
-versionCode=2208
+version=v2.2.9
+versionCode=2209
 author=RKNnoVPN
 description=Transparent proxy via tproxy+iptables with sing-box and Xray-core for VLESS/XHTTP only. No VpnService, no TUN.
 updateJson=https://raw.githubusercontent.com/youtubediscord/RKNnoVPN/main/update.json

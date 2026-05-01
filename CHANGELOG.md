@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.2.9
+
+- Fixed Magisk module updates on arm64-v8a devices by packaging Android ABI binary aliases alongside the normalized updater paths.
+- Made module installation and service binary restore accept both Android ABI names (`arm64-v8a`, `armeabi-v7a`) and normalized names (`arm64`, `armv7`).
+- Kept in-app updater compatibility with existing `binaries/arm64` and `binaries/armv7` release layouts.
+- Synchronized app, daemon, daemonctl, module, update feed, and bundled script version metadata to `v2.2.9`.
+
 ## v2.2.8
 
 - Suppressed early Dashboard daemon/module poll errors during the first boot window before the daemon reports its first successful status.

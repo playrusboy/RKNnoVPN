@@ -218,6 +218,15 @@ func TestValidateModuleStagingAcceptsCompleteBundle(t *testing.T) {
 	}
 }
 
+func TestBinaryArchCandidatesIncludeAndroidAbiNames(t *testing.T) {
+	if got := strings.Join(binaryArchCandidates("arm64"), ","); got != "arm64,arm64-v8a" {
+		t.Fatalf("arm64 candidates = %q", got)
+	}
+	if got := strings.Join(binaryArchCandidates("armv7"), ","); got != "armv7,armeabi-v7a,arm" {
+		t.Fatalf("armv7 candidates = %q", got)
+	}
+}
+
 func TestValidateModuleStagingRejectsBadModuleProp(t *testing.T) {
 	staging := t.TempDir()
 	binDir := filepath.Join(staging, "binaries", runtimeBinaryArch())

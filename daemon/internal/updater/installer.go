@@ -459,11 +459,8 @@ func stagedBinaryDir(staging string) (string, error) {
 	}
 
 	arch := runtimeBinaryArch()
-	if dir := findSubdir(staging, "binaries", arch); dir != "" {
-		return dir, nil
-	}
-	if arch == "armv7" {
-		if dir := findSubdir(staging, "binaries", "arm"); dir != "" {
+	for _, candidate := range binaryArchCandidates(arch) {
+		if dir := findSubdir(staging, "binaries", candidate); dir != "" {
 			return dir, nil
 		}
 	}
@@ -823,6 +820,17 @@ func runtimeBinaryArch() string {
 		return "armv7"
 	default:
 		return runtime.GOARCH
+	}
+}
+
+func binaryArchCandidates(arch string) []string {
+	switch arch {
+	case "arm64":
+		return []string{"arm64", "arm64-v8a"}
+	case "armv7":
+		return []string{"armv7", "armeabi-v7a", "arm"}
+	default:
+		return []string{arch}
 	}
 }
 

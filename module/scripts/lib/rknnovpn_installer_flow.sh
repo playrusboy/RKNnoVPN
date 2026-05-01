@@ -65,16 +65,30 @@ check_architecture() {
     case "$ARCH" in
         arm64-v8a|arm64*)
             ARCH_DIR="arm64"
+            ARCH_ABI_DIR="arm64-v8a"
             ui_print "  [*] Architecture: $ARCH -> ${ARCH_DIR} (OK)"
             ;;
         armeabi-v7a|armeabi|armv7*|arm*)
             ARCH_DIR="armv7"
+            ARCH_ABI_DIR="armeabi-v7a"
             ui_print "  [*] Architecture: $ARCH -> ${ARCH_DIR} (OK)"
             ;;
         *)
             abort_install "Unsupported architecture: $ARCH. Supported: arm64-v8a and armeabi-v7a."
             ;;
     esac
+}
+
+find_binaries_dir() {
+    for candidate in "$ARCH" "$ARCH_ABI_DIR" "$ARCH_DIR" arm64-v8a arm64 armeabi-v7a armv7 arm; do
+        [ -n "$candidate" ] || continue
+        SRC_BIN="${MODPATH}/binaries/${candidate}"
+        if [ -d "$SRC_BIN" ]; then
+            echo "$SRC_BIN"
+            return 0
+        fi
+    done
+    return 1
 }
 
 check_api_level() {
@@ -248,12 +262,10 @@ mark_manual_start_required() {
 }
 
 install_binaries() {
-    SRC_BIN="${MODPATH}/binaries/${ARCH_DIR:-arm64}"
-    if [ ! -d "$SRC_BIN" ]; then
-        abort_install "No binaries directory for ${ARCH:-unknown} at ${SRC_BIN}"
-    fi
+    SRC_BIN="$(find_binaries_dir 2>/dev/null)" ||
+        abort_install "No binaries directory for ${ARCH:-unknown}; checked ABI ${ARCH_ABI_DIR:-unknown} and normalized ${ARCH_DIR:-unknown} under ${MODPATH}/binaries"
 
-    ui_print "  [*] Installing ${ARCH_DIR:-arm64} binaries..."
+    ui_print "  [*] Installing ${ARCH_DIR:-arm64} binaries from ${SRC_BIN#$MODPATH/}..."
     for bin_file in "$SRC_BIN"/*; do
         [ ! -f "$bin_file" ] && continue
         bin_name="$(basename "$bin_file")"

@@ -73,6 +73,14 @@ if ! grep -q 'install_module' module/META-INF/com/google/android/update-binary; 
   fail "Magisk update-binary must invoke install_module"
 fi
 
+if ! grep -q 'ARCH_ABI_DIR="arm64-v8a"' module/scripts/lib/rknnovpn_installer_flow.sh; then
+  fail "installer must support arm64-v8a binary alias"
+fi
+
+if ! grep -q 'arm64-v8a arm64' module/service.sh; then
+  fail "service binary restore must support arm64-v8a and arm64 aliases"
+fi
+
 expected_zip="https://github.com/youtubediscord/RKNnoVPN/releases/download/${daemon_version}/rknnovpn-${daemon_version}-module.zip"
 expected_changelog="https://github.com/youtubediscord/RKNnoVPN/releases/tag/${daemon_version}"
 update_zip="$(sed -n 's/[[:space:]]*"zipUrl"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' update.json | head -n 1)"
