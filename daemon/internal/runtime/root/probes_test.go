@@ -108,6 +108,9 @@ func TestRunNodeProbesOverridesBootstrapFailureWithURLFailure(t *testing.T) {
 	if results[0].ErrorClass != "outbound_url_failed" {
 		t.Fatalf("ErrorClass = %q, want outbound_url_failed", results[0].ErrorClass)
 	}
+	if results[0].Verdict != "unknown" {
+		t.Fatalf("soft outbound URL failure verdict = %q, want unknown", results[0].Verdict)
+	}
 }
 
 func TestRunNodeProbesUsesTransparentURLProbeForActiveNodeWithoutClashAPI(t *testing.T) {

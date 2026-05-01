@@ -8,6 +8,7 @@ import com.rknnovpn.panel.ipc.DaemonClientResult
 import com.rknnovpn.panel.ipc.ConfigMutationInfo
 import com.rknnovpn.panel.ipc.PollingStatusSource
 import com.rknnovpn.panel.ipc.RejectedSubscriptionNode
+import com.rknnovpn.panel.ipc.isNoRuntimeProfileReason
 import com.rknnovpn.panel.model.Node
 import com.rknnovpn.panel.model.ProfileConfig
 import com.rknnovpn.panel.model.SubscriptionSource
@@ -81,6 +82,9 @@ class ProfileRepository @Inject constructor(
     /** Human-readable status from the last successful partial or informational operation. */
     val notice: StateFlow<String?> = _notice.asStateFlow()
 
+    private fun emptyFirstRunProfile(): ProfileConfig =
+        ProfileConfig(id = "default", name = "Default")
+
     // ---- Read ----
 
     /**
@@ -98,6 +102,20 @@ class ProfileRepository @Inject constructor(
                 is DaemonClientResult.Ok -> {
                     _profile.value = result.data
                     result.data
+                }
+                is DaemonClientResult.DaemonUnavailable -> {
+                    if (result.reason.isNoRuntimeProfileReason()) {
+                        val emptyProfile = emptyFirstRunProfile()
+                        _profile.value = emptyProfile
+                        _error.value = null
+                        emptyProfile
+                    } else {
+                        val msg = describeFailure(result)
+                        Log.w(TAG, "refresh failed: $msg")
+                        _profile.value = null
+                        _error.value = msg
+                        null
+                    }
                 }
                 else -> {
                     val msg = describeFailure(result)
@@ -377,6 +395,15 @@ class ProfileRepository @Inject constructor(
             is DaemonClientResult.Ok -> {
                 _profile.value = result.data
             }
+            is DaemonClientResult.DaemonUnavailable -> {
+                if (result.reason.isNoRuntimeProfileReason()) {
+                    _profile.value = emptyFirstRunProfile()
+                    _error.value = null
+                } else {
+                    _profile.value = null
+                    Log.w(TAG, "refreshUnlocked failed: ${describeFailure(result)}")
+                }
+            }
             else -> {
                 _profile.value = null
                 Log.w(TAG, "refreshUnlocked failed: ${describeFailure(result)}")
@@ -389,6 +416,19 @@ class ProfileRepository @Inject constructor(
             is DaemonClientResult.Ok -> {
                 _profile.value = result.data
                 true
+            }
+            is DaemonClientResult.DaemonUnavailable -> {
+                if (result.reason.isNoRuntimeProfileReason()) {
+                    _profile.value = emptyFirstRunProfile()
+                    _error.value = null
+                    true
+                } else {
+                    val msg = describeFailure(result)
+                    _profile.value = null
+                    _error.value = msg
+                    Log.w(TAG, "$tag post-write refresh failed: $msg")
+                    false
+                }
             }
             else -> {
                 val msg = describeFailure(result)
@@ -411,6 +451,20 @@ class ProfileRepository @Inject constructor(
             is DaemonClientResult.Ok -> {
                 _profile.value = result.data
                 result.data
+            }
+            is DaemonClientResult.DaemonUnavailable -> {
+                if (result.reason.isNoRuntimeProfileReason()) {
+                    val emptyProfile = emptyFirstRunProfile()
+                    _profile.value = emptyProfile
+                    _error.value = null
+                    emptyProfile
+                } else {
+                    val msg = describeFailure(result)
+                    _profile.value = null
+                    Log.w(TAG, "refreshUnlockedOrNull failed: $msg")
+                    _error.value = msg
+                    null
+                }
             }
             else -> {
                 val msg = describeFailure(result)
@@ -441,7 +495,7 @@ class ProfileRepository @Inject constructor(
             _error.value = messages.get(com.rknnovpn.panel.R.string.node_no_supported_proxy_links_parsed)
             return emptyList()
         }
-        return when (val result = client.profileImportNodes(parsedNodes)) {
+        return when (val result = client.profileImportNodes(parsedNodes, reload = false)) {
             is DaemonClientResult.Ok -> {
                 publishRuntimeStatus(result.data)
                 refreshUnlockedWithStatus("importNodes")

@@ -138,6 +138,14 @@ class PollingStatusSource @Inject constructor(
                 Log.w(TAG, "Daemon binary not found")
             }
             is DaemonClientResult.DaemonUnavailable -> {
+                if (result.reason.isNoRuntimeProfileReason()) {
+                    consecutiveFailures = 0
+                    _status.value = DaemonStatus(state = ConnectionState.DISCONNECTED)
+                    _connectionState.value = DaemonConnectionState.IDLE
+                    _lastError.value = null
+                    Log.d(TAG, "Daemon intentionally not started yet: no runtime profile")
+                    return
+                }
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
                 _lastError.value = messages.formatDaemonFailure(result)

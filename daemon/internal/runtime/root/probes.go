@@ -156,7 +156,20 @@ func (r NodeProbeRunner) runTunnelProbe(profile *config.NodeProfile, result *run
 	if result.ThroughputStatus == "not_run" {
 		result.ThroughputStatus = "unavailable"
 	}
+	if result.TCPStatus == "ok" && isSoftURLProbeFailure(result.ErrorClass) {
+		result.Verdict = "unknown"
+		return
+	}
 	result.Verdict = "unusable"
+}
+
+func isSoftURLProbeFailure(errorClass string) bool {
+	switch errorClass {
+	case "outbound_url_failed", "runtime_degraded":
+		return true
+	default:
+		return false
+	}
 }
 
 func (r NodeProbeRunner) runTunnelURLProbe(profile *config.NodeProfile, result *runtimev2.NodeProbeResult) (int64, error) {
@@ -185,7 +198,7 @@ func (r NodeProbeRunner) runTunnelURLProbe(profile *config.NodeProfile, result *
 }
 
 func FinalizeNodeProbeResult(result runtimev2.NodeProbeResult) runtimev2.NodeProbeResult {
-	if result.TCPStatus == "ok" && result.URLStatus == "fail" {
+	if result.TCPStatus == "ok" && result.URLStatus == "fail" && !isSoftURLProbeFailure(result.ErrorClass) {
 		result.Verdict = "unusable"
 	}
 	return result

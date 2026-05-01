@@ -18,7 +18,7 @@ DAEMON_SOCKET="${RKNNOVPN_DIR}/run/daemon.sock"
 CONFIG_FILE="${RKNNOVPN_DIR}/config/config.json"
 MANUAL_FLAG="${RKNNOVPN_DIR}/config/manual"
 LOG_FILE="${RKNNOVPN_DIR}/logs/service.log"
-PROFILE_FILE="${RKNNOVPN_DIR}/config/profile.json"
+PROFILE_FILE="${RKNNOVPN_PROFILE_FILE:-/data/adb/rknnovpn-data/profile.json}"
 MODULE_PROP="${MODDIR}/module.prop"
 LOG_VERSION_FILE="${RKNNOVPN_DIR}/logs/.version"
 LOG_ARCHIVE_DIR="${RKNNOVPN_DIR}/logs/archive"
@@ -51,6 +51,9 @@ fi
 # ============================================================================
 
 prepare_runtime_dirs() {
+    if command -v rknnovpn_ensure_profile_state >/dev/null 2>&1; then
+        rknnovpn_ensure_profile_state 2>/dev/null || true
+    fi
     mkdir -p "${RKNNOVPN_DIR}/logs" "${RKNNOVPN_DIR}/run" "${RKNNOVPN_DIR}/config" 2>/dev/null
     chown 0:0 "${RKNNOVPN_DIR}/logs" "${RKNNOVPN_DIR}/run" "${RKNNOVPN_DIR}/config" 2>/dev/null
     chmod 0700 "${RKNNOVPN_DIR}/logs" "${RKNNOVPN_DIR}/run" "${RKNNOVPN_DIR}/config" 2>/dev/null
@@ -370,6 +373,7 @@ has_runtime_profile() {
 
 if [ "$APP_REPAIR" != "1" ] && ! has_runtime_profile; then
     log_info "No configured proxy nodes/keys; daemon launch skipped until the app imports a server"
+    release_service_lock
     exit 0
 fi
 
@@ -472,7 +476,7 @@ log_info "File descriptor limit: ${ACTUAL_ULIMIT}"
 # ============================================================================
 
 launch_daemon() {
-    log_info "Launching RKNnoVPN daemon..."
+    log_info "Preparing RKNnoVPN daemon launch..."
     log_info "  Binary:  ${DAEMON_BIN}"
     log_info "  Config:  ${CONFIG_FILE}"
     log_info "  PID file: ${DAEMON_PID_FILE}"
@@ -517,12 +521,14 @@ launch_daemon() {
     # - nohup: ignore SIGHUP when terminal closes
     # - setsid: create new session (no controlling terminal)
     # stdout/stderr go to daemon log file
-    nohup setsid "${DAEMON_BIN}" \
+    log_info "Starting RKNnoVPN daemon process..."
+    RKNNOVPN_PROFILE_PATH="$PROFILE_FILE" nohup setsid "${DAEMON_BIN}" \
         --config "${CONFIG_FILE}" \
         --data-dir "${RKNNOVPN_DIR}" \
         >> "${RKNNOVPN_DIR}/logs/daemon.log" 2>&1 &
 
     DAEMON_PID=$!
+    log_info "Daemon process forked with launcher PID ${DAEMON_PID}; waiting for IPC socket"
 
     # Brief wait to check if it crashed immediately
     sleep 2
@@ -594,13 +600,16 @@ if [ "$LAUNCH_RESULT" -eq 0 ]; then
     if [ -n "$DAEMON_PID" ] && kill -0 "$DAEMON_PID" 2>/dev/null; then
         log_info "RKNnoVPN daemon is running (PID ${DAEMON_PID})"
         log_info "service.sh completed successfully"
+        release_service_lock
     else
         log_error "Daemon PID ${DAEMON_PID} is no longer running"
         log_error "Check logs at ${RKNNOVPN_DIR}/logs/daemon.log"
+        release_service_lock
         exit 1
     fi
 else
     log_error "Failed to launch daemon"
     log_error "Check logs at ${RKNNOVPN_DIR}/logs/daemon.log"
+    release_service_lock
     exit 1
 fi

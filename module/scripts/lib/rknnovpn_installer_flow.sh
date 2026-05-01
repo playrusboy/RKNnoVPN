@@ -4,6 +4,7 @@
 
 RKNNOVPN_DIR="${RKNNOVPN_DIR:-/data/adb/modules/rknnovpn}"
 RKNNOVPN_GID="${RKNNOVPN_GID:-23333}"
+RKNNOVPN_STATE_DIR="${RKNNOVPN_STATE_DIR:-/data/adb/rknnovpn-data}"
 SUBDIRS="${SUBDIRS:-bin config config/rendered scripts run logs backup profiles releases}"
 
 abort_install() {
@@ -188,6 +189,7 @@ prepare_install_logs() {
 preserve_existing_config() {
     CONFIG_FILE="${RKNNOVPN_DIR}/config/config.json"
     PROFILE_FILE="${RKNNOVPN_DIR}/config/profile.json"
+    PERSISTENT_PROFILE_FILE="${RKNNOVPN_STATE_DIR}/profile.json"
 
     if [ -f "$CONFIG_FILE" ]; then
         ui_print "  [*] Existing config.json found — preserving"
@@ -200,6 +202,18 @@ preserve_existing_config() {
     if [ -f "$PROFILE_FILE" ]; then
         ui_print "  [*] Existing profile.json found — preserving"
         cp -f "$PROFILE_FILE" "${RKNNOVPN_DIR}/backup/profile.json.pre-upgrade" 2>/dev/null
+    fi
+    mkdir -p "$RKNNOVPN_STATE_DIR" 2>/dev/null || abort_install "Failed to create ${RKNNOVPN_STATE_DIR}"
+    chown 0:0 "$RKNNOVPN_STATE_DIR" 2>/dev/null || true
+    chmod 0700 "$RKNNOVPN_STATE_DIR" 2>/dev/null || true
+    if [ ! -f "$PERSISTENT_PROFILE_FILE" ] && [ -f "$PROFILE_FILE" ]; then
+        cp -f "$PROFILE_FILE" "$PERSISTENT_PROFILE_FILE" 2>/dev/null || abort_install "Failed to preserve profile.json"
+        ui_print "  [*] profile.json moved to persistent state"
+    fi
+    if [ -f "$PERSISTENT_PROFILE_FILE" ]; then
+        cp -f "$PERSISTENT_PROFILE_FILE" "${RKNNOVPN_DIR}/backup/profile.json.pre-upgrade" 2>/dev/null || true
+        chown 0:0 "$PERSISTENT_PROFILE_FILE" 2>/dev/null || true
+        chmod 0600 "$PERSISTENT_PROFILE_FILE" 2>/dev/null || true
     fi
 }
 

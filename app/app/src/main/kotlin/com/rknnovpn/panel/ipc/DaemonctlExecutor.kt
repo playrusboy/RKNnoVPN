@@ -70,6 +70,8 @@ class DaemonctlExecutor @Inject constructor() {
         private const val DEFAULT_TIMEOUT_MS = 5_000L
         private const val INLINE_PARAMS_LIMIT = 16 * 1024
         private const val MODULE_SERVICE_PATH = "/data/adb/modules/rknnovpn/service.sh"
+        private const val PROFILE_PATH = "/data/adb/rknnovpn-data/profile.json"
+        private const val LEGACY_PROFILE_PATH = "/data/adb/modules/rknnovpn/config/profile.json"
         private const val REPAIR_COOLDOWN_MS = 15_000L
         private const val REPAIR_RETRY_DELAY_MS = 1_500L
         private const val REPAIR_RETRY_TIMEOUT_MS = 5_000L
@@ -100,7 +102,10 @@ class DaemonctlExecutor @Inject constructor() {
             val result = withTimeoutOrNull(timeoutMs) {
                 executeRaw(method, params)
             }
-            val checkedResult = withModuleInstallStateHint(result ?: DaemonctlResult.Timeout(timeoutMs, method))
+            val checkedResult = withModuleInstallStateHint(
+                result ?: DaemonctlResult.Timeout(timeoutMs, method),
+                allowModuleRepair,
+            )
             if (
                 allowModuleRepair &&
                 checkedResult is DaemonctlResult.DaemonUnavailable &&
@@ -327,7 +332,10 @@ class DaemonctlExecutor @Inject constructor() {
             !text.contains("service.sh is missing")
     }
 
-    private fun withModuleInstallStateHint(result: DaemonctlResult): DaemonctlResult {
+    private fun withModuleInstallStateHint(
+        result: DaemonctlResult,
+        allowModuleRepair: Boolean,
+    ): DaemonctlResult {
         if (result !is DaemonctlResult.DaemonUnavailable && result !is DaemonctlResult.DaemonNotFound) {
             return result
         }
@@ -342,6 +350,11 @@ class DaemonctlExecutor @Inject constructor() {
             "missing" -> DaemonctlResult.DaemonNotFound(daemonctlPath)
             "service_missing" -> DaemonctlResult.DaemonUnavailable("service.sh is missing")
             "daemonctl_missing" -> DaemonctlResult.DaemonNotFound(daemonctlPath)
+            "no_runtime_profile" -> if (!allowModuleRepair && result is DaemonctlResult.DaemonUnavailable) {
+                DaemonctlResult.DaemonUnavailable(NO_RUNTIME_PROFILE_REASON)
+            } else {
+                result
+            }
             else -> result
         }
     }
@@ -362,6 +375,13 @@ class DaemonctlExecutor @Inject constructor() {
               echo service_missing
             elif [ ! -x /data/adb/modules/rknnovpn/bin/daemonctl ]; then
               echo daemonctl_missing
+            elif { [ ! -f $PROFILE_PATH ] &&
+                   [ ! -f $LEGACY_PROFILE_PATH ]; } ||
+                 { [ -f $PROFILE_PATH ] &&
+                   ! tr -d '\n\r\t ' < $PROFILE_PATH 2>/dev/null | grep -q '"nodes":\[{'; } ||
+                 { [ ! -f $PROFILE_PATH ] &&
+                   ! tr -d '\n\r\t ' < $LEGACY_PROFILE_PATH 2>/dev/null | grep -q '"nodes":\[{'; }; then
+              echo no_runtime_profile
             else
               echo active
             fi

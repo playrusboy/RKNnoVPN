@@ -18,8 +18,6 @@ internal fun List<NodeProbeResultV2>.toNodeTestInfo(url: String): NodeTestInfo =
                     urlStatus == "ok" && probe.tunnelDelay != null -> "usable"
                     else -> "unknown"
                 }
-            }.let { raw ->
-                if (tcpStatus == "ok" && urlStatus != "ok") "unusable" else raw
             }
             NodeTestResult(
                 id = probe.id,

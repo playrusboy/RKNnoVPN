@@ -40,6 +40,11 @@ sealed class DaemonClientResult<out T> {
     }
 }
 
+internal const val NO_RUNTIME_PROFILE_REASON = "no runtime profile configured"
+
+internal fun String.isNoRuntimeProfileReason(): Boolean =
+    contains(NO_RUNTIME_PROFILE_REASON, ignoreCase = true)
+
 internal fun <T> DaemonClientResult<T>.asFailure(): DaemonClientResult<Nothing> = when (this) {
     is DaemonClientResult.DaemonError -> this
     is DaemonClientResult.RootDenied -> this

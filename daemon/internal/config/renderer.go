@@ -51,7 +51,7 @@ func renderSingboxConfig(cfg *Config, profile *NodeProfile, cacheFilePath string
 			"level":     "info",
 			"timestamp": true,
 		},
-		"dns":      buildDNS(cfg),
+		"dns":      buildDNS(cfg, profile),
 		"inbounds": buildInbounds(cfg),
 		"route":    route,
 	}
@@ -88,14 +88,19 @@ func renderSingboxConfig(cfg *Config, profile *NodeProfile, cacheFilePath string
 	return data, nil
 }
 
-func buildDNS(cfg *Config) map[string]interface{} {
+func buildDNS(cfg *Config, profile *NodeProfile) map[string]interface{} {
+	remoteDetour := "proxy"
+	if RequiresXraySidecar(profile) {
+		remoteDetour = "direct"
+	}
 	servers := []map[string]interface{}{
-		buildDNSServer("remote-dns", cfg.DNS.ProxyDNS, "proxy"),
-		buildDNSServer("direct-dns", cfg.DNS.DirectDNS, ""),
+		buildDNSServer("remote-dns", cfg.DNS.ProxyDNS, remoteDetour),
+		buildDNSServer("direct-dns", cfg.DNS.DirectDNS, "direct"),
 		{
 			"type":   "udp",
 			"tag":    "bootstrap-dns",
 			"server": cfg.DNS.BootstrapIP,
+			"detour": "direct",
 		},
 	}
 
@@ -935,6 +940,25 @@ func applyProfileLinkFallback(profile *NodeProfile, link string) {
 		return
 	}
 	switch profile.Protocol {
+	case "vless", "vmess":
+		parsed, err := url.Parse(link)
+		if err != nil || !strings.EqualFold(normalizeProtocol(parsed.Scheme), profile.Protocol) {
+			return
+		}
+		if profile.Address == "" {
+			profile.Address = parsed.Hostname()
+		}
+		if profile.Port == 0 {
+			if port, err := strconv.Atoi(parsed.Port()); err == nil {
+				profile.Port = port
+			}
+		}
+		if profile.UUID == "" && parsed.User != nil {
+			profile.UUID = parsed.User.Username()
+		}
+		if profile.Transport == "" || profile.Transport == "tcp" || transportExtrasMissing(profile) {
+			applyStreamSettings(profile, streamSettingsFromLinkQuery(parsed.Query()))
+		}
 	case "shadowsocks":
 		method, password, host, port, ok := parseShadowsocksLink(link)
 		if !ok {
@@ -969,6 +993,128 @@ func applyProfileLinkFallback(profile *NodeProfile, link string) {
 			profile.UUID = password
 		}
 	}
+}
+
+func transportExtrasMissing(profile *NodeProfile) bool {
+	switch profile.Transport {
+	case "ws", "http", "h2", "httpupgrade", "xhttp":
+		return strings.TrimSpace(profile.Extra["path"]) == "" && strings.TrimSpace(profile.Extra["host"]) == ""
+	case "grpc":
+		return strings.TrimSpace(profile.Extra["service_name"]) == ""
+	default:
+		return false
+	}
+}
+
+func streamSettingsFromLinkQuery(query url.Values) map[string]interface{} {
+	network := strings.ToLower(strings.TrimSpace(query.Get("type")))
+	if network == "" {
+		return nil
+	}
+	stream := map[string]interface{}{"network": network}
+	switch security := strings.ToLower(strings.TrimSpace(query.Get("security"))); security {
+	case "tls":
+		stream["security"] = security
+		tls := transportTLSSettingsFromLink(query)
+		if len(tls) > 0 {
+			stream["tlsSettings"] = tls
+		}
+	case "reality":
+		stream["security"] = security
+		reality := transportTLSSettingsFromLink(query)
+		if pbk := strings.TrimSpace(firstQueryValue(query, "pbk", "publicKey")); pbk != "" {
+			reality["publicKey"] = pbk
+		}
+		if sid := strings.TrimSpace(firstQueryValue(query, "sid", "shortId")); sid != "" {
+			reality["shortId"] = sid
+		}
+		stream["realitySettings"] = reality
+	}
+	switch network {
+	case "ws":
+		ws := map[string]interface{}{}
+		if path := strings.TrimSpace(query.Get("path")); path != "" {
+			ws["path"] = path
+		}
+		if host := strings.TrimSpace(query.Get("host")); host != "" {
+			ws["headers"] = map[string]interface{}{"Host": host}
+		}
+		stream["wsSettings"] = ws
+	case "grpc":
+		grpc := map[string]interface{}{}
+		if serviceName := strings.TrimSpace(firstQueryValue(query, "serviceName", "service_name")); serviceName != "" {
+			grpc["serviceName"] = serviceName
+		}
+		if mode := strings.TrimSpace(query.Get("mode")); mode != "" {
+			grpc["mode"] = mode
+		}
+		if authority := strings.TrimSpace(query.Get("authority")); authority != "" {
+			grpc["authority"] = authority
+		}
+		stream["grpcSettings"] = grpc
+	case "http", "h2":
+		httpSettings := map[string]interface{}{}
+		if path := strings.TrimSpace(query.Get("path")); path != "" {
+			httpSettings["path"] = path
+		}
+		if host := strings.TrimSpace(query.Get("host")); host != "" {
+			httpSettings["host"] = splitQueryCSV(host)
+		}
+		stream["httpSettings"] = httpSettings
+	case "httpupgrade":
+		httpUpgrade := map[string]interface{}{}
+		if path := strings.TrimSpace(query.Get("path")); path != "" {
+			httpUpgrade["path"] = path
+		}
+		if host := strings.TrimSpace(query.Get("host")); host != "" {
+			httpUpgrade["host"] = host
+		}
+		stream["httpupgradeSettings"] = httpUpgrade
+	case "xhttp":
+		xhttp := map[string]interface{}{}
+		if path := strings.TrimSpace(query.Get("path")); path != "" {
+			xhttp["path"] = path
+		}
+		if host := strings.TrimSpace(query.Get("host")); host != "" {
+			xhttp["host"] = host
+		}
+		if mode := strings.TrimSpace(query.Get("mode")); mode != "" {
+			xhttp["mode"] = mode
+		}
+		stream["xhttpSettings"] = xhttp
+	}
+	return stream
+}
+
+func splitQueryCSV(value string) []interface{} {
+	result := []interface{}{}
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func transportTLSSettingsFromLink(query url.Values) map[string]interface{} {
+	settings := map[string]interface{}{}
+	if sni := strings.TrimSpace(firstQueryValue(query, "sni", "servername")); sni != "" {
+		settings["serverName"] = sni
+	}
+	if fp := strings.TrimSpace(firstQueryValue(query, "fp", "fingerprint")); fp != "" {
+		settings["fingerprint"] = fp
+	}
+	return settings
+}
+
+func firstQueryValue(query url.Values, keys ...string) string {
+	for _, key := range keys {
+		if value := query.Get(key); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func parseShadowsocksLink(link string) (method string, password string, host string, port int, ok bool) {

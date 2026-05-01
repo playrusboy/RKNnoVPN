@@ -5,8 +5,9 @@ entrypoint.
 
 ## Entry Points
 
-- `customize.sh` installs files, preserves user config, records the release
-  catalog, and disables autostart until the app starts the runtime.
+- `customize.sh` installs files, moves user profile state into the persistent
+  state directory, records the release catalog, and disables autostart until
+  the app starts the runtime.
 - `post-fs-data.sh` is early boot only: create the data skeleton, apply basic
   permissions, and set kernel toggles. It must not clean runtime markers.
 - `service.sh` is late boot only: wait for boot completion, ask
@@ -46,9 +47,15 @@ installer must treat all `scripts/lib/*.sh` files as required module files.
 The library owns these path names:
 
 - `RKNNOVPN_DIR=/data/adb/modules/rknnovpn`
+- `RKNNOVPN_STATE_DIR=/data/adb/rknnovpn-data`
 - `BIN_DIR`, `CONFIG_DIR`, `SCRIPTS_DIR`, `RUN_DIR`, `LOG_DIR`
+- `PROFILE_FILE=/data/adb/rknnovpn-data/profile.json`
 - `RESET_LOCK`, `ACTIVE_FILE`, `MANUAL_FLAG`
 - `DAEMON_PID_FILE`, `SINGBOX_PID_FILE`, `DAEMON_SOCK`
+
+`config/profile.json` is not the canonical user profile location anymore. It
+may exist only as an upgrade source or diagnostic mirror; module updates and
+root-manager reinstalls must preserve `RKNNOVPN_STATE_DIR`.
 
 ## Marker Ownership
 

@@ -386,6 +386,7 @@ func MergeNodes(current Document, incoming []Node) (Document, map[string]int) {
 	}
 	stats := map[string]int{"added": 0, "updated": 0, "unchanged": 0, "stale": 0}
 	seenIncoming := map[string]bool{}
+	importedActiveNodeID := ""
 	for _, node := range incoming {
 		key := NodeMatchKey(node)
 		if key == "" || seenIncoming[key] {
@@ -404,12 +405,20 @@ func MergeNodes(current Document, incoming []Node) (Document, map[string]int) {
 				stats["updated"]++
 			}
 			next.Nodes[index] = node
+			if importedActiveNodeID == "" && !node.Stale {
+				importedActiveNodeID = node.ID
+			}
 		} else {
 			stats["added"]++
 			next.Nodes = append(next.Nodes, node)
+			if importedActiveNodeID == "" && !node.Stale {
+				importedActiveNodeID = node.ID
+			}
 		}
 	}
-	if next.ActiveNodeID == "" || nodeByID(next.Nodes, next.ActiveNodeID) == nil || nodeByID(next.Nodes, next.ActiveNodeID).Stale {
+	if importedActiveNodeID != "" {
+		next.ActiveNodeID = importedActiveNodeID
+	} else if next.ActiveNodeID == "" || nodeByID(next.Nodes, next.ActiveNodeID) == nil || nodeByID(next.Nodes, next.ActiveNodeID).Stale {
 		next.ActiveNodeID = ""
 		for _, node := range next.Nodes {
 			if !node.Stale {

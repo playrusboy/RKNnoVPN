@@ -64,6 +64,10 @@ for subdir in $SUBDIRS; do
     fi
 done
 
+if command -v rknnovpn_ensure_profile_state >/dev/null 2>&1; then
+    rknnovpn_ensure_profile_state 2>/dev/null || log_warn "Failed to prepare persistent profile state"
+fi
+
 # ============================================================================
 # 2. Set file permissions
 # ============================================================================

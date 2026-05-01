@@ -4,6 +4,7 @@
 
 RKNNOVPN_DIR="${RKNNOVPN_DIR:-${MODDIR:-${MODPATH:-/data/adb/modules/rknnovpn}}}"
 RKNNOVPN_GID="${RKNNOVPN_GID:-23333}"
+RKNNOVPN_STATE_DIR="${RKNNOVPN_STATE_DIR:-/data/adb/rknnovpn-data}"
 
 BIN_DIR="${BIN_DIR:-${RKNNOVPN_DIR}/bin}"
 CONFIG_DIR="${CONFIG_DIR:-${RKNNOVPN_DIR}/config}"
@@ -15,6 +16,8 @@ LOG_DIR="${LOG_DIR:-${RKNNOVPN_DIR}/logs}"
 BACKUP_DIR="${BACKUP_DIR:-${RKNNOVPN_DIR}/backup}"
 PROFILES_DIR="${PROFILES_DIR:-${RKNNOVPN_DIR}/profiles}"
 RELEASES_DIR="${RELEASES_DIR:-${RKNNOVPN_DIR}/releases}"
+PROFILE_FILE="${PROFILE_FILE:-${RKNNOVPN_STATE_DIR}/profile.json}"
+LEGACY_PROFILE_FILE="${LEGACY_PROFILE_FILE:-${CONFIG_DIR}/profile.json}"
 ROLLBACK_DIR="${ROLLBACK_DIR:-/data/adb/rknnovpn-rollback}"
 ROLLBACK_SYSCTL_SNAPSHOT_DIR="${ROLLBACK_SYSCTL_SNAPSHOT_DIR:-${ROLLBACK_DIR}/sysctl-snapshot}"
 SYSCTL_SNAPSHOT_DIR="${SYSCTL_SNAPSHOT_DIR:-${ROLLBACK_SYSCTL_SNAPSHOT_DIR}}"
@@ -60,10 +63,24 @@ rknnovpn_log_info() { rknnovpn_log i "$@"; }
 rknnovpn_log_warn() { rknnovpn_log w "$@"; }
 rknnovpn_log_error() { rknnovpn_log e "$@"; }
 
+rknnovpn_ensure_profile_state() {
+    mkdir -p "$RKNNOVPN_STATE_DIR" 2>/dev/null || return 1
+    chown 0:0 "$RKNNOVPN_STATE_DIR" 2>/dev/null || true
+    chmod 0700 "$RKNNOVPN_STATE_DIR" 2>/dev/null || true
+    if [ ! -f "$PROFILE_FILE" ] && [ -f "$LEGACY_PROFILE_FILE" ]; then
+        cp -f "$LEGACY_PROFILE_FILE" "$PROFILE_FILE" 2>/dev/null || return 1
+    fi
+    if [ -f "$PROFILE_FILE" ]; then
+        chown 0:0 "$PROFILE_FILE" 2>/dev/null || true
+        chmod 0600 "$PROFILE_FILE" 2>/dev/null || true
+    fi
+}
+
 rknnovpn_ensure_layout() {
     for _dir in "$BIN_DIR" "$CONFIG_DIR" "$RENDERED_CONFIG_DIR" "$SCRIPTS_DIR" "$RUN_DIR" "$DATA_DIR" "$LOG_DIR" "$BACKUP_DIR" "$PROFILES_DIR" "$RELEASES_DIR"; do
         mkdir -p "$_dir" 2>/dev/null || return 1
     done
+    rknnovpn_ensure_profile_state || return 1
 }
 
 rknnovpn_apply_data_permissions() {
@@ -87,9 +104,10 @@ rknnovpn_apply_data_permissions() {
     chown -R 0:"$RKNNOVPN_GID" "$RUN_DIR" 2>/dev/null || true
     chmod 0750 "$RUN_DIR" 2>/dev/null || true
 
-    chown -R 0:0 "$DATA_DIR" "$LOG_DIR" "$BACKUP_DIR" "$PROFILES_DIR" "$RELEASES_DIR" 2>/dev/null || true
-    chmod 0700 "$DATA_DIR" "$LOG_DIR" "$BACKUP_DIR" "$PROFILES_DIR" "$RELEASES_DIR" 2>/dev/null || true
+    chown -R 0:0 "$DATA_DIR" "$LOG_DIR" "$BACKUP_DIR" "$PROFILES_DIR" "$RELEASES_DIR" "$RKNNOVPN_STATE_DIR" 2>/dev/null || true
+    chmod 0700 "$DATA_DIR" "$LOG_DIR" "$BACKUP_DIR" "$PROFILES_DIR" "$RELEASES_DIR" "$RKNNOVPN_STATE_DIR" 2>/dev/null || true
     find "$LOG_DIR" -type f -exec chmod 0600 {} \; 2>/dev/null || true
+    [ -f "$PROFILE_FILE" ] && chmod 0600 "$PROFILE_FILE" 2>/dev/null || true
 }
 
 rknnovpn_sysctl_snapshot_key() {
@@ -184,7 +202,7 @@ rknnovpn_compact_json_file() {
 }
 
 rknnovpn_has_runtime_profile() {
-    _profile_file="${1:-${CONFIG_DIR}/profile.json}"
+    _profile_file="${1:-${PROFILE_FILE}}"
 
     _profile_json="$(rknnovpn_compact_json_file "$_profile_file" 2>/dev/null)"
     case "$_profile_json" in

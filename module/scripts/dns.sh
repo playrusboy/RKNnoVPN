@@ -29,7 +29,7 @@
 set -eu
 
 TAG="rknnovpn:dns"
-SCRIPT_VERSION="v2.2.4"
+SCRIPT_VERSION="v2.2.6"
 SCRIPT_DIR="${0%/*}"
 if [ -f "${SCRIPT_DIR}/lib/rknnovpn_env.sh" ]; then
     . "${SCRIPT_DIR}/lib/rknnovpn_env.sh"

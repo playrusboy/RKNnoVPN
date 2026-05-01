@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
+	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 )
 
 // SelfExitDelay is how long the old daemon waits after forking the new
@@ -270,6 +271,10 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	if err := markManualStartRequired(dataDir); err != nil {
 		rollbackBinaries()
 		return fmt.Errorf("mark manual start required: %w", err)
+	}
+	if err := ensurePersistentProfile(dataDir); err != nil {
+		rollbackBinaries()
+		return fmt.Errorf("preserve profile state: %w", err)
 	}
 
 	if err := updateCurrentReleaseSymlink(dataDir, releaseDir); err != nil {
@@ -783,6 +788,31 @@ func markManualStartRequired(dataDir string) error {
 		return fmt.Errorf("remove active marker: %w", err)
 	}
 	return nil
+}
+
+func ensurePersistentProfile(dataDir string) error {
+	paths := modulecontract.NewPaths(dataDir)
+	configPath := filepath.Join(paths.ConfigDir(), "config.json")
+	profilePath := profiledoc.Path(configPath)
+	legacyProfilePath := profiledoc.LegacyPath(configPath)
+	if profilePath == legacyProfilePath {
+		return nil
+	}
+	if _, err := os.Stat(profilePath); err == nil {
+		return nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("stat profile: %w", err)
+	}
+	if _, err := os.Stat(legacyProfilePath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat module profile: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(profilePath), 0o700); err != nil {
+		return fmt.Errorf("mkdir profile state: %w", err)
+	}
+	return copyFile(legacyProfilePath, profilePath, 0o600)
 }
 
 func runtimeBinaryArch() string {

@@ -1,5 +1,20 @@
 # Changelog
 
+## v2.2.6
+
+- Fixed VLESS subscription imports so WebSocket, gRPC, HTTP, HTTPUpgrade, and XHTTP transport settings are preserved instead of silently falling back to incomplete transport configs.
+- Fixed VLESS/XHTTP sidecar startup for stored nodes by ensuring Xray receives `encryption: "none"` for every VLESS user.
+- Added runtime fallback from the original proxy link so already imported WS/gRPC nodes can recover missing transport fields without manual re-import.
+- Synchronized app, daemon, daemonctl, module, update feed, and bundled script version metadata to `v2.2.6`.
+
+## v2.2.5
+
+- Fixed XHTTP sidecar DNS routing so bootstrap/direct DNS no longer depends on the same proxy path that is being established.
+- Preserved imported nodes across Magisk module updates by moving the runtime profile to persistent module-owned state.
+- Sped up manual key import by avoiding unnecessary runtime reload during direct node import.
+- Fixed manual imports so the newly imported live node becomes the active node.
+- Synchronized app, daemon, daemonctl, module, update feed, and bundled script version metadata to `v2.2.5`.
+
 ## v2.2.4
 
 - Fixed HTTPS URL checks on Android by loading system and user-added CA roots in daemon transparent probes.

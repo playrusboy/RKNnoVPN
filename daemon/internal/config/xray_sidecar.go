@@ -54,6 +54,7 @@ func xrayOutbound(profile *NodeProfile) (map[string]interface{}, error) {
 		if !streamUsesXHTTP(outbound) {
 			return nil, fmt.Errorf("xray sidecar: stored outbound is not XHTTP")
 		}
+		ensureVLESSUsersEncryption(outbound)
 		stripXHTTPVisionFlow(outbound)
 		return outbound, nil
 	}
@@ -120,6 +121,43 @@ func xrayOutbound(profile *NodeProfile) (map[string]interface{}, error) {
 		},
 		"streamSettings": stream,
 	}, nil
+}
+
+func ensureVLESSUsersEncryption(outbound map[string]interface{}) {
+	if outbound == nil {
+		return
+	}
+	protocol, _ := outbound["protocol"].(string)
+	if !strings.EqualFold(strings.TrimSpace(protocol), "vless") {
+		return
+	}
+	settings, ok := outbound["settings"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	vnext, ok := settings["vnext"].([]interface{})
+	if !ok {
+		return
+	}
+	for _, rawServer := range vnext {
+		server, ok := rawServer.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		users, ok := server["users"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, rawUser := range users {
+			user, ok := rawUser.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if strings.TrimSpace(stringFromMap(user, "encryption")) == "" {
+				user["encryption"] = "none"
+			}
+		}
+	}
 }
 
 func streamUsesXHTTP(outbound map[string]interface{}) bool {

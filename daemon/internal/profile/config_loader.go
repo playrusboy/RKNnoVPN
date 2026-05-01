@@ -23,6 +23,20 @@ func LoadConfigProjection(configPath string) (LoadedConfig, error) {
 	if err != nil {
 		return LoadedConfig{}, fmt.Errorf("load profile: %w", err)
 	}
+	if !profileFound {
+		legacyProfilePath := LegacyPath(configPath)
+		if legacyProfilePath != profilePath {
+			profileDoc, profileFound, err = Load(legacyProfilePath)
+			if err != nil {
+				return LoadedConfig{}, fmt.Errorf("load module profile: %w", err)
+			}
+			if profileFound {
+				if err := Save(profilePath, profileDoc); err != nil {
+					return LoadedConfig{}, fmt.Errorf("persist profile state: %w", err)
+				}
+			}
+		}
+	}
 	if profileFound {
 		cfg, _, err = ApplyToConfig(cfg, profileDoc)
 		if err != nil {

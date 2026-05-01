@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -118,7 +119,7 @@ func testTransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int) 
 	}
 	transport := &http.Transport{
 		Proxy:               nil,
-		DialContext:         dialer.DialContext,
+		DialContext:         ipv4FirstMarkedDialContext(dialer, resolver, timeout),
 		TLSHandshakeTimeout: timeout,
 		DisableKeepAlives:   true,
 	}
@@ -153,4 +154,47 @@ func testTransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int) 
 		return metrics, fmt.Errorf("transparent URL probe HTTP %d", resp.StatusCode)
 	}
 	return metrics, nil
+}
+
+func ipv4FirstMarkedDialContext(base *net.Dialer, resolver *net.Resolver, timeout time.Duration) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network string, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil || net.ParseIP(host) != nil {
+			return base.DialContext(ctx, network, address)
+		}
+		resolveCtx, cancel := context.WithTimeout(ctx, timeout)
+		addrs, lookupErr := resolver.LookupIPAddr(resolveCtx, host)
+		cancel()
+		if lookupErr != nil || len(addrs) == 0 {
+			return base.DialContext(ctx, network, address)
+		}
+
+		ordered := preferIPv4(addrs)
+		errs := make([]error, 0, len(ordered))
+		for _, addr := range ordered {
+			dialCtx, dialCancel := context.WithTimeout(ctx, timeout)
+			conn, dialErr := base.DialContext(dialCtx, network, net.JoinHostPort(addr.IP.String(), port))
+			dialCancel()
+			if dialErr == nil {
+				return conn, nil
+			}
+			errs = append(errs, dialErr)
+		}
+		return nil, errors.Join(errs...)
+	}
+}
+
+func preferIPv4(addrs []net.IPAddr) []net.IPAddr {
+	ordered := make([]net.IPAddr, 0, len(addrs))
+	for _, addr := range addrs {
+		if addr.IP.To4() != nil {
+			ordered = append(ordered, addr)
+		}
+	}
+	for _, addr := range addrs {
+		if addr.IP.To4() == nil {
+			ordered = append(ordered, addr)
+		}
+	}
+	return ordered
 }

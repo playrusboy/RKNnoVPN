@@ -5,11 +5,27 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 )
 
 const profileFileName = "profile.json"
 
 func Path(configPath string) string {
+	if override := os.Getenv("RKNNOVPN_PROFILE_PATH"); override != "" {
+		return override
+	}
+	cleanConfigPath := filepath.Clean(configPath)
+	defaultConfigPath := filepath.Join(modulecontract.DefaultModuleDir, modulecontract.ConfigDirName, "config.json")
+	if cleanConfigPath == defaultConfigPath ||
+		strings.HasPrefix(cleanConfigPath, filepath.Clean(modulecontract.DefaultModuleDir)+string(os.PathSeparator)) {
+		return filepath.Join(modulecontract.DefaultStateDir, profileFileName)
+	}
+	return filepath.Join(filepath.Dir(configPath), profileFileName)
+}
+
+func LegacyPath(configPath string) string {
 	return filepath.Join(filepath.Dir(configPath), profileFileName)
 }
 

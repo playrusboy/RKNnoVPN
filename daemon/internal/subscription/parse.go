@@ -135,6 +135,9 @@ func buildOutbound(node profiledoc.Node, parsed *neturl.URL) json.RawMessage {
 	switch node.Protocol {
 	case "vless", "vmess":
 		user := map[string]interface{}{"id": userSecret}
+		if node.Protocol == "vless" {
+			user["encryption"] = valueOrDefault(strings.TrimSpace(parsed.Query().Get("encryption")), "none")
+		}
 		if flow := parsed.Query().Get("flow"); flow != "" {
 			user["flow"] = flow
 		}
@@ -217,7 +220,53 @@ func buildStreamSettings(query neturl.Values) map[string]interface{} {
 			stream["tlsSettings"] = tlsSettings
 		}
 	}
-	if network == "xhttp" {
+	switch network {
+	case "ws":
+		ws := map[string]interface{}{}
+		if path := strings.TrimSpace(query.Get("path")); path != "" {
+			ws["path"] = path
+		} else {
+			ws["path"] = "/"
+		}
+		if host := strings.TrimSpace(query.Get("host")); host != "" {
+			ws["headers"] = map[string]interface{}{"Host": host}
+		}
+		stream["wsSettings"] = ws
+	case "grpc":
+		grpc := map[string]interface{}{}
+		if serviceName := strings.TrimSpace(firstQuery(query, "serviceName", "service_name")); serviceName != "" {
+			grpc["serviceName"] = serviceName
+		}
+		if mode := strings.TrimSpace(query.Get("mode")); mode != "" {
+			grpc["mode"] = mode
+		}
+		if authority := strings.TrimSpace(query.Get("authority")); authority != "" {
+			grpc["authority"] = authority
+		}
+		stream["grpcSettings"] = grpc
+	case "http", "h2":
+		httpSettings := map[string]interface{}{}
+		if path := strings.TrimSpace(query.Get("path")); path != "" {
+			httpSettings["path"] = path
+		} else {
+			httpSettings["path"] = "/"
+		}
+		if host := strings.TrimSpace(query.Get("host")); host != "" {
+			httpSettings["host"] = splitCSV(host)
+		}
+		stream["httpSettings"] = httpSettings
+	case "httpupgrade":
+		httpUpgrade := map[string]interface{}{}
+		if path := strings.TrimSpace(query.Get("path")); path != "" {
+			httpUpgrade["path"] = path
+		} else {
+			httpUpgrade["path"] = "/"
+		}
+		if host := strings.TrimSpace(query.Get("host")); host != "" {
+			httpUpgrade["host"] = host
+		}
+		stream["httpupgradeSettings"] = httpUpgrade
+	case "xhttp":
 		xhttp := map[string]interface{}{}
 		if path := strings.TrimSpace(query.Get("path")); path != "" {
 			xhttp["path"] = path
@@ -239,6 +288,24 @@ func buildStreamSettings(query neturl.Values) map[string]interface{} {
 		stream["xhttpSettings"] = xhttp
 	}
 	return stream
+}
+
+func splitCSV(value string) []string {
+	result := []string{}
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func valueOrDefault(value string, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
 }
 
 func firstQuery(query neturl.Values, keys ...string) string {

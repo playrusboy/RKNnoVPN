@@ -50,8 +50,15 @@ func TestRenderSingboxConfigAvoidsRemovedSingBox113Fields(t *testing.T) {
 		if _, ok := server["address_resolver"]; ok {
 			t.Fatalf("legacy DNS server address_resolver field rendered: %#v", server)
 		}
-		if tag := server["tag"]; (tag == "direct-dns" || tag == "bootstrap-dns") && server["detour"] == "direct" {
-			t.Fatalf("DNS server must not detour through empty direct outbound: %#v", server)
+		switch server["tag"] {
+		case "remote-dns":
+			if server["detour"] != "proxy" {
+				t.Fatalf("default remote DNS must detour through proxy: %#v", server)
+			}
+		case "direct-dns", "bootstrap-dns":
+			if server["detour"] != "direct" {
+				t.Fatalf("direct/bootstrap DNS must explicitly detour direct: %#v", server)
+			}
 		}
 	}
 
@@ -103,6 +110,55 @@ func TestRenderSingboxConfigAvoidsRemovedSingBox113Fields(t *testing.T) {
 	localRule := rules[2].(map[string]any)
 	if localRule["action"] != "reject" {
 		t.Fatalf("local TPROXY route should reject instead of looping: %#v", localRule)
+	}
+}
+
+func TestRenderXHTTPProfileRoutesRemoteDNSDirect(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Profile.ActiveNodeID = "xhttp-node"
+	cfg.Profile.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"xhttp-node",
+			"name":"XHTTP",
+			"server":"example.com",
+			"port":443,
+			"protocol":"vless",
+			"outbound":{
+				"protocol":"vless",
+				"settings":{
+					"vnext":[{
+						"address":"example.com",
+						"port":443,
+						"users":[{"id":"00000000-0000-0000-0000-000000000000","encryption":"none"}]
+					}]
+				},
+				"streamSettings":{
+					"network":"xhttp",
+					"security":"reality",
+					"realitySettings":{"serverName":"www.example.com","publicKey":"public-key"},
+					"xhttpSettings":{"path":"/","mode":"auto"}
+				}
+			}
+		}`),
+	}
+
+	profile := ResolveActiveProfile(cfg)
+	if !RequiresXraySidecar(profile) {
+		t.Fatalf("test profile must require xray sidecar: %#v", profile)
+	}
+	data, err := RenderSingboxConfig(cfg, profile)
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	var rendered map[string]any
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	for _, rawServer := range rendered["dns"].(map[string]any)["servers"].([]any) {
+		server := rawServer.(map[string]any)
+		if server["tag"] == "remote-dns" && server["detour"] != "direct" {
+			t.Fatalf("xhttp sidecar remote DNS must avoid depending on the same proxy: %#v", server)
+		}
 	}
 }
 

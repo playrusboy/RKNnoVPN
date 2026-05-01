@@ -218,6 +218,44 @@ func TestProfileValidationRejectsAllowLanAndRepairsStaleActive(t *testing.T) {
 	}
 }
 
+func TestMergeNodesSelectsImportedManualNode(t *testing.T) {
+	current := Document{
+		ID:           "main",
+		Name:         "Primary",
+		ActiveNodeID: "old",
+		Nodes: []Node{
+			{
+				ID:       "old",
+				Name:     "Old",
+				Protocol: "vless",
+				Server:   "old.example",
+				Port:     443,
+				Outbound: json.RawMessage(`{"protocol":"vless","settings":{"vnext":[{"address":"old.example","port":443}]}}`),
+				Source:   NodeSource{Type: "MANUAL"},
+			},
+		},
+	}
+	incoming := []Node{
+		{
+			ID:       "new",
+			Name:     "New",
+			Protocol: "vless",
+			Server:   "new.example",
+			Port:     443,
+			Outbound: json.RawMessage(`{"protocol":"vless","settings":{"vnext":[{"address":"new.example","port":443}]}}`),
+			Source:   NodeSource{Type: "MANUAL"},
+		},
+	}
+
+	next, stats := MergeNodes(current, incoming)
+	if stats["added"] != 1 {
+		t.Fatalf("expected one added node, got %#v", stats)
+	}
+	if next.ActiveNodeID != "new" {
+		t.Fatalf("imported node was not selected: %#v", next.ActiveNodeID)
+	}
+}
+
 func TestNormalizeSubscriptionsRecomputesProviderCounts(t *testing.T) {
 	doc := Document{
 		ID: "main",

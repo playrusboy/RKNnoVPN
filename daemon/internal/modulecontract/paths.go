@@ -4,6 +4,7 @@ import "path/filepath"
 
 const (
 	DefaultModuleDir = "/data/adb/modules/rknnovpn"
+	DefaultStateDir  = "/data/adb/rknnovpn-data"
 	DefaultGroupID   = "23333"
 
 	BinDirName            = "bin"
