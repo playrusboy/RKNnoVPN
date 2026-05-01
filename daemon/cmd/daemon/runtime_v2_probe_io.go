@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/rootcerts"
 )
 
 func testTCPConnect(host string, port int, timeout time.Duration) (int64, error) {
@@ -119,6 +121,9 @@ func testTransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int) 
 		DialContext:         dialer.DialContext,
 		TLSHandshakeTimeout: timeout,
 		DisableKeepAlives:   true,
+	}
+	if roots := rootcerts.AndroidSystemPool(); roots != nil {
+		transport.TLSClientConfig = &tls.Config{RootCAs: roots}
 	}
 	defer transport.CloseIdleConnections()
 

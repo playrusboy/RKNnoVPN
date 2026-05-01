@@ -138,6 +138,74 @@ func TestBootstrapResolverIgnoresSystemLoopbackDNSServer(t *testing.T) {
 	<-done
 }
 
+func TestFetchLookupUsesSystemResolverFirst(t *testing.T) {
+	previousSystem := systemLookupIPAddr
+	previousBootstrap := bootstrapLookupIPAddr
+	systemLookupIPAddr = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("203.0.113.10")}}, nil
+	}
+	bootstrapLookupIPAddr = func(context.Context, string) ([]net.IPAddr, error) {
+		t.Fatal("bootstrap resolver should not be used when system resolver succeeds")
+		return nil, nil
+	}
+	t.Cleanup(func() {
+		systemLookupIPAddr = previousSystem
+		bootstrapLookupIPAddr = previousBootstrap
+	})
+
+	ips, err := lookupFetchHost(context.Background(), "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ips) != 1 || !ips[0].IP.Equal(net.ParseIP("203.0.113.10")) {
+		t.Fatalf("unexpected resolved IPs: %#v", ips)
+	}
+}
+
+func TestFetchLookupFallsBackToBootstrapResolver(t *testing.T) {
+	previousSystem := systemLookupIPAddr
+	previousBootstrap := bootstrapLookupIPAddr
+	systemLookupIPAddr = func(context.Context, string) ([]net.IPAddr, error) {
+		return nil, errors.New("system resolver unavailable")
+	}
+	bootstrapLookupIPAddr = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("203.0.113.20")}}, nil
+	}
+	t.Cleanup(func() {
+		systemLookupIPAddr = previousSystem
+		bootstrapLookupIPAddr = previousBootstrap
+	})
+
+	ips, err := lookupFetchHost(context.Background(), "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ips) != 1 || !ips[0].IP.Equal(net.ParseIP("203.0.113.20")) {
+		t.Fatalf("unexpected resolved IPs: %#v", ips)
+	}
+}
+
+func TestFetchDialRejectsSystemResolvedPrivateIP(t *testing.T) {
+	previousSystem := systemLookupIPAddr
+	previousBootstrap := bootstrapLookupIPAddr
+	systemLookupIPAddr = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+	}
+	bootstrapLookupIPAddr = func(context.Context, string) ([]net.IPAddr, error) {
+		t.Fatal("bootstrap resolver should not be used when system resolver succeeds")
+		return nil, nil
+	}
+	t.Cleanup(func() {
+		systemLookupIPAddr = previousSystem
+		bootstrapLookupIPAddr = previousBootstrap
+	})
+
+	_, err := fetchDialContext(context.Background(), "tcp", "example.com:443")
+	if err == nil || !strings.Contains(err.Error(), "local, private, or reserved") {
+		t.Fatalf("expected private resolved IP rejection, got %v", err)
+	}
+}
+
 func TestClassifyError(t *testing.T) {
 	if got := ClassifyError("", errors.New("missing")); got != ErrorInvalidParams {
 		t.Fatalf("empty URL should be invalid params, got %s", got)

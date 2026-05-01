@@ -110,6 +110,32 @@ func TestValidateDesiredStateDoesNotMutateDesiredState(t *testing.T) {
 	}
 }
 
+func TestRunOperationProfileApplyUpdatesAppliedActiveProfileID(t *testing.T) {
+	backend := &fakeBackend{kind: BackendRootTProxy}
+	o := NewOrchestrator(
+		DesiredState{BackendKind: BackendRootTProxy, ActiveProfileID: "node-old"},
+		backend,
+	)
+
+	status := startAndWait(t, o)
+	if status.AppliedState.ActiveProfileID != "node-old" {
+		t.Fatalf("initial applied profile = %q, want node-old", status.AppliedState.ActiveProfileID)
+	}
+
+	if err := o.ApplyDesiredState(DesiredState{BackendKind: BackendRootTProxy, ActiveProfileID: "node-new"}); err != nil {
+		t.Fatalf("apply desired state: %v", err)
+	}
+	if _, err := o.RunOperation(OperationProfileApply, PhaseStarting, func(generation int64) error {
+		return nil
+	}); err != nil {
+		t.Fatalf("profile apply operation: %v", err)
+	}
+	status = waitForOperationDone(t, o, OperationProfileApply)
+	if status.AppliedState.ActiveProfileID != "node-new" {
+		t.Fatalf("applied profile after profile apply = %q, want node-new", status.AppliedState.ActiveProfileID)
+	}
+}
+
 func TestStopCallsBackendEvenWhenAppliedPhaseStopped(t *testing.T) {
 	backend := &fakeBackend{kind: BackendRootTProxy}
 	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)

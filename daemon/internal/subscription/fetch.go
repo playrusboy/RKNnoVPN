@@ -25,6 +25,12 @@ var fetchBootstrapDNSServers = []string{
 	"9.9.9.9:53",
 }
 
+var systemLookupIPAddr = net.DefaultResolver.LookupIPAddr
+
+var bootstrapLookupIPAddr = func(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return newBootstrapResolver().LookupIPAddr(ctx, host)
+}
+
 type ErrorKind string
 
 const (
@@ -260,7 +266,7 @@ func fetchDialContext(ctx context.Context, network string, address string) (net.
 	if isDisallowedSourceHost(host) {
 		return nil, fmt.Errorf("subscription URL host is local, private, or reserved")
 	}
-	ips, err := newBootstrapResolver().LookupIPAddr(ctx, host)
+	ips, err := lookupFetchHost(ctx, host)
 	if err != nil {
 		return nil, err
 	}
@@ -284,6 +290,34 @@ func fetchDialContext(ctx context.Context, network string, address string) (net.
 	}
 	if lastErr != nil {
 		return nil, lastErr
+	}
+	return nil, fmt.Errorf("subscription URL host did not resolve")
+}
+
+func lookupFetchHost(ctx context.Context, host string) ([]net.IPAddr, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		return []net.IPAddr{{IP: ip}}, nil
+	}
+
+	systemCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	ips, systemErr := systemLookupIPAddr(systemCtx, host)
+	cancel()
+	if systemErr == nil && len(ips) > 0 {
+		return ips, nil
+	}
+
+	ips, bootstrapErr := bootstrapLookupIPAddr(ctx, host)
+	if bootstrapErr == nil && len(ips) > 0 {
+		return ips, nil
+	}
+	if systemErr != nil && bootstrapErr != nil {
+		return nil, fmt.Errorf("system DNS lookup failed: %v; bootstrap DNS lookup failed: %w", systemErr, bootstrapErr)
+	}
+	if systemErr != nil {
+		return nil, systemErr
+	}
+	if bootstrapErr != nil {
+		return nil, bootstrapErr
 	}
 	return nil, fmt.Errorf("subscription URL host did not resolve")
 }

@@ -167,22 +167,7 @@ func ReloadAfterConfigChange(input ConfigReloadInput, deps ConfigReloadDeps) err
 		detail = deps.LastRuntimeReport().Status
 	}
 	recordStage("hot-swap", "ok", "", detail, false)
-	if deps.ReapplyRuntimeRules == nil {
-		err := fmt.Errorf("netstack reapply hook is not configured")
-		err = failStage("netstack-reapply", "RULES_NOT_APPLIED", err, false)
-		return err
-	}
-	netReport, err := deps.ReapplyRuntimeRules(input.Config)
-	if err != nil {
-		resetReport := reloadResetReport(deps, input.Generation)
-		recordStage("reset-after-netstack-failure", resetReport.Status, "", resetReportDetail(resetReport), resetReport.Status != "ok")
-		err = failStage("netstack-reapply", runtimeerr.Code(err, "RULES_NOT_APPLIED"), err, resetReport.Status != "ok")
-		return runtimeerr.WithResetReport(
-			fmt.Errorf("%s rules failed; %s, runtime stopped for safety: %w", context, savedLabel, err),
-			resetReport,
-		)
-	}
-	recordStage("netstack-reapply", "ok", "", fmt.Sprintf("steps=%d", len(netReport.Steps)), false)
+	recordStage("netstack-reapply", "skipped", "", "runtime env unchanged", false)
 	if deps.ResetRescueState != nil {
 		deps.ResetRescueState()
 	}

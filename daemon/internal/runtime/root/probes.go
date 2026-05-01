@@ -138,8 +138,10 @@ func (r NodeProbeRunner) runTunnelProbe(profile *config.NodeProfile, result *run
 	}
 
 	result.ErrorDetail = urlErr.Error()
-	if result.ErrorClass == "" {
-		result.ErrorClass = ClassifyURLTestFailure(urlErr, r.RuntimeHealth)
+	if classified := ClassifyURLTestFailure(urlErr, r.RuntimeHealth); classified != "" {
+		result.ErrorClass = classified
+	} else if result.ErrorClass == "" {
+		result.ErrorClass = "tunnel_delay_failed"
 	}
 	if result.ErrorClass == "api_disabled" {
 		result.URLStatus = "not_run"
@@ -163,7 +165,7 @@ func (r NodeProbeRunner) runTunnelURLProbe(profile *config.NodeProfile, result *
 		result.ThroughputStatus = "latency_only"
 		return urlMS, err
 	}
-	if r.ProfileCount == 1 {
+	if r.ProfileCount == 1 || profile.ID == strings.TrimSpace(r.Config.Profile.ActiveNodeID) {
 		metrics, err := r.IO.TransparentURLProbe(r.Config, r.TestURL, r.TimeoutMS)
 		if metrics.ResponseBytes > 0 {
 			responseBytes := metrics.ResponseBytes

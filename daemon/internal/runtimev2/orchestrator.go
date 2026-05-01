@@ -581,10 +581,18 @@ func (o *Orchestrator) RunOperation(kind OperationKind, phase Phase, fn func(gen
 			}
 			o.mu.Lock()
 			health := o.health
+			desired := o.desired
 			o.mu.Unlock()
 			applied := active
 			if kind == OperationUpdateInstall {
 				applied.Phase = PhaseStopped
+			} else if operationAppliesDesiredRuntimeState(kind) {
+				if desired.BackendKind != "" {
+					applied.BackendKind = desired.BackendKind
+				}
+				applied.ActiveProfileID = desired.ActiveProfileID
+				applied.StartedAt = op.StartedAt
+				applied.Phase = phaseFromHealth(health, PhaseHealthy)
 			} else if !health.CheckedAt.IsZero() && !health.CheckedAt.Before(op.StartedAt) {
 				applied.Phase = phaseFromHealth(health, PhaseHealthy)
 			}
@@ -758,6 +766,15 @@ func (o *Orchestrator) runSubmittedOperation(op OperationStatus, run func(Operat
 	}()
 	if run != nil {
 		completion = run(op)
+	}
+}
+
+func operationAppliesDesiredRuntimeState(kind OperationKind) bool {
+	switch kind {
+	case OperationConfigMutation, OperationProfileApply, OperationApplyDesiredState, OperationReload:
+		return true
+	default:
+		return false
 	}
 }
 
