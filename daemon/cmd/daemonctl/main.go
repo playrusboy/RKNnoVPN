@@ -16,7 +16,7 @@ import (
 
 const maxFrameBytes = 16 * 1024 * 1024
 
-var Version = "v2.2.9"
+var Version = "v2.2.10"
 
 func main() {
 	if len(os.Args) < 2 {

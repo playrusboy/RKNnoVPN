@@ -447,14 +447,8 @@ jobs:
           name: xray-armv7
           path: module/binaries/armv7/
 
-      - name: Add Android ABI binary aliases
-        run: |
-          rm -rf module/binaries/arm64-v8a module/binaries/armeabi-v7a
-          cp -a module/binaries/arm64 module/binaries/arm64-v8a
-          cp -a module/binaries/armv7 module/binaries/armeabi-v7a
-
       - name: Set permissions
-        run: chmod 755 module/binaries/arm64/* module/binaries/arm64-v8a/* module/binaries/armv7/* module/binaries/armeabi-v7a/*
+        run: chmod 755 module/binaries/arm64/* module/binaries/armv7/*
 
       - name: Stamp version in module.prop
         run: |
@@ -484,9 +478,13 @@ jobs:
           zip -r ../rknnovpn-module.zip . \
             -x "*.git*" "*.DS_Store"
           cd ..
-          for dir in arm64 arm64-v8a armv7 armeabi-v7a; do
+          for dir in arm64 armv7; do
             unzip -l rknnovpn-module.zip "binaries/${dir}/daemon" "binaries/${dir}/daemonctl" "binaries/${dir}/sing-box" "binaries/${dir}/xray" >/dev/null
           done
+          if unzip -l rknnovpn-module.zip 'binaries/arm64-v8a/*' 'binaries/armeabi-v7a/*' >/dev/null 2>&1; then
+            echo "ZIP must not package duplicate Android ABI alias binary directories" >&2
+            exit 1
+          fi
           sha256sum rknnovpn-module.zip
 
       - name: Upload module ZIP

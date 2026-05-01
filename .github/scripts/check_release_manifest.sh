@@ -81,6 +81,13 @@ if ! grep -q 'arm64-v8a arm64' module/service.sh; then
   fail "service binary restore must support arm64-v8a and arm64 aliases"
 fi
 
+if grep -REn 'cp -a .*binaries/(arm64-v8a|armeabi-v7a)|Add Android ABI binary aliases' .github/workflows Makefile >/tmp/release-manifest-abi-copies.$$ 2>/dev/null; then
+  cat /tmp/release-manifest-abi-copies.$$ >&2
+  rm -f /tmp/release-manifest-abi-copies.$$
+  fail "release packaging must resolve Android ABI aliases in scripts, not duplicate binary directories"
+fi
+rm -f /tmp/release-manifest-abi-copies.$$
+
 expected_zip="https://github.com/youtubediscord/RKNnoVPN/releases/download/${daemon_version}/rknnovpn-${daemon_version}-module.zip"
 expected_changelog="https://github.com/youtubediscord/RKNnoVPN/releases/tag/${daemon_version}"
 update_zip="$(sed -n 's/[[:space:]]*"zipUrl"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' update.json | head -n 1)"

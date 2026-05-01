@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.2.10
+
+- Removed duplicate Android ABI binary directories from the Magisk module ZIP so release size returns to the compact two-architecture layout.
+- Kept installer, service restore, and daemon updater compatibility with Android ABI names by resolving `arm64-v8a` to packaged `arm64` and `armeabi-v7a` to packaged `armv7`.
+- Added a release ZIP guard that rejects duplicate ABI alias binary directories in GitHub Actions.
+- Synchronized app, daemon, daemonctl, module, update feed, and bundled script version metadata to `v2.2.10`.
+
 ## v2.2.9
 
 - Fixed Magisk module updates on arm64-v8a devices by packaging Android ABI binary aliases alongside the normalized updater paths.
