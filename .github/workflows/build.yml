@@ -335,9 +335,13 @@ jobs:
           - arch: arm64
             goarch: arm64
             goarm: ""
+            cc: aarch64-linux-android23-clang
+            linker: /system/bin/linker64
           - arch: armv7
             goarch: arm
             goarm: "7"
+            cc: armv7a-linux-androideabi23-clang
+            linker: /system/bin/linker
     steps:
       - name: Checkout Xray-core
         uses: actions/checkout@v4
@@ -352,16 +356,39 @@ jobs:
           go-version: ${{ env.XRAY_GO_VERSION }}
           cache-dependency-path: xray-src/go.sum
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: |
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            SDKMANAGER="$(command -v sdkmanager || true)"
+          fi
+          if [[ -z "$SDKMANAGER" ]]; then
+            echo "sdkmanager not found" >&2
+            exit 127
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null
+          "$SDKMANAGER" --install "ndk;${ANDROID_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
       - name: Build Android Xray-core
         run: |
           mkdir -p "out/${{ matrix.arch }}"
           cd xray-src
-          CGO_ENABLED=0 GOOS=android GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} go build \
+          export CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.cc }}"
+          CGO_ENABLED=1 GOOS=android GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} go build \
             -trimpath \
             -ldflags "-s -w -buildid=" \
             -o "../out/${{ matrix.arch }}/xray" ./main
           cd ..
           chmod 755 "out/${{ matrix.arch }}/xray"
+          if ! readelf -l "out/${{ matrix.arch }}/xray" | grep -q "Requesting program interpreter: ${{ matrix.linker }}"; then
+            echo "ERROR: xray is not an Android PIE binary for ${{ matrix.arch }}"
+            readelf -l "out/${{ matrix.arch }}/xray"
+            exit 1
+          fi
           readelf -h "out/${{ matrix.arch }}/xray"
           sha256sum "out/${{ matrix.arch }}/xray"
 
