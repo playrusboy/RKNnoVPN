@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.2.3
+
+- Fixed first-run daemon repair waits so the APK can survive slow rooted daemon startup before importing keys.
+- Added direct import support for sing-box outbound JSON and full configs with `outbounds`, alongside proxy links and WireGuard configs.
+- Fixed imported server visibility by selecting the normalized group after import.
+- Removed the default Russia bypass dependency on remote GitHub SRS rule-set downloads during sing-box startup.
+- Improved runtime diagnostics: full diagnostic bundles are shared from Settings, device-lab collection uses current daemonctl methods, and unavailable node helper probes no longer mark servers unusable.
+- Clarified degraded URL-probe messaging so successful `commit-state` is not shown as the failed stage.
+- Synchronized app, daemon, daemonctl, module, update feed, and bundled script version metadata to `v2.2.3`.
+
 ## v2.2.2
 
 - Fixed remote sing-box rule-set downloads so startup does not depend on the selected proxy node while fetching GitHub SRS files.

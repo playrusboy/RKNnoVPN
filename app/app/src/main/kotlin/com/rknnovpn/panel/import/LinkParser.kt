@@ -112,6 +112,19 @@ object LinkParser {
     }
 
     /**
+     * Parse every supported direct import item from [text].
+     *
+     * This includes share links, WireGuard config text, and sing-box outbound
+     * JSON objects or full sing-box configs containing an `outbounds` array.
+     */
+    fun detectNodes(text: String): List<Node> {
+        val linkNodes = detectUris(text).mapNotNull(::parse)
+        val singBoxNodes = SingBoxOutboundImporter.parse(text)
+        return (linkNodes + singBoxNodes)
+            .distinctBy { "${it.protocol.name}:${it.server}:${it.port}:${it.name}" }
+    }
+
+    /**
      * Heuristic: does [text] look like a subscription URL rather than a direct proxy link?
      */
     fun isSubscriptionUrl(text: String): Boolean {

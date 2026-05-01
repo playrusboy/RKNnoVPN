@@ -47,7 +47,7 @@
     <string name="health_issue_dns_listener_down">DNS listener 127.0.0.1 не отвечает.</string>
     <string name="health_issue_dns_lookup_timeout">DNS-запрос через локальный listener ушёл в таймаут.</string>
     <string name="health_issue_proxy_dns_unavailable">Proxy DNS недоступен.</string>
-    <string name="health_issue_outbound_url_failed">URL-проверка не прошла через выбранный proxy-маршрут.</string>
+    <string name="health_issue_outbound_url_failed">URL-проверка через выбранный прокси-маршрут не прошла.</string>
     <string name="health_issue_readiness_failed">Проверки готовности runtime не пройдены.</string>
     <string name="health_issue_core_spawn_failed">Процесс sing-box не удалось запустить.</string>
     <string name="health_issue_core_spawn_failed_with_reason">Процесс sing-box не удалось запустить: %1$s</string>
@@ -117,12 +117,12 @@
 
     <!-- Import sheet -->
     <string name="import_nodes">Импорт серверов</string>
-    <string name="tab_paste_uri">Вставить URI</string>
+    <string name="tab_paste_uri">Вставить</string>
     <string name="tab_scan_qr">Сканировать QR</string>
     <string name="tab_subscription">Подписка</string>
-    <string name="paste_uri_hint">Вставьте ссылки vless://, trojan://, ss://, socks5://, hysteria2://, tuic://…</string>
+    <string name="paste_uri_hint">Вставьте proxy-ссылки, WireGuard config или sing-box outbound JSON…</string>
     <string name="paste_from_clipboard">Из буфера</string>
-    <string name="detect_uris">Определить URI</string>
+    <string name="detect_uris">Определить</string>
     <string name="camera_permission_button">Разрешить камеру</string>
     <string name="subscription_url_hint">https://example.com/sub</string>
     <string name="fetch">Загрузить</string>
@@ -344,11 +344,11 @@
     <string name="node_set_active_failed">Не удалось сделать сервер активным</string>
     <string name="node_delete_failed">Не удалось удалить сервер</string>
     <string name="node_update_failed">Не удалось обновить сервер</string>
-    <string name="node_no_valid_proxy_uris_detected">В вставленном тексте не найдено корректных proxy URI</string>
-    <string name="node_detected_uris_unparsed">URI найдены, но ни один не удалось разобрать</string>
+    <string name="node_no_valid_proxy_uris_detected">В вставленном тексте не найдены поддерживаемые proxy-ссылки или sing-box outbounds</string>
+    <string name="node_detected_uris_unparsed">Proxy-ссылки или config найдены, но ни один элемент не удалось разобрать</string>
     <string name="node_import_failed">Импорт не удался. Демон запущен?</string>
     <string name="node_no_valid_links_to_import">Нет корректных ссылок для импорта</string>
-    <string name="node_no_valid_proxy_links_detected">Корректные proxy-ссылки не найдены</string>
+    <string name="node_no_valid_proxy_links_detected">Поддерживаемые proxy-ссылки или sing-box outbounds не найдены</string>
     <string name="node_no_supported_proxy_links_parsed">Не удалось разобрать ни одну поддерживаемую proxy-ссылку</string>
     <string name="subscription_fetch_failed">Не удалось загрузить подписку</string>
     <string name="subscription_no_supported_links">В подписке нет поддерживаемых proxy-ссылок</string>
@@ -371,7 +371,7 @@
     <string name="node_test_reason_runtime_not_ready">runtime не готов</string>
     <string name="node_test_reason_runtime_degraded">runtime degraded</string>
     <string name="node_test_reason_proxy_dns_unavailable">proxy DNS недоступен</string>
-    <string name="node_test_reason_outbound_url_failed">URL-проверка через выбранный proxy-маршрут не прошла</string>
+    <string name="node_test_reason_outbound_url_failed">URL-проверка через выбранный прокси-маршрут не прошла</string>
     <string name="node_test_reason_http_helper_unavailable">HTTP helper недоступен</string>
     <string name="node_test_reason_api_disabled">URL-тест узла отключен в production-режиме</string>
     <string name="node_test_reason_api_unavailable">локальный control API недоступен</string>

@@ -335,12 +335,14 @@ class NodeListViewModel @Inject constructor(
     }
 
     /**
-     * Parse URIs from pasted text and populate import candidates.
+     * Parse direct import items from pasted text and populate import candidates.
      *
-     * Uses [LinkParser] for full protocol-aware parsing so that the preview
-     * shows correct names, servers, ports, and the outbound JSON is populated.
-     * Malformed or unsupported URIs are skipped with an error instead of being
-     * shown as importable, because persistence goes through the same parser.
+     * Uses [LinkParser] for full protocol-aware parsing so that the preview shows
+     * correct names, servers, ports, and the outbound JSON is populated. This
+     * also accepts sing-box outbound JSON and full configs with an `outbounds`
+     * array. Malformed or unsupported inputs are skipped with an error instead
+     * of being shown as importable, because persistence goes through the same
+     * parser.
      */
     fun detectUris(text: String) {
         val cleanText = text.trim()
@@ -360,29 +362,14 @@ class NodeListViewModel @Inject constructor(
             return
         }
 
-        val detectedUris = LinkParser.detectUris(text)
-        if (detectedUris.isEmpty()) {
-            _uiState.update {
-                it.copy(
-                    importCandidates = emptyList(),
-                    pendingSubscriptionPreview = null,
-                    errorMessage = messages.get(
-                        com.rknnovpn.panel.R.string.node_no_valid_proxy_uris_detected
-                    ),
-                    statusMessage = null,
-                )
-            }
-            return
-        }
-
-        val parsedNodes = detectedUris.mapNotNull(LinkParser::parse)
+        val parsedNodes = LinkParser.detectNodes(text)
         if (parsedNodes.isEmpty()) {
             _uiState.update {
                 it.copy(
                     importCandidates = emptyList(),
                     pendingSubscriptionPreview = null,
                     errorMessage = messages.get(
-                        com.rknnovpn.panel.R.string.node_detected_uris_unparsed
+                        com.rknnovpn.panel.R.string.node_no_valid_proxy_uris_detected
                     ),
                     statusMessage = null,
                 )
@@ -426,49 +413,34 @@ class NodeListViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null, statusMessage = null) }
 
-            // Build a single multi-line string of share links for the daemon.
-            val links = selected.mapNotNull { it.link.ifBlank { null } }.joinToString("\n")
-
-            if (links.isNotBlank()) {
-                val imported = profileRepository.importNodes(links)
-                if (imported.isEmpty()) {
-                    val err = profileRepository.error.value
-                    _uiState.update {
-                        it.copy(
-                            errorMessage = err ?: messages.get(
-                                com.rknnovpn.panel.R.string.node_import_failed
-                            ),
-                            statusMessage = null,
-                            isLoading = false,
-                        )
-                    }
-                } else {
-                    Log.d(TAG, "Imported ${imported.size} nodes via daemon")
-                    // Auto-select the group of the first imported node so the user
-                    // can see the results immediately.
-                    val firstGroup = imported.firstOrNull()?.group
-                    val persistedWarning = profileRepository.error.value
-                    val notice = profileRepository.notice.value.takeIf { persistedWarning == null }
-                    _uiState.update {
-                        it.copy(
-                            showImportSheet = persistedWarning != null,
-                            importCandidates = if (persistedWarning != null) it.importCandidates else emptyList(),
-                            pendingSubscriptionPreview = null,
-                            isLoading = false,
-                            errorMessage = persistedWarning,
-                            statusMessage = notice,
-                            selectedGroup = firstGroup ?: it.selectedGroup,
-                        )
-                    }
-                }
-            } else {
+            val imported = profileRepository.importParsedNodes(selected)
+            if (imported.isEmpty()) {
+                val err = profileRepository.error.value
                 _uiState.update {
                     it.copy(
-                        errorMessage = messages.get(
-                            com.rknnovpn.panel.R.string.node_no_valid_links_to_import
+                        errorMessage = err ?: messages.get(
+                            com.rknnovpn.panel.R.string.node_import_failed
                         ),
                         statusMessage = null,
                         isLoading = false,
+                    )
+                }
+            } else {
+                Log.d(TAG, "Imported ${imported.size} nodes via daemon")
+                // Auto-select the group of the first imported node so the user
+                // can see the results immediately.
+                val firstGroup = imported.firstOrNull()?.let(::normalizeNode)?.group
+                val persistedWarning = profileRepository.error.value
+                val notice = profileRepository.notice.value.takeIf { persistedWarning == null }
+                _uiState.update {
+                    it.copy(
+                        showImportSheet = persistedWarning != null,
+                        importCandidates = if (persistedWarning != null) it.importCandidates else emptyList(),
+                        pendingSubscriptionPreview = null,
+                        isLoading = false,
+                        errorMessage = persistedWarning,
+                        statusMessage = notice,
+                        selectedGroup = firstGroup ?: it.selectedGroup,
                     )
                 }
             }
@@ -539,7 +511,7 @@ class NodeListViewModel @Inject constructor(
                 return@launch
             }
 
-            val firstGroup = imported.firstOrNull()?.group
+            val firstGroup = imported.firstOrNull()?.let(::normalizeNode)?.group
             val persistedWarning = profileRepository.error.value
             val notice = profileRepository.notice.value.takeIf { persistedWarning == null }
             _uiState.update {

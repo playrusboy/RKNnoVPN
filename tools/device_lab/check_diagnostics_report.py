@@ -17,6 +17,9 @@ def main() -> int:
         print(f"diagnostics report JSON is not parseable: {exc}", file=sys.stderr)
         return 1
 
+    if isinstance(data, dict) and data.get("ok") is True and isinstance(data.get("result"), dict):
+        data = data["result"]
+
     errors = []
     warnings = []
 

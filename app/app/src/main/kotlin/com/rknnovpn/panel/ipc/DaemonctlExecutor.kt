@@ -73,7 +73,7 @@ class DaemonctlExecutor @Inject constructor() {
         private const val REPAIR_COOLDOWN_MS = 15_000L
         private const val REPAIR_RETRY_DELAY_MS = 1_500L
         private const val REPAIR_RETRY_TIMEOUT_MS = 5_000L
-        private const val REPAIR_TOTAL_WAIT_MS = 24_000L
+        private const val REPAIR_TOTAL_WAIT_MS = 120_000L
 
         /** Exit code returned by `su` when the user denies the superuser prompt. */
         private const val SU_DENIED_EXIT_CODE = 13

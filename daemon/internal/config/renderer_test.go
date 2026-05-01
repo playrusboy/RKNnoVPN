@@ -177,7 +177,7 @@ func TestRenderRouteUsesRuleActionsAndRemoteRuleSets(t *testing.T) {
 		set := rawSet.(map[string]any)
 		byTag[set["tag"].(string)] = set
 	}
-	for _, tag := range []string{"geoip-ru", "geoip-cn", "geosite-cn", "geosite-category-ads-all"} {
+	for _, tag := range []string{"geoip-cn", "geosite-cn", "geosite-category-ads-all"} {
 		set := byTag[tag]
 		if set == nil {
 			t.Fatalf("missing remote rule-set %s in %#v", tag, sets)
@@ -197,6 +197,9 @@ func TestRenderRouteUsesRuleActionsAndRemoteRuleSets(t *testing.T) {
 	}
 	if byTag["geosite-ru"] != nil {
 		t.Fatalf("geosite-ru is not a canonical SagerNet rule-set and must not be rendered: %#v", sets)
+	}
+	if byTag["geoip-ru"] != nil {
+		t.Fatalf("geoip-ru must not be rendered because default Russia bypass must not fetch remote rule-sets at startup: %#v", sets)
 	}
 }
 
@@ -674,6 +677,56 @@ func TestRenderVLESSVisionUDP443NormalizesForSingBox(t *testing.T) {
 	}
 	if outbound["packet_encoding"] != "xudp" {
 		t.Fatalf("udp443 vision flow must enable xudp packet encoding, got %#v", outbound)
+	}
+}
+
+func TestRenderVLESSPreservesStoredPacketEncoding(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = ""
+	cfg.Node.UUID = ""
+	cfg.Profile.ActiveNodeID = "packet-node"
+	cfg.Profile.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"packet-node",
+			"name":"Packet Addr",
+			"protocol":"VLESS",
+			"server":"example.com",
+			"port":443,
+			"outbound":{
+				"protocol":"vless",
+				"settings":{
+					"vnext":[{
+						"address":"example.com",
+						"port":443,
+						"users":[{
+							"id":"00000000-0000-0000-0000-000000000000",
+							"encryption":"none",
+							"packet_encoding":"packetaddr"
+						}]
+					}]
+				},
+				"streamSettings":{
+					"network":"tcp",
+					"security":"tls",
+					"tlsSettings":{
+						"serverName":"www.example.com"
+					}
+				}
+			}
+		}`),
+	}
+
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	var rendered map[string]any
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	outbound := rendered["outbounds"].([]any)[0].(map[string]any)
+	if outbound["packet_encoding"] != "packetaddr" {
+		t.Fatalf("stored packet encoding must be preserved, got %#v", outbound)
 	}
 }
 

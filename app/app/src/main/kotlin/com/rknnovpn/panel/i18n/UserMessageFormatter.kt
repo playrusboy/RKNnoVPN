@@ -337,8 +337,19 @@ class UserMessageFormatter @Inject constructor(
     }
 
     private fun formatRuntimeStage(report: RuntimeStageReport?): String {
-        val stage = report?.failedStage?.trim()?.ifBlank { null }
-            ?: report?.failedStageOrLast?.name?.trim()?.ifBlank { null }
+        val failedStage = report?.failedStage?.trim()?.ifBlank { null }
+            ?: report?.stages
+                ?.lastOrNull { it.status.equals("failed", ignoreCase = true) }
+                ?.name
+                ?.trim()
+                ?.ifBlank { null }
+        val stage = failedStage ?: report
+            ?.takeIf { it.status.equals("failed", ignoreCase = true) }
+            ?.stages
+            ?.lastOrNull()
+            ?.name
+            ?.trim()
+            ?.ifBlank { null }
             ?: return ""
         return when (stage) {
             "render-config" -> "рендер конфигурации"

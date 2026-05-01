@@ -184,7 +184,7 @@ class ProfileRepository @Inject constructor(
         config.copy(activeNodeId = null)
     }
 
-    /** Import nodes from share links or refresh a subscription URL. */
+    /** Import nodes from direct import content or refresh a subscription URL. */
     suspend fun importNodes(input: String): List<Node> = withContext(Dispatchers.IO) {
         mutex.withLock {
             _loading.value = true
@@ -196,6 +196,20 @@ class ProfileRepository @Inject constructor(
                 } else {
                     importDirectLinksUnlocked(input)
                 }
+            } finally {
+                _loading.value = false
+            }
+        }
+    }
+
+    /** Import already parsed manual nodes, including nodes created from config JSON. */
+    suspend fun importParsedNodes(nodes: List<Node>): List<Node> = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            _loading.value = true
+            _error.value = null
+            _notice.value = null
+            try {
+                importParsedNodesUnlocked(nodes)
             } finally {
                 _loading.value = false
             }
@@ -411,29 +425,33 @@ class ProfileRepository @Inject constructor(
     private suspend fun importDirectLinksUnlocked(
         rawInput: String
     ): List<Node> {
-        val detectedUris = LinkParser.detectUris(rawInput)
-        if (detectedUris.isEmpty()) {
+        val parsedNodes = LinkParser.detectNodes(rawInput)
+        if (parsedNodes.isEmpty()) {
             _error.value = messages.get(com.rknnovpn.panel.R.string.node_no_valid_proxy_links_detected)
             return emptyList()
         }
 
-        val parsedNodes = detectedUris.mapNotNull(LinkParser::parse)
+        return importParsedNodesUnlocked(parsedNodes)
+    }
+
+    private suspend fun importParsedNodesUnlocked(
+        parsedNodes: List<Node>,
+    ): List<Node> {
         if (parsedNodes.isEmpty()) {
             _error.value = messages.get(com.rknnovpn.panel.R.string.node_no_supported_proxy_links_parsed)
             return emptyList()
         }
-
         return when (val result = client.profileImportNodes(parsedNodes)) {
             is DaemonClientResult.Ok -> {
                 publishRuntimeStatus(result.data)
-                refreshUnlockedWithStatus("importDirectLinks")
+                refreshUnlockedWithStatus("importNodes")
                 parsedNodes
             }
             else -> {
                 val msg = describeFailure(result)
-                Log.w(TAG, "importDirectLinks failed: $msg")
+                Log.w(TAG, "importNodes failed: $msg")
                 if (result.configWasSaved()) {
-                    refreshAfterSavedFailure("importDirectLinks", msg)
+                    refreshAfterSavedFailure("importNodes", msg)
                     return emptyList()
                 }
                 _error.value = msg

@@ -636,16 +636,11 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun shareRuntimeLogs() {
-        val current = _uiState.value.logsText
-        if (current.isNotBlank()) {
-            _uiState.update { it.copy(shareLogsText = current, shareLogsEventId = it.shareLogsEventId + 1) }
-            return
-        }
         _uiState.update { it.copy(isLoadingLogs = true, errorMessage = null) }
         viewModelScope.launch {
-            when (val result = daemonClient.runtimeLogs(lines = 220)) {
+            when (val result = daemonClient.diagnosticBundle(lines = 220)) {
                 is DaemonClientResult.Ok -> {
-                    val logs = result.data.text
+                    val logs = result.data
                     _uiState.update {
                         it.copy(
                             logsText = logs,
@@ -656,13 +651,28 @@ class SettingsViewModel @Inject constructor(
                     }
                 }
                 else -> {
-                    val message = formatUpdateError(result)
-                    Log.w(TAG, "Failed to prepare runtime logs: $message")
-                    _uiState.update {
-                        it.copy(
-                            isLoadingLogs = false,
-                            errorMessage = message,
-                        )
+                    when (val fallback = daemonClient.runtimeLogs(lines = 220)) {
+                        is DaemonClientResult.Ok -> {
+                            val logs = fallback.data.text
+                            _uiState.update {
+                                it.copy(
+                                    logsText = logs,
+                                    shareLogsText = logs,
+                                    shareLogsEventId = it.shareLogsEventId + 1,
+                                    isLoadingLogs = false,
+                                )
+                            }
+                        }
+                        else -> {
+                            val message = formatUpdateError(result)
+                            Log.w(TAG, "Failed to prepare diagnostic bundle: $message")
+                            _uiState.update {
+                                it.copy(
+                                    isLoadingLogs = false,
+                                    errorMessage = message,
+                                )
+                            }
+                        }
                     }
                 }
             }

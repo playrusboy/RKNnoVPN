@@ -5,11 +5,11 @@ import android.content.Context
 import com.rknnovpn.panel.model.Node
 
 /**
- * Monitors the system clipboard for proxy URIs.
+ * Monitors the system clipboard for proxy import content.
  *
  * Designed to be called on Activity resume. Checks the primary clipboard text for
- * recognised proxy schemes and returns an [ImportPreview] when one or more links
- * are detected.
+ * recognised proxy schemes or supported config snippets and returns an
+ * [ImportPreview] when importable nodes are detected.
  *
  * Usage:
  * ```kotlin
@@ -31,14 +31,14 @@ object ClipboardWatcher {
     private var lastOfferedHash: String? = null
 
     /**
-     * Preview returned when the clipboard contains importable proxy links.
+     * Preview returned when the clipboard contains importable proxy content.
      */
     data class ImportPreview(
         /** Raw clipboard text. */
         val rawText: String,
-        /** URIs detected in the text. */
+        /** URIs detected in the text; config-only imports may leave this empty. */
         val detectedUris: List<String>,
-        /** Nodes that were successfully parsed (subset of detectedUris). */
+        /** Nodes that were successfully parsed from links or config snippets. */
         val parsedNodes: List<Node>,
         /** Number of URIs that failed to parse. */
         val parseFailures: Int,
@@ -80,21 +80,10 @@ object ClipboardWatcher {
             )
         }
 
-        // Detect proxy URIs.
+        // Detect proxy URIs and supported config snippets.
         val uris = LinkParser.detectUris(text)
-        if (uris.isEmpty()) return null
-
-        // Parse each detected URI.
-        val nodes = mutableListOf<Node>()
-        var failures = 0
-        for (uri in uris) {
-            val node = LinkParser.parse(uri)
-            if (node != null) {
-                nodes += node
-            } else {
-                failures++
-            }
-        }
+        val nodes = LinkParser.detectNodes(text)
+        val failures = uris.count { LinkParser.parse(it) == null }
 
         // Only offer if at least one node parsed successfully.
         if (nodes.isEmpty()) return null
@@ -128,18 +117,8 @@ object ClipboardWatcher {
         }
 
         val uris = LinkParser.detectUris(text)
-        if (uris.isEmpty()) return null
-
-        val nodes = mutableListOf<Node>()
-        var failures = 0
-        for (uri in uris) {
-            val node = LinkParser.parse(uri)
-            if (node != null) {
-                nodes += node
-            } else {
-                failures++
-            }
-        }
+        val nodes = LinkParser.detectNodes(text)
+        val failures = uris.count { LinkParser.parse(it) == null }
 
         if (nodes.isEmpty()) return null
 

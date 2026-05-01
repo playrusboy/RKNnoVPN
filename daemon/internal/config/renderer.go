@@ -767,6 +767,9 @@ func profileFromStoredNode(raw json.RawMessage, index int) (*NodeProfile, error)
 		}
 		profile.UUID = stringFromMap(user, "id")
 		profile.Flow = stringFromMap(user, "flow")
+		if protocol == "vless" {
+			copyStringExtra(profile.Extra, user, "packet_encoding")
+		}
 		if protocol == "vmess" {
 			profile.AlterID = intFromMap(user, "alterId")
 			profile.Security = valueOrDefault(stringFromMap(user, "security"), "auto")
@@ -1531,8 +1534,9 @@ func buildRoute(cfg *Config) map[string]interface{} {
 		})
 	}
 
-	// Bypass Russia via GeoIP plus country-code domains. SagerNet does not
-	// publish a canonical geosite-ru rule-set, so keep domains explicit.
+	// Bypass Russia without startup-time network fetches. Remote SRS rule-sets
+	// are resolved before the proxy listener is ready, so keep the default
+	// Russia bypass fully local.
 	if cfg.Routing.BypassRussia {
 		rules = append(rules, map[string]interface{}{
 			"type":     "logical",
@@ -1540,7 +1544,6 @@ func buildRoute(cfg *Config) map[string]interface{} {
 			"action":   "route",
 			"outbound": "direct",
 			"rules": []map[string]interface{}{
-				{"rule_set": []string{"geoip-ru"}},
 				{"ip_cidr": russianServiceDirectCIDRs()},
 				{"domain_suffix": russianDomainSuffixes()},
 			},
@@ -1840,10 +1843,6 @@ func valueOrDefault(value string, fallback string) string {
 
 func buildRuleSets(cfg *Config) []map[string]interface{} {
 	var sets []map[string]interface{}
-
-	if cfg.Routing.BypassRussia {
-		sets = append(sets, remoteRuleSet("geoip-ru", "SagerNet/sing-geoip", "direct"))
-	}
 
 	if cfg.Routing.BypassChina {
 		sets = append(sets,

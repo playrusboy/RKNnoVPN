@@ -137,15 +137,24 @@ func (r NodeProbeRunner) runTunnelProbe(profile *config.NodeProfile, result *run
 		return
 	}
 
+	result.ErrorDetail = urlErr.Error()
+	if result.ErrorClass == "" {
+		result.ErrorClass = ClassifyURLTestFailure(urlErr, r.RuntimeHealth)
+	}
+	if result.ErrorClass == "api_disabled" {
+		result.URLStatus = "not_run"
+		if result.ThroughputStatus == "not_run" {
+			result.ThroughputStatus = "unavailable"
+		}
+		result.Verdict = "unknown"
+		return
+	}
+
 	result.URLStatus = "fail"
 	if result.ThroughputStatus == "not_run" {
 		result.ThroughputStatus = "unavailable"
 	}
 	result.Verdict = "unusable"
-	result.ErrorDetail = urlErr.Error()
-	if result.ErrorClass == "" {
-		result.ErrorClass = ClassifyURLTestFailure(urlErr, r.RuntimeHealth)
-	}
 }
 
 func (r NodeProbeRunner) runTunnelURLProbe(profile *config.NodeProfile, result *runtimev2.NodeProbeResult) (int64, error) {
@@ -174,7 +183,7 @@ func (r NodeProbeRunner) runTunnelURLProbe(profile *config.NodeProfile, result *
 }
 
 func FinalizeNodeProbeResult(result runtimev2.NodeProbeResult) runtimev2.NodeProbeResult {
-	if result.TCPStatus == "ok" && result.URLStatus != "ok" {
+	if result.TCPStatus == "ok" && result.URLStatus == "fail" {
 		result.Verdict = "unusable"
 	}
 	return result

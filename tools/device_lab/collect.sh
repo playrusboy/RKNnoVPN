@@ -53,9 +53,11 @@ capture_su system_proxy "settings get global http_proxy; settings get global glo
 
 if adb_su "test -x '$DAEMONCTL_PATH'" >/dev/null 2>&1; then
     capture_su daemonctl_version "'$DAEMONCTL_PATH' version" || true
-    capture_su daemonctl_status "'$DAEMONCTL_PATH' status" || true
+    capture_su daemonctl_status "'$DAEMONCTL_PATH' backend.status" || true
     capture_su daemonctl_self_check "'$DAEMONCTL_PATH' self-check" || true
-    capture_su_raw diagnostics_report.json "'$DAEMONCTL_PATH' diagnostics.report '{\"lines\":160}'" || true
+    capture_su_raw diagnostics_report.json "'$DAEMONCTL_PATH' diagnostics.report" || true
+    capture_su_raw runtime_logs.json "'$DAEMONCTL_PATH' logs" || true
+    capture_su module_log_tail "tail -n 180 '$RKNNOVPN_DIR/logs/daemon.log' '$RKNNOVPN_DIR/logs/service.log' '$RKNNOVPN_DIR/logs/sing-box.log' 2>&1" || true
     if command -v python3 >/dev/null 2>&1; then
         python3 "$SCRIPT_DIR/check_diagnostics_report.py" "$RUN_DIR/diagnostics_report.json" >"$RUN_DIR/diagnostics_report_check.txt" 2>&1 || true
     fi
