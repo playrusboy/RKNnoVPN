@@ -1001,20 +1001,16 @@ func applyStreamSettings(profile *NodeProfile, stream map[string]interface{}) {
 		network = "tcp"
 	}
 	security := stringFromMap(stream, "security")
-	if security == "reality" {
-		profile.Transport = "reality"
-	} else {
-		profile.Transport = network
-	}
-	if security == "tls" {
-		profile.Extra["security"] = "tls"
+	profile.Transport = network
+	switch security {
+	case "tls", "reality":
+		profile.Extra["security"] = security
 	}
 
 	if tls := mapFromMap(stream, "tlsSettings"); len(tls) > 0 {
 		applyTLSSettings(profile, tls)
 	}
 	if reality := mapFromMap(stream, "realitySettings"); len(reality) > 0 {
-		profile.Transport = "reality"
 		applyTLSSettings(profile, reality)
 		profile.RealityPubKey = stringFromMap(reality, "publicKey")
 		profile.RealityShortID = stringFromMap(reality, "shortId")
@@ -1354,20 +1350,9 @@ func buildTransport(profile *NodeProfile) (map[string]interface{}, error) {
 		return nil, nil
 
 	case "quic":
-		tp := map[string]interface{}{
-			"type":     "quic",
-			"security": profile.Extra["quic_security"],
-		}
-		if tp["security"] == "" {
-			tp["security"] = "none"
-		}
-		if key, ok := profile.Extra["key"]; ok && key != "" {
-			tp["key"] = key
-		}
-		if headerType, ok := profile.Extra["header_type"]; ok && headerType != "" {
-			tp["header_type"] = headerType
-		}
-		return tp, nil
+		return map[string]interface{}{
+			"type": "quic",
+		}, nil
 
 	case "httpupgrade":
 		tp := map[string]interface{}{
@@ -1380,10 +1365,15 @@ func buildTransport(profile *NodeProfile) (map[string]interface{}, error) {
 			tp["path"] = path
 		}
 		return tp, nil
+
+	case "reality":
+		return nil, nil
 	}
 
-	// "reality", "tcp", or empty -- no separate transport block needed.
-	return nil, nil
+	if profile.Transport == "" {
+		return nil, nil
+	}
+	return nil, fmt.Errorf("renderer: sing-box does not support V2Ray %s transport", profile.Transport)
 }
 
 func buildRoute(cfg *Config) map[string]interface{} {

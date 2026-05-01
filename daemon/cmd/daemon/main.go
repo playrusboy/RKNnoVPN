@@ -2,7 +2,7 @@ package main
 
 import "log"
 
-var Version = "v2.1.6"
+var Version = "v2.1.7"
 
 func main() {
 	if err := runDaemon(parseDaemonOptions()); err != nil {

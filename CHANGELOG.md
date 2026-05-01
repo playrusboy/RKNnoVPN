@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.1.7
+
+- Fixed Reality over gRPC rendering so sing-box gets `transport.type=grpc` together with Reality TLS instead of losing the gRPC transport.
+- Fixed QUIC transport rendering by omitting Xray-only QUIC fields that sing-box does not support.
+- Reject unsupported V2Ray transports such as mKCP explicitly instead of silently rendering them as plain TCP.
+- Synchronized app, daemon, daemonctl, module, and update feed metadata to `v2.1.7`.
+
 ## v2.1.6
 
 - Hardened no-reboot in-app module updates so the old daemon cannot remove the new daemon PID file during live handoff.
