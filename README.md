@@ -13,6 +13,7 @@
 - APK не имеет `INTERNET`: подписки, update-check/download и сетевые диагностики выполняет root-демон через `daemonctl`.
 - APK запрашивает package visibility для локального выбора приложений и audit-подсказок: список установленных приложений читается через Android `PackageManager`, но не отправляется в сеть самим APK.
 - Можно проксировать только выбранные приложения, оставляя остальные напрямую.
+- Можно включить раздачу трафика клиентов хотспота через RKNnoVPN.
 - Сохранённые серверы рендерятся в `sing-box` как отдельные outbounds.
 - Над несколькими серверами используется `urltest`, чтобы `sing-box` выбирал рабочий и быстрый outbound.
 - Поддерживается `arm64-v8a` и `armeabi-v7a`.
@@ -72,7 +73,7 @@ APK вызывает `daemonctl` через `su`. `daemonctl` общается �
 | SOCKS4 / SOCKS5 upstream | поддерживается |
 | Hysteria2 | поддерживается через `sing-box` |
 | TUIC v5 | поддерживается через `sing-box` |
-| WireGuard | запланирован; `sing-box` собирается с `with_wireguard` |
+| WireGuard | поддерживается как `sing-box` outbound без kernel WG-интерфейса |
 | AmneziaWG | отдельный будущий слой, не равен обычному WireGuard |
 
 ## Форматы импорта
@@ -87,6 +88,7 @@ APK вызывает `daemonctl` через `su`. `daemonctl` общается �
 - `hysteria2://`, `hy2://`
 - `tuic://`
 - `vpn://` Amnezia
+- WireGuard `.conf` и encoded WireGuard URI
 - подписки с base64/plain URI list
 - QR-коды
 
@@ -94,8 +96,7 @@ APK вызывает `daemonctl` через `su`. `daemonctl` общается �
 
 - Clash YAML import;
 - sing-box JSON import;
-- v2rayNG backup import;
-- WireGuard `.conf` import.
+- v2rayNG backup import.
 
 ## Выбор серверов и тесты
 
@@ -105,6 +106,8 @@ APK вызывает `daemonctl` через `su`. `daemonctl` общается �
 
 - TCP connect показывает время соединения до адреса сервера.
 - URL delay показывает задержку реального запроса через конкретный outbound, если core уже запущен.
+- Если URL-проба отдаёт тело ответа, UI также показывает измеренную скорость
+  ответа и умеет сортировать nodes по скорости.
 
 Для белых списков важно смотреть не только TCP ping. Низкий ping не гарантирует нормальную скорость: при ограничении со стороны ТСПУ пакет может отвечать быстро, но реальный HTTP/HTTPS response будет идти секунды. Поэтому главная метрика для авто-выбора - URL response / delay, а ping используется как вспомогательная диагностика.
 
@@ -224,9 +227,9 @@ su -c '/data/adb/modules/rknnovpn/bin/daemonctl diagnostics.testNodes'
 
 ## Что пока не готово
 
-- WireGuard import и renderer.
 - AmneziaWG runtime.
-- Полный speed-throttle probe для диагностики второго типа белых списков.
+- Отдельный полный speed-throttle probe для диагностики второго типа белых
+  списков; базовая скорость уже измеряется, если URL-проба отдаёт тело ответа.
 
 ## Лицензия
 
