@@ -1321,14 +1321,8 @@ func buildTransport(profile *NodeProfile) (map[string]interface{}, error) {
 		tp := map[string]interface{}{
 			"type": "grpc",
 		}
-		if sn, ok := profile.Extra["service_name"]; ok {
+		if sn := profile.Extra["service_name"]; sn != "" {
 			tp["service_name"] = sn
-		}
-		if mode, ok := profile.Extra["mode"]; ok {
-			tp["mode"] = mode
-		}
-		if authority, ok := profile.Extra["authority"]; ok {
-			tp["authority"] = authority
 		}
 		return tp, nil
 

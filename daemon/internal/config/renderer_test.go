@@ -543,6 +543,45 @@ func TestRenderSocksOutboundDoesNotInheritTransport(t *testing.T) {
 	}
 }
 
+func TestRenderGRPCTransportOmitsXrayOnlyFields(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = "example.com"
+	cfg.Node.Port = 443
+	cfg.Node.Protocol = "vless"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	cfg.Transport.Protocol = "grpc"
+	cfg.Transport.TLSServer = "google.com"
+	cfg.Transport.Extra = map[string]string{
+		"security":     "reality",
+		"public_key":   "public-key",
+		"short_id":     "short-id",
+		"service_name": "TunService",
+		"mode":         "\ufffd",
+		"authority":    "google.com",
+	}
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	outbound := rendered["outbounds"].([]any)[0].(map[string]any)
+	transport := outbound["transport"].(map[string]any)
+	if transport["type"] != "grpc" || transport["service_name"] != "TunService" {
+		t.Fatalf("unexpected grpc transport: %#v", transport)
+	}
+	if _, ok := transport["mode"]; ok {
+		t.Fatalf("sing-box grpc transport must not render xray mode: %#v", transport)
+	}
+	if _, ok := transport["authority"]; ok {
+		t.Fatalf("sing-box grpc transport must not render xray authority: %#v", transport)
+	}
+}
+
 func TestRenderWireGuardOutboundWithoutKernelInterface(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = "203.0.113.1"

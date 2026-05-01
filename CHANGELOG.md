@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.1.5
+
+- Fixed sing-box config rendering for imported VLESS/Trojan/VMess gRPC nodes by omitting Xray-only gRPC fields (`mode` and `authority`) that sing-box rejects.
+- Added regression coverage for malformed imported gRPC `mode` values so one bad field cannot break sing-box config check.
+- Synchronized app, daemon, daemonctl, module, and update feed metadata to `v2.1.5`.
+
 ## v2.1.4
 
 - Added the standard Magisk installer envelope (`META-INF/com/google/android/update-binary` and `updater-script`) to the module ZIP so Magisk can launch module updates reliably from the Modules tab.
