@@ -145,9 +145,12 @@
     <string name="proxied_count">Через прокси: %d</string>
     <string name="bypassed_count">Напрямую: %d</string>
     <string name="apply">Применить</string>
+    <string name="back">Назад</string>
     <string name="loading_apps">Загрузка приложений…</string>
     <string name="app_picker_mode_disabled">Выбор приложений недоступен в текущем режиме маршрутизации.</string>
     <string name="always_direct_app_label">Всегда напрямую</string>
+    <string name="always_direct_allow_proxy">Проксировать</string>
+    <string name="always_direct_restore">Вернуть напрямую</string>
 
     <!-- Settings -->
     <string name="settings_routing">Маршрутизация</string>
@@ -204,6 +207,9 @@
     <string name="urltest_url">URL для проверки</string>
     <string name="always_direct_apps">Всегда напрямую</string>
     <string name="always_direct_apps_desc">Эти приложения обходят TPROXY и DNS-перехват до маршрутизации.</string>
+    <string name="always_direct_excluded_apps">Можно проксировать</string>
+    <string name="always_direct_excluded_apps_desc">Эти приложения исключены из встроенного списка “всегда напрямую” и снова доступны для маршрутизации через RKNnoVPN.</string>
+    <string name="always_direct_excluded_picker_warning">Выберите приложение, которое нужно убрать из встроенного списка “всегда напрямую”. После этого его можно будет выбрать для прокси как обычное приложение.</string>
     <string name="always_direct_picker_warning">Выберите приложение из установленных на этом устройстве. Оно будет полностью обходить RKNnoVPN: трафик и обычные DNS-запросы не попадут в прокси. Добавляйте сюда только приложения, которым действительно нужен прямой российский выход.</string>
     <string name="always_direct_system_apps">Служебные приложения напрямую</string>
     <string name="always_direct_system_apps_desc">Системные и служебные приложения Android обходят RKNnoVPN.</string>

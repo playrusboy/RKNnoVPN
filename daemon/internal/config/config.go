@@ -155,16 +155,17 @@ type profileNodeValidationConfig struct {
 
 // RoutingConfig controls traffic routing rules.
 type RoutingConfig struct {
-	Mode                   string   `json:"mode"` // "all", "whitelist", "blacklist", "rules", "direct"
-	BypassLAN              bool     `json:"bypass_lan"`
-	BypassChina            bool     `json:"bypass_china"` // matches config.json routing.bypass_china
-	BypassRussia           bool     `json:"bypass_russia"`
-	BlockAds               bool     `json:"block_ads"`
-	CustomDirect           []string `json:"custom_direct"` // domains/IPs to route directly
-	CustomProxy            []string `json:"custom_proxy"`  // domains/IPs to force through proxy
-	CustomBlock            []string `json:"custom_block"`  // domains/IPs to block
-	AlwaysDirectApps       []string `json:"always_direct_apps,omitempty"`
-	AlwaysDirectSystemApps bool     `json:"always_direct_system_apps"`
+	Mode                     string   `json:"mode"` // "all", "whitelist", "blacklist", "rules", "direct"
+	BypassLAN                bool     `json:"bypass_lan"`
+	BypassChina              bool     `json:"bypass_china"` // matches config.json routing.bypass_china
+	BypassRussia             bool     `json:"bypass_russia"`
+	BlockAds                 bool     `json:"block_ads"`
+	CustomDirect             []string `json:"custom_direct"` // domains/IPs to route directly
+	CustomProxy              []string `json:"custom_proxy"`  // domains/IPs to force through proxy
+	CustomBlock              []string `json:"custom_block"`  // domains/IPs to block
+	AlwaysDirectApps         []string `json:"always_direct_apps,omitempty"`
+	AlwaysDirectExcludedApps []string `json:"always_direct_excluded_apps,omitempty"`
+	AlwaysDirectSystemApps   bool     `json:"always_direct_system_apps"`
 }
 
 // AppsConfig controls per-app routing (Android split tunnel).

@@ -312,14 +312,19 @@ func (r *RescueManager) scriptEnv() map[string]string {
 	}
 
 	profileInbounds := r.cfg.ResolveProfileInbounds()
-	appRouting := core.BuildRuntimeAppRoutingEnv(
+	appRouting := core.BuildRuntimeAppRoutingEnvWithExclusions(
 		r.cfg.Apps.Mode,
 		r.cfg.Apps.Packages,
 		r.cfg.Routing.AlwaysDirectApps,
+		r.cfg.Routing.AlwaysDirectExcludedApps,
 		r.cfg.Routing.AlwaysDirectSystemApps,
 		r.cfg.Routing.Mode,
 	)
-	privacyGuardPackages := core.ResolveAlwaysDirectPackageNames(r.cfg.Routing.AlwaysDirectApps, r.cfg.Routing.AlwaysDirectSystemApps)
+	privacyGuardPackages := core.ResolveAlwaysDirectPackageNamesWithExclusions(
+		r.cfg.Routing.AlwaysDirectApps,
+		r.cfg.Routing.AlwaysDirectExcludedApps,
+		r.cfg.Routing.AlwaysDirectSystemApps,
+	)
 	chainProxyPorts, chainProxyUIDs, chainProxyRules := core.BuildChainedProxyProtectionEnv(r.cfg)
 
 	return map[string]string{

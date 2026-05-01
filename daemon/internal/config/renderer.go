@@ -331,13 +331,15 @@ func buildOutbounds(cfg *Config, profile *NodeProfile) ([]map[string]interface{}
 
 	outbounds := []map[string]interface{}{}
 	nodeTags := make([]string, 0, len(nodeProfiles))
-	groupPlans := buildGroupOutboundPlans(nodeProfiles)
 	for index, nodeProfile := range nodeProfiles {
 		if len(nodeProfiles) == 1 {
 			nodeProfile.Tag = "proxy"
 		} else if nodeProfile.Tag == "" {
 			nodeProfile.Tag = fmt.Sprintf("node-%d", index+1)
 		}
+	}
+	groupPlans := buildGroupOutboundPlans(nodeProfiles)
+	for _, nodeProfile := range nodeProfiles {
 		proxyOut, err := buildProxyOutbound(nodeProfile)
 		if err != nil {
 			return nil, err
@@ -1019,6 +1021,10 @@ func applyStreamSettings(profile *NodeProfile, stream map[string]interface{}) {
 	}
 
 	switch network {
+	case "tcp":
+		tcpSettings := mapFromMap(stream, "tcpSettings")
+		header := mapFromMap(tcpSettings, "header")
+		profile.Extra["header_type"] = stringFromMap(header, "type")
 	case "ws":
 		ws := mapFromMap(stream, "wsSettings")
 		profile.Extra["path"] = stringFromMap(ws, "path")
@@ -1350,6 +1356,15 @@ func buildTransport(profile *NodeProfile) (map[string]interface{}, error) {
 		return nil, nil
 
 	case "quic":
+		if security := strings.TrimSpace(profile.Extra["quic_security"]); security != "" && security != "none" {
+			return nil, fmt.Errorf("renderer: sing-box QUIC transport does not support V2Ray QUIC security %q", security)
+		}
+		if key := strings.TrimSpace(profile.Extra["key"]); key != "" {
+			return nil, fmt.Errorf("renderer: sing-box QUIC transport does not support V2Ray QUIC key")
+		}
+		if headerType := strings.TrimSpace(profile.Extra["header_type"]); headerType != "" && headerType != "none" {
+			return nil, fmt.Errorf("renderer: sing-box QUIC transport does not support V2Ray QUIC header type %q", headerType)
+		}
 		return map[string]interface{}{
 			"type": "quic",
 		}, nil

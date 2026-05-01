@@ -76,6 +76,8 @@ data class RoutingConfig(
     val blockIps: List<String> = emptyList(),
     /** Package names that must always bypass RKNnoVPN before TPROXY/DNS interception. */
     val alwaysDirectAppList: List<String> = emptyList(),
+    /** Package names removed from the built-in always-direct policy. */
+    val alwaysDirectExcludedAppList: List<String> = emptyList(),
     /** Route Android system/service apps directly before TPROXY/DNS interception. */
     val alwaysDirectSystemApps: Boolean = true
 )

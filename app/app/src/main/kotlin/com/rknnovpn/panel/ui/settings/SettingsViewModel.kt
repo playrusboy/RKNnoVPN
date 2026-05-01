@@ -97,6 +97,7 @@ data class SettingsUiState(
     val fakeDns: Boolean = false,
     val urlTestUrl: String = "https://www.gstatic.com/generate_204",
     val alwaysDirectPackagesText: String = "",
+    val alwaysDirectExcludedPackagesText: String = "",
     val alwaysDirectSystemApps: Boolean = true,
     val sharingEnabled: Boolean = false,
     val sharingInterfacesText: String = "",
@@ -390,8 +391,11 @@ class SettingsViewModel @Inject constructor(
             if (cleanPackage !in packages) {
                 packages += cleanPackage
             }
+            val excluded = parsePackageList(state.alwaysDirectExcludedPackagesText)
+                .filterNot { it == cleanPackage }
             state.copy(
                 alwaysDirectPackagesText = packages.joinToString("\n"),
+                alwaysDirectExcludedPackagesText = excluded.joinToString("\n"),
                 errorMessage = null,
             )
         }
@@ -405,6 +409,38 @@ class SettingsViewModel @Inject constructor(
                 .filterNot { it == cleanPackage }
             state.copy(
                 alwaysDirectPackagesText = packages.joinToString("\n"),
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun addAlwaysDirectExcludedPackage(packageName: String) {
+        val cleanPackage = packageName.trim()
+        if (cleanPackage.isBlank()) return
+        _uiState.update { state ->
+            val excluded = parsePackageList(state.alwaysDirectExcludedPackagesText)
+                .toMutableList()
+            if (cleanPackage !in excluded) {
+                excluded += cleanPackage
+            }
+            val direct = parsePackageList(state.alwaysDirectPackagesText)
+                .filterNot { it == cleanPackage }
+            state.copy(
+                alwaysDirectPackagesText = direct.joinToString("\n"),
+                alwaysDirectExcludedPackagesText = excluded.joinToString("\n"),
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun removeAlwaysDirectExcludedPackage(packageName: String) {
+        val cleanPackage = packageName.trim()
+        if (cleanPackage.isBlank()) return
+        _uiState.update { state ->
+            val excluded = parsePackageList(state.alwaysDirectExcludedPackagesText)
+                .filterNot { it == cleanPackage }
+            state.copy(
+                alwaysDirectExcludedPackagesText = excluded.joinToString("\n"),
                 errorMessage = null,
             )
         }
@@ -433,10 +469,14 @@ class SettingsViewModel @Inject constructor(
 
     fun applyAlwaysDirectPackages() {
         val packages = parsePackageList(_uiState.value.alwaysDirectPackagesText)
+        val excluded = parsePackageList(_uiState.value.alwaysDirectExcludedPackagesText)
         viewModelScope.launch {
             val ok = profileRepository.updateConfig { config ->
                 config.copy(
-                    routing = config.routing.copy(alwaysDirectAppList = packages),
+                    routing = config.routing.copy(
+                        alwaysDirectAppList = packages,
+                        alwaysDirectExcludedAppList = excluded,
+                    ),
                 )
             }
             if (!ok) {
@@ -876,6 +916,7 @@ class SettingsViewModel @Inject constructor(
                 fakeDns = config.dns.fakeDns,
                 urlTestUrl = config.health.checkUrl,
                 alwaysDirectPackagesText = config.routing.alwaysDirectAppList.joinToString("\n"),
+                alwaysDirectExcludedPackagesText = config.routing.alwaysDirectExcludedAppList.joinToString("\n"),
                 alwaysDirectSystemApps = config.routing.alwaysDirectSystemApps,
                 sharingEnabled = config.sharing.enabled,
                 sharingInterfacesText = config.sharing.interfaces.joinToString("\n"),

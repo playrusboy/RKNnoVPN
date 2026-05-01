@@ -646,7 +646,7 @@ func TestRenderRealityGRPCStoredNodeKeepsGRPCTransport(t *testing.T) {
 	}
 }
 
-func TestRenderQUICTransportOmitsXrayOnlyFields(t *testing.T) {
+func TestRenderQUICTransportAllowsPlainSingBoxQUIC(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = "example.com"
 	cfg.Node.Port = 443
@@ -654,9 +654,8 @@ func TestRenderQUICTransportOmitsXrayOnlyFields(t *testing.T) {
 	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
 	cfg.Transport.Protocol = "quic"
 	cfg.Transport.Extra = map[string]string{
-		"quic_security": "aes-128-gcm",
-		"key":           "secret",
-		"header_type":   "srtp",
+		"quic_security": "none",
+		"header_type":   "none",
 	}
 
 	var rendered map[string]any
@@ -675,6 +674,67 @@ func TestRenderQUICTransportOmitsXrayOnlyFields(t *testing.T) {
 	}
 }
 
+func TestRenderRejectsUnsupportedV2RayQUICFields(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = "example.com"
+	cfg.Node.Port = 443
+	cfg.Node.Protocol = "vless"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	cfg.Transport.Protocol = "quic"
+	cfg.Transport.Extra = map[string]string{
+		"quic_security": "aes-128-gcm",
+		"key":           "secret",
+		"header_type":   "srtp",
+	}
+
+	_, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err == nil || !strings.Contains(err.Error(), "does not support V2Ray QUIC security") {
+		t.Fatalf("expected unsupported quic security error, got %v", err)
+	}
+}
+
+func TestRenderRejectsStoredV2RayQUICFields(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = ""
+	cfg.Node.UUID = ""
+	cfg.Profile.ActiveNodeID = "quic-node"
+	cfg.Profile.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"quic-node",
+			"name":"QUIC",
+			"protocol":"VLESS",
+			"server":"example.com",
+			"port":443,
+			"outbound":{
+				"protocol":"vless",
+				"settings":{
+					"vnext":[{
+						"address":"example.com",
+						"port":443,
+						"users":[{
+							"id":"00000000-0000-0000-0000-000000000000",
+							"encryption":"none"
+						}]
+					}]
+				},
+				"streamSettings":{
+					"network":"quic",
+					"quicSettings":{
+						"security":"aes-128-gcm",
+						"key":"secret",
+						"header_type":"srtp"
+					}
+				}
+			}
+		}`),
+	}
+
+	_, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err == nil || !strings.Contains(err.Error(), "does not support V2Ray QUIC security") {
+		t.Fatalf("expected unsupported stored quic security error, got %v", err)
+	}
+}
+
 func TestRenderRejectsUnsupportedV2RayTransport(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = "example.com"
@@ -686,6 +746,109 @@ func TestRenderRejectsUnsupportedV2RayTransport(t *testing.T) {
 	_, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
 	if err == nil || !strings.Contains(err.Error(), "does not support V2Ray kcp transport") {
 		t.Fatalf("expected unsupported kcp transport error, got %v", err)
+	}
+}
+
+func TestRenderRejectsStoredUnsupportedV2RayTransports(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		network  string
+		settings string
+		want     string
+	}{
+		{
+			name:     "mkcp",
+			network:  "mkcp",
+			settings: `"kcpSettings":{"header_type":"none"}`,
+			want:     "does not support V2Ray mkcp transport",
+		},
+		{
+			name:     "splithttp",
+			network:  "splithttp",
+			settings: `"splithttpSettings":{"path":"/","host":"example.com"}`,
+			want:     "does not support V2Ray splithttp transport",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Node.Address = ""
+			cfg.Node.UUID = ""
+			cfg.Profile.ActiveNodeID = tc.name + "-node"
+			nodeJSON := strings.ReplaceAll(`{
+				"id":"NODE_ID",
+				"name":"Unsupported",
+				"protocol":"VLESS",
+				"server":"example.com",
+				"port":443,
+				"outbound":{
+					"protocol":"vless",
+					"settings":{
+						"vnext":[{
+							"address":"example.com",
+							"port":443,
+							"users":[{
+								"id":"00000000-0000-0000-0000-000000000000",
+								"encryption":"none"
+							}]
+						}]
+					},
+					"streamSettings":{
+						"network":"NETWORK",
+						SETTINGS
+					}
+				}
+			}`, "NODE_ID", cfg.Profile.ActiveNodeID)
+			nodeJSON = strings.ReplaceAll(nodeJSON, "NETWORK", tc.network)
+			nodeJSON = strings.ReplaceAll(nodeJSON, "SETTINGS", tc.settings)
+			cfg.Profile.Nodes = []json.RawMessage{json.RawMessage(nodeJSON)}
+
+			_, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected %q error, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestRenderRejectsStoredV2RayTCPHeaderTransport(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = ""
+	cfg.Node.UUID = ""
+	cfg.Profile.ActiveNodeID = "tcp-header-node"
+	cfg.Profile.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"tcp-header-node",
+			"name":"TCP header",
+			"protocol":"VLESS",
+			"server":"example.com",
+			"port":443,
+			"outbound":{
+				"protocol":"vless",
+				"settings":{
+					"vnext":[{
+						"address":"example.com",
+						"port":443,
+						"users":[{
+							"id":"00000000-0000-0000-0000-000000000000",
+							"encryption":"none"
+						}]
+					}]
+				},
+				"streamSettings":{
+					"network":"tcp",
+					"tcpSettings":{
+						"header":{
+							"type":"http"
+						}
+					}
+				}
+			}
+		}`),
+	}
+
+	_, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err == nil || !strings.Contains(err.Error(), "does not support V2Ray TCP header transport") {
+		t.Fatalf("expected unsupported tcp header error, got %v", err)
 	}
 }
 
@@ -1037,6 +1200,58 @@ func TestRenderPanelNodeGroupsAsSelectorOutbounds(t *testing.T) {
 	groupSelectorTags := groupSelector["outbounds"].([]any)
 	if len(groupSelectorTags) != 3 || groupSelectorTags[0] != "group-europe-auto" || groupSelectorTags[1] != "node-first-node" || groupSelectorTags[2] != "node-second-node" {
 		t.Fatalf("unexpected group selector members: %#v", groupSelectorTags)
+	}
+}
+
+func TestRenderSinglePanelNodeGroupReferencesProxyOutbound(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = ""
+	cfg.Node.UUID = ""
+	cfg.Profile.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"777ac0ee-41ee-4d59-b401-fa817f813d6f",
+			"name":"Only",
+			"group":"Default",
+			"protocol":"SOCKS",
+			"server":"127.0.0.1",
+			"port":1081,
+			"outbound":{
+				"protocol":"socks",
+				"settings":{"address":"127.0.0.1","port":1081,"version":"5"}
+			}
+		}`),
+	}
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	byTag := map[string]map[string]any{}
+	for _, rawOutbound := range rendered["outbounds"].([]any) {
+		outbound := rawOutbound.(map[string]any)
+		if tag, ok := outbound["tag"].(string); ok {
+			byTag[tag] = outbound
+		}
+	}
+
+	if byTag["proxy"] == nil {
+		t.Fatalf("single profile node should render as proxy outbound: %#v", byTag)
+	}
+	if byTag["node-777ac0ee-41ee-4d59-b401-fa817f813d6f"] != nil {
+		t.Fatalf("single profile node must not leave old node tag outbound: %#v", byTag)
+	}
+	groupSelector := byTag["group-default"]
+	if groupSelector == nil {
+		t.Fatalf("expected Default group selector, got %#v", byTag)
+	}
+	groupSelectorTags := groupSelector["outbounds"].([]any)
+	if len(groupSelectorTags) != 1 || groupSelectorTags[0] != "proxy" || groupSelector["default"] != "proxy" {
+		t.Fatalf("single-node group selector must target proxy, got %#v", groupSelector)
 	}
 }
 

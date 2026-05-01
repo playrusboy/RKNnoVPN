@@ -281,6 +281,16 @@ func TestClashRoyaleIsNotBuiltInAlwaysDirect(t *testing.T) {
 	}
 }
 
+func TestBuiltInAlwaysDirectCanBeExcludedByUser(t *testing.T) {
+	excluded := map[string]bool{"ru.sberbankmobile": true}
+	if IsBuiltInAlwaysDirectPackageWithExclusions("ru.sberbankmobile", excluded) {
+		t.Fatal("user exclusion should override built-in always-direct package")
+	}
+	if !IsBuiltInAlwaysDirectPackageWithExclusions("ru.alfabank.mobile.android", excluded) {
+		t.Fatal("unexcluded built-in package should stay always-direct")
+	}
+}
+
 func TestBuildAppRoutingEnvCanHardBypassSystemApps(t *testing.T) {
 	withPackageResolverTestEnv(t, `
 com.example.app 10123 0 /data/user/0/com.example.app default

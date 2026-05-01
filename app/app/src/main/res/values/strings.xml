@@ -145,9 +145,12 @@
     <string name="proxied_count">%d proxied</string>
     <string name="bypassed_count">%d direct</string>
     <string name="apply">Apply</string>
+    <string name="back">Back</string>
     <string name="loading_apps">Loading apps…</string>
     <string name="app_picker_mode_disabled">Per-app selection is unavailable in the current routing mode.</string>
     <string name="always_direct_app_label">Always direct</string>
+    <string name="always_direct_allow_proxy">Allow proxy</string>
+    <string name="always_direct_restore">Keep direct</string>
 
     <!-- Settings -->
     <string name="settings_routing">Routing</string>
@@ -204,6 +207,9 @@
     <string name="urltest_url">URL test endpoint</string>
     <string name="always_direct_apps">Always-direct apps</string>
     <string name="always_direct_apps_desc">These apps bypass TPROXY and DNS interception before routing.</string>
+    <string name="always_direct_excluded_apps">Allowed through proxy</string>
+    <string name="always_direct_excluded_apps_desc">Apps in this list are removed from the built-in always-direct catalogue and can be selected for proxy routing.</string>
+    <string name="always_direct_excluded_picker_warning">Choose an app to remove from the built-in always-direct catalogue. After that it can be routed through RKNnoVPN like a normal app.</string>
     <string name="always_direct_picker_warning">Choose an app installed on this device. It will fully bypass RKNnoVPN: its traffic and classic DNS requests will not go through the proxy. Add only apps that really need a direct Russian route.</string>
     <string name="always_direct_system_apps">System apps direct</string>
     <string name="always_direct_system_apps_desc">Route Android system and service apps outside RKNnoVPN.</string>

@@ -88,10 +88,14 @@ fun SettingsScreen(
     val vpnDetectionUrl = stringResource(R.string.vpn_detection_url)
     val bypassRussiaDisablePhrase = stringResource(R.string.bypass_russia_disable_phrase)
     var showAlwaysDirectAppPicker by remember { mutableStateOf(false) }
+    var showAlwaysDirectExcludedAppPicker by remember { mutableStateOf(false) }
     var showBypassRussiaDisableDialog by remember { mutableStateOf(false) }
     var bypassRussiaDisableConfirmation by remember { mutableStateOf("") }
     val alwaysDirectPackages = remember(state.alwaysDirectPackagesText) {
         parsePackageSelection(state.alwaysDirectPackagesText)
+    }
+    val alwaysDirectExcludedPackages = remember(state.alwaysDirectExcludedPackagesText) {
+        parsePackageSelection(state.alwaysDirectExcludedPackagesText)
     }
 
     LaunchedEffect(state.shareLogsEventId) {
@@ -320,6 +324,39 @@ fun SettingsScreen(
                 }
                 TextButton(
                     onClick = { showAlwaysDirectAppPicker = true },
+                    modifier = Modifier.align(Alignment.Start),
+                ) {
+                    Icon(Icons.Filled.Apps, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.add_app))
+                }
+                Text(
+                    text = stringResource(R.string.always_direct_excluded_apps),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = stringResource(R.string.always_direct_excluded_apps_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (alwaysDirectExcludedPackages.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.no_apps_selected),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Column {
+                        alwaysDirectExcludedPackages.forEach { packageName ->
+                            AppPackageListItem(
+                                packageName = packageName,
+                                onRemove = { viewModel.removeAlwaysDirectExcludedPackage(packageName) },
+                            )
+                        }
+                    }
+                }
+                TextButton(
+                    onClick = { showAlwaysDirectExcludedAppPicker = true },
                     modifier = Modifier.align(Alignment.Start),
                 ) {
                     Icon(Icons.Filled.Apps, contentDescription = null)
@@ -571,6 +608,15 @@ fun SettingsScreen(
             warningText = stringResource(R.string.always_direct_picker_warning),
             onDismiss = { showAlwaysDirectAppPicker = false },
             onSelect = viewModel::addAlwaysDirectPackage,
+        )
+    }
+
+    if (showAlwaysDirectExcludedAppPicker) {
+        AppPackagePickerDialog(
+            title = stringResource(R.string.choose_app),
+            warningText = stringResource(R.string.always_direct_excluded_picker_warning),
+            onDismiss = { showAlwaysDirectExcludedAppPicker = false },
+            onSelect = viewModel::addAlwaysDirectExcludedPackage,
         )
     }
 

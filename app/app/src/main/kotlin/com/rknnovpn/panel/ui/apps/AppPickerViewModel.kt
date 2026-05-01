@@ -30,6 +30,7 @@ private data class RoutingSelection(
     val routingMode: RoutingMode,
     val selectedPackages: Set<String>,
     val alwaysDirectPackages: Set<String>,
+    val alwaysDirectExcludedPackages: Set<String>,
     val alwaysDirectSystemApps: Boolean,
     val appGroupRoutes: Map<String, String>,
     val nodeGroups: List<String>,
@@ -44,6 +45,7 @@ data class AppInfo(
     val isSystemApp: Boolean,
     val isProxied: Boolean = false,
     val isAlwaysDirect: Boolean = false,
+    val isAlwaysDirectExcluded: Boolean = false,
     val nodeGroup: String = "",
 )
 
@@ -195,6 +197,52 @@ class AppPickerViewModel @Inject constructor(
         }
     }
 
+    fun allowAlwaysDirectAppThroughProxy(packageName: String) {
+        val cleanPackage = packageName.trim()
+        if (cleanPackage.isBlank()) return
+        viewModelScope.launch {
+            val ok = profileRepository.updateConfig { config ->
+                val excluded = (config.routing.alwaysDirectExcludedAppList + cleanPackage)
+                    .map(String::trim)
+                    .filter(String::isNotBlank)
+                    .distinct()
+                val direct = config.routing.alwaysDirectAppList
+                    .filterNot { it == cleanPackage }
+                config.copy(
+                    routing = config.routing.copy(
+                        alwaysDirectAppList = direct,
+                        alwaysDirectExcludedAppList = excluded,
+                    ),
+                )
+            }
+            if (!ok) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Failed to exclude always-direct app: $err")
+                _uiState.update { it.copy(errorMessage = err) }
+            }
+        }
+    }
+
+    fun restoreAlwaysDirectApp(packageName: String) {
+        val cleanPackage = packageName.trim()
+        if (cleanPackage.isBlank()) return
+        viewModelScope.launch {
+            val ok = profileRepository.updateConfig { config ->
+                config.copy(
+                    routing = config.routing.copy(
+                        alwaysDirectExcludedAppList = config.routing.alwaysDirectExcludedAppList
+                            .filterNot { it == cleanPackage },
+                    ),
+                )
+            }
+            if (!ok) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Failed to restore always-direct app: $err")
+                _uiState.update { it.copy(errorMessage = err) }
+            }
+        }
+    }
+
     fun applyTemplate(template: AppTemplate) {
         if (!_uiState.value.supportsPerAppSelection) return
         _uiState.update { state ->
@@ -328,6 +376,7 @@ class AppPickerViewModel @Inject constructor(
                         label = label,
                         isSystemApp = isSystem,
                         isAlwaysDirect = isAlwaysDirect,
+                        isAlwaysDirectExcluded = pkg in daemonSelection.alwaysDirectExcludedPackages,
                         nodeGroup = daemonSelection.appGroupRoutes[pkg].orEmpty(),
                         isProxied = if (isAlwaysDirect && daemonSelection.routingMode == RoutingMode.PER_APP_BYPASS) {
                             true
@@ -419,6 +468,7 @@ class AppPickerViewModel @Inject constructor(
                                 )
                                 app.copy(
                                     isAlwaysDirect = isAlwaysDirect,
+                                    isAlwaysDirectExcluded = app.packageName in selection.alwaysDirectExcludedPackages,
                                     nodeGroup = selection.appGroupRoutes[app.packageName].orEmpty(),
                                     isProxied = if (isAlwaysDirect && selection.routingMode == RoutingMode.PER_APP_BYPASS) {
                                         true
@@ -459,6 +509,7 @@ private fun ProfileConfig.toRoutingSelection(): RoutingSelection {
         routingMode,
         selected,
         routing.alwaysDirectAppList.toSet(),
+        routing.alwaysDirectExcludedAppList.toSet(),
         routing.alwaysDirectSystemApps,
         routing.appGroupRoutes,
         nodeGroups,
@@ -470,8 +521,16 @@ private fun isAlwaysDirectApp(
     isSystemApp: Boolean,
     selection: RoutingSelection,
 ): Boolean =
-    (selection.alwaysDirectSystemApps && isSystemApp) ||
-        AlwaysDirectApps.matches(packageName, selection.alwaysDirectPackages)
+    when {
+        packageName in selection.alwaysDirectPackages -> true
+        packageName in selection.alwaysDirectExcludedPackages -> false
+        selection.alwaysDirectSystemApps && isSystemApp -> true
+        else -> AlwaysDirectApps.matches(
+            packageName,
+            selection.alwaysDirectPackages,
+            selection.alwaysDirectExcludedPackages,
+        )
+    }
 
 enum class AppTemplate {
     BROWSERS,

@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.2.0
+
+- Fixed single-node group selector rendering so sing-box no longer references a missing `node-*` outbound from `group-default`.
+- Fixed subscription fetching on Android by loading system and user-added Android CA certificates for daemon-side TLS verification.
+- Added user-editable exclusions from the built-in always-direct app policy so Russian/sensitive apps can be explicitly routed through RKNnoVPN when needed.
+- Improved the app routing screen with an anchored Apply button and per-app controls to proxy or restore built-in always-direct apps.
+- Added an in-app Back button to the Audit screen.
+- Synchronized app, daemon, daemonctl, module, update feed, and bundled script version metadata to `v2.2.0`.
+
 ## v2.1.7
 
 - Fixed Reality over gRPC rendering so sing-box gets `transport.type=grpc` together with Reality TLS instead of losing the gRPC transport.

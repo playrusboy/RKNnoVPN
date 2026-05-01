@@ -30,8 +30,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -65,21 +65,17 @@ fun AppPickerScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     Scaffold(
-        floatingActionButton = {
-            FloatingActionButton(
+        bottomBar = {
+            FilledTonalButton(
                 onClick = viewModel::applySelection,
-                containerColor = if (state.supportsPerAppSelection) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceVariant
-                },
-                contentColor = if (state.supportsPerAppSelection) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                enabled = state.supportsPerAppSelection,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
                 Icon(Icons.Filled.Check, contentDescription = stringResource(R.string.apply))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(R.string.apply))
             }
         },
     ) { innerPadding ->
@@ -271,6 +267,8 @@ fun AppPickerScreen(
                             nodeGroups = state.nodeGroups,
                             onToggle = { viewModel.toggleApp(app.packageName) },
                             onGroupChange = { group -> viewModel.setAppGroup(app.packageName, group) },
+                            onAllowProxy = { viewModel.allowAlwaysDirectAppThroughProxy(app.packageName) },
+                            onRestoreDirect = { viewModel.restoreAlwaysDirectApp(app.packageName) },
                         )
                     }
                 }
@@ -301,6 +299,8 @@ private fun AppRow(
     nodeGroups: List<String>,
     onToggle: () -> Unit,
     onGroupChange: (String) -> Unit,
+    onAllowProxy: () -> Unit,
+    onRestoreDirect: () -> Unit,
 ) {
     var groupMenuExpanded by remember(app.packageName) { mutableStateOf(false) }
     Row(
@@ -335,13 +335,23 @@ private fun AppRow(
                 overflow = TextOverflow.Ellipsis,
             )
             if (app.isAlwaysDirect) {
-                Text(
-                    text = stringResource(R.string.always_direct_app_label),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(R.string.always_direct_app_label),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    TextButton(onClick = onAllowProxy) {
+                        Text(stringResource(R.string.always_direct_allow_proxy))
+                    }
+                }
+            } else if (app.isAlwaysDirectExcluded) {
+                TextButton(onClick = onRestoreDirect) {
+                    Text(stringResource(R.string.always_direct_restore))
+                }
             }
             if (enabled && nodeGroups.isNotEmpty() && !app.isAlwaysDirect) {
                 Box {

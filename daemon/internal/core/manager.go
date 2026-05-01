@@ -1192,14 +1192,19 @@ func (m *CoreManager) scriptEnv() map[string]string {
 	}
 
 	profileInbounds := m.config.ResolveProfileInbounds()
-	appRouting := BuildRuntimeAppRoutingEnv(
+	appRouting := BuildRuntimeAppRoutingEnvWithExclusions(
 		m.config.Apps.Mode,
 		m.config.Apps.Packages,
 		m.config.Routing.AlwaysDirectApps,
+		m.config.Routing.AlwaysDirectExcludedApps,
 		m.config.Routing.AlwaysDirectSystemApps,
 		m.config.Routing.Mode,
 	)
-	privacyGuardPackages := ResolveAlwaysDirectPackageNames(m.config.Routing.AlwaysDirectApps, m.config.Routing.AlwaysDirectSystemApps)
+	privacyGuardPackages := ResolveAlwaysDirectPackageNamesWithExclusions(
+		m.config.Routing.AlwaysDirectApps,
+		m.config.Routing.AlwaysDirectExcludedApps,
+		m.config.Routing.AlwaysDirectSystemApps,
+	)
 	chainProxyPorts, chainProxyUIDs, chainProxyRules := BuildChainedProxyProtectionEnv(m.config)
 
 	return map[string]string{

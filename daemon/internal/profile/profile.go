@@ -40,19 +40,20 @@ type RuntimeConfig struct {
 }
 
 type RoutingConfig struct {
-	Mode                   string            `json:"mode"`
-	BypassRussia           bool              `json:"bypassRussia"`
-	AppProxyList           []string          `json:"appProxyList,omitempty"`
-	AppBypassList          []string          `json:"appBypassList,omitempty"`
-	AppGroupRoutes         map[string]string `json:"appGroupRoutes,omitempty"`
-	DirectDomains          []string          `json:"directDomains,omitempty"`
-	ProxyDomains           []string          `json:"proxyDomains,omitempty"`
-	BlockDomains           []string          `json:"blockDomains,omitempty"`
-	DirectIps              []string          `json:"directIps,omitempty"`
-	ProxyIps               []string          `json:"proxyIps,omitempty"`
-	BlockIps               []string          `json:"blockIps,omitempty"`
-	AlwaysDirectAppList    []string          `json:"alwaysDirectAppList,omitempty"`
-	AlwaysDirectSystemApps bool              `json:"alwaysDirectSystemApps"`
+	Mode                        string            `json:"mode"`
+	BypassRussia                bool              `json:"bypassRussia"`
+	AppProxyList                []string          `json:"appProxyList,omitempty"`
+	AppBypassList               []string          `json:"appBypassList,omitempty"`
+	AppGroupRoutes              map[string]string `json:"appGroupRoutes,omitempty"`
+	DirectDomains               []string          `json:"directDomains,omitempty"`
+	ProxyDomains                []string          `json:"proxyDomains,omitempty"`
+	BlockDomains                []string          `json:"blockDomains,omitempty"`
+	DirectIps                   []string          `json:"directIps,omitempty"`
+	ProxyIps                    []string          `json:"proxyIps,omitempty"`
+	BlockIps                    []string          `json:"blockIps,omitempty"`
+	AlwaysDirectAppList         []string          `json:"alwaysDirectAppList,omitempty"`
+	AlwaysDirectExcludedAppList []string          `json:"alwaysDirectExcludedAppList,omitempty"`
+	AlwaysDirectSystemApps      bool              `json:"alwaysDirectSystemApps"`
 }
 
 type DNSConfig struct {
@@ -489,16 +490,17 @@ func routingFromConfig(cfg *config.Config) RoutingConfig {
 	proxyDomains, proxyIps := splitRoutingRuleInputs(cfg.Routing.CustomProxy)
 	blockDomains, blockIps := splitRoutingRuleInputs(cfg.Routing.CustomBlock)
 	routing := RoutingConfig{
-		AppGroupRoutes:         map[string]string{},
-		DirectDomains:          directDomains,
-		ProxyDomains:           proxyDomains,
-		BlockDomains:           blockDomains,
-		DirectIps:              directIps,
-		ProxyIps:               proxyIps,
-		BlockIps:               blockIps,
-		AlwaysDirectAppList:    append([]string(nil), cfg.Routing.AlwaysDirectApps...),
-		AlwaysDirectSystemApps: cfg.Routing.AlwaysDirectSystemApps,
-		BypassRussia:           cfg.Routing.BypassRussia,
+		AppGroupRoutes:              map[string]string{},
+		DirectDomains:               directDomains,
+		ProxyDomains:                proxyDomains,
+		BlockDomains:                blockDomains,
+		DirectIps:                   directIps,
+		ProxyIps:                    proxyIps,
+		BlockIps:                    blockIps,
+		AlwaysDirectAppList:         append([]string(nil), cfg.Routing.AlwaysDirectApps...),
+		AlwaysDirectExcludedAppList: append([]string(nil), cfg.Routing.AlwaysDirectExcludedApps...),
+		AlwaysDirectSystemApps:      cfg.Routing.AlwaysDirectSystemApps,
+		BypassRussia:                cfg.Routing.BypassRussia,
 	}
 	for key, value := range cfg.Apps.AppGroups {
 		routing.AppGroupRoutes[key] = value
@@ -525,6 +527,7 @@ func applyRoutingToConfig(cfg *config.Config, routing RoutingConfig) {
 	cfg.Routing.CustomProxy = mergeRoutingRuleInputs(routing.ProxyDomains, routing.ProxyIps)
 	cfg.Routing.CustomBlock = mergeRoutingRuleInputs(routing.BlockDomains, routing.BlockIps)
 	cfg.Routing.AlwaysDirectApps = append([]string(nil), routing.AlwaysDirectAppList...)
+	cfg.Routing.AlwaysDirectExcludedApps = append([]string(nil), routing.AlwaysDirectExcludedAppList...)
 	cfg.Routing.AlwaysDirectSystemApps = routing.AlwaysDirectSystemApps
 	cfg.Routing.BypassRussia = routing.BypassRussia
 	cfg.Apps.AppGroups = map[string]string{}

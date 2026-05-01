@@ -391,10 +391,15 @@ func ResolvePackageUIDsDetailed(packages []string) PackageUIDResolution {
 // ResolveAlwaysDirectUIDsDetailed resolves user-configured and built-in
 // packages that must bypass RKNnoVPN, with structured diagnostics.
 func ResolveAlwaysDirectUIDsDetailed(packages []string, includeSystemApps bool) PackageUIDResolution {
+	return ResolveAlwaysDirectUIDsDetailedWithExclusions(packages, nil, includeSystemApps)
+}
+
+func ResolveAlwaysDirectUIDsDetailedWithExclusions(packages []string, excludedPackages []string, includeSystemApps bool) PackageUIDResolution {
 	userPackages := packageSet(packages)
+	excluded := packageSet(excludedPackages)
 	systemPackages, systemErrors := loadSystemPackageSet(includeSystemApps)
 	result := resolvePackageUIDsFromSources(joinUniqueStringSlices(userPackages.values(), systemPackages.values()), func(pkgName string) bool {
-		return userPackages[pkgName] || systemPackages[pkgName] || IsBuiltInAlwaysDirectPackage(pkgName)
+		return userPackages[pkgName] || (!excluded[pkgName] && systemPackages[pkgName]) || IsBuiltInAlwaysDirectPackageWithExclusions(pkgName, excluded)
 	}, false)
 	result.Errors = append(result.Errors, systemErrors...)
 	return result
@@ -404,7 +409,12 @@ func ResolveAlwaysDirectUIDsDetailed(packages []string, includeSystemApps bool) 
 // treated as privacy-sensitive and kept out of RKNnoVPN. The result is used for
 // OS-level privacy guards where package names, not UIDs, are the control plane.
 func ResolveAlwaysDirectPackageNames(packages []string, includeSystemApps bool) []string {
+	return ResolveAlwaysDirectPackageNamesWithExclusions(packages, nil, includeSystemApps)
+}
+
+func ResolveAlwaysDirectPackageNamesWithExclusions(packages []string, excludedPackages []string, includeSystemApps bool) []string {
 	userPackages := packageSet(packages)
+	excluded := packageSet(excludedPackages)
 	systemPackages, _ := loadSystemPackageSet(includeSystemApps)
 	seen := make(map[string]bool)
 	result := make([]string, 0)
@@ -425,7 +435,7 @@ func ResolveAlwaysDirectPackageNames(packages []string, includeSystemApps bool) 
 			continue
 		}
 		for pkgName := range catalog.uids {
-			if userPackages[pkgName] || systemPackages[pkgName] || IsBuiltInAlwaysDirectPackage(pkgName) {
+			if userPackages[pkgName] || (!excluded[pkgName] && systemPackages[pkgName]) || IsBuiltInAlwaysDirectPackageWithExclusions(pkgName, excluded) {
 				add(pkgName)
 			}
 		}
@@ -438,15 +448,20 @@ func ResolveAlwaysDirectPackageNames(packages []string, includeSystemApps bool) 
 // BuildPackageRoutingResolution resolves both app-routing package sets from a
 // shared source probe for diagnostics report.
 func BuildPackageRoutingResolution(packages []string, alwaysDirectPackages []string, includeSystemApps bool) PackageRoutingResolution {
+	return BuildPackageRoutingResolutionWithExclusions(packages, alwaysDirectPackages, nil, includeSystemApps)
+}
+
+func BuildPackageRoutingResolutionWithExclusions(packages []string, alwaysDirectPackages []string, excludedPackages []string, includeSystemApps bool) PackageRoutingResolution {
 	catalogs := loadPackageUIDCatalogs(true)
 	selectedWanted := packageSet(packages)
 	alwaysWanted := packageSet(alwaysDirectPackages)
+	excluded := packageSet(excludedPackages)
 	systemWanted, systemErrors := loadSystemPackageSet(includeSystemApps)
 	selected := resolvePackageUIDsFromCatalogs(catalogs, selectedWanted.values(), func(pkgName string) bool {
 		return selectedWanted[pkgName]
 	})
 	alwaysDirect := resolvePackageUIDsFromCatalogs(catalogs, joinUniqueStringSlices(alwaysWanted.values(), systemWanted.values()), func(pkgName string) bool {
-		return alwaysWanted[pkgName] || systemWanted[pkgName] || IsBuiltInAlwaysDirectPackage(pkgName)
+		return alwaysWanted[pkgName] || (!excluded[pkgName] && systemWanted[pkgName]) || IsBuiltInAlwaysDirectPackageWithExclusions(pkgName, excluded)
 	})
 	errors := sourceErrors(catalogs)
 	errors = append(errors, systemErrors...)
@@ -472,8 +487,12 @@ type AppRoutingEnv struct {
 // BuildAppRoutingEnv resolves package names into unambiguous UID sets for
 // proxy, direct and hard-bypass traffic.
 func BuildAppRoutingEnv(mode string, packages []string, alwaysDirectPackages []string, includeSystemApps bool) AppRoutingEnv {
+	return BuildAppRoutingEnvWithExclusions(mode, packages, alwaysDirectPackages, nil, includeSystemApps)
+}
+
+func BuildAppRoutingEnvWithExclusions(mode string, packages []string, alwaysDirectPackages []string, excludedPackages []string, includeSystemApps bool) AppRoutingEnv {
 	appMode := MapAppMode(mode)
-	alwaysDirectUIDs := ResolveAlwaysDirectUIDsDetailed(alwaysDirectPackages, includeSystemApps).UIDString
+	alwaysDirectUIDs := ResolveAlwaysDirectUIDsDetailedWithExclusions(alwaysDirectPackages, excludedPackages, includeSystemApps).UIDString
 	env := AppRoutingEnv{
 		AppMode:    appMode,
 		BypassUIDs: joinUniqueFields(networkStackUID, alwaysDirectUIDs),
@@ -505,8 +524,12 @@ func BuildAppRoutingEnv(mode string, packages []string, alwaysDirectPackages []s
 // full runtime config. Routing "direct" is a hard bypass: no app traffic or DNS
 // should be intercepted even if the persisted split-tunnel app mode is stale.
 func BuildRuntimeAppRoutingEnv(appMode string, packages []string, alwaysDirectPackages []string, includeSystemApps bool, routingMode string) AppRoutingEnv {
+	return BuildRuntimeAppRoutingEnvWithExclusions(appMode, packages, alwaysDirectPackages, nil, includeSystemApps, routingMode)
+}
+
+func BuildRuntimeAppRoutingEnvWithExclusions(appMode string, packages []string, alwaysDirectPackages []string, excludedPackages []string, includeSystemApps bool, routingMode string) AppRoutingEnv {
 	if strings.EqualFold(strings.TrimSpace(routingMode), "direct") {
-		alwaysDirectUIDs := ResolveAlwaysDirectUIDsDetailed(alwaysDirectPackages, includeSystemApps).UIDString
+		alwaysDirectUIDs := ResolveAlwaysDirectUIDsDetailedWithExclusions(alwaysDirectPackages, excludedPackages, includeSystemApps).UIDString
 		return AppRoutingEnv{
 			AppMode:    "off",
 			BypassUIDs: joinUniqueFields(networkStackUID, alwaysDirectUIDs),
@@ -514,12 +537,19 @@ func BuildRuntimeAppRoutingEnv(appMode string, packages []string, alwaysDirectPa
 			DNSMode:    "off",
 		}
 	}
-	return BuildAppRoutingEnv(appMode, packages, alwaysDirectPackages, includeSystemApps)
+	return BuildAppRoutingEnvWithExclusions(appMode, packages, alwaysDirectPackages, excludedPackages, includeSystemApps)
 }
 
 // IsBuiltInAlwaysDirectPackage reports whether a package is part of the
 // built-in hard-direct policy for sensitive apps and network clients.
 func IsBuiltInAlwaysDirectPackage(pkgName string) bool {
+	return IsBuiltInAlwaysDirectPackageWithExclusions(pkgName, nil)
+}
+
+func IsBuiltInAlwaysDirectPackageWithExclusions(pkgName string, excludedPackages map[string]bool) bool {
+	if excludedPackages[pkgName] {
+		return false
+	}
 	if builtInAlwaysDirectExclusions[pkgName] {
 		return false
 	}

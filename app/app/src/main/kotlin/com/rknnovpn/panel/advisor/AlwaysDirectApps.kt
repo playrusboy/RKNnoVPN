@@ -206,9 +206,14 @@ object AlwaysDirectApps {
         "tun2socks",
     )
 
-    fun matches(packageName: String, manualPackages: Set<String> = emptySet()): Boolean {
-        if (packageName in manualPackages || packageName in exactPackages) return true
+    fun matches(
+        packageName: String,
+        manualPackages: Set<String> = emptySet(),
+        excludedPackages: Set<String> = emptySet(),
+    ): Boolean {
+        if (packageName in manualPackages) return true
         if (packageName in excludedPackages) return false
+        if (packageName in exactPackages) return true
         if (prefixes.any(packageName::startsWith)) return true
         val lower = packageName.lowercase()
         return keywords.any(lower::contains)

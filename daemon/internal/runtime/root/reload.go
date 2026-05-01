@@ -33,10 +33,11 @@ func BuildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 	}
 	apiPort := cfg.Proxy.APIPort
 	profileInbounds := cfg.ResolveProfileInbounds()
-	appRouting := core.BuildRuntimeAppRoutingEnv(
+	appRouting := core.BuildRuntimeAppRoutingEnvWithExclusions(
 		cfg.Apps.Mode,
 		cfg.Apps.Packages,
 		cfg.Routing.AlwaysDirectApps,
+		cfg.Routing.AlwaysDirectExcludedApps,
 		cfg.Routing.AlwaysDirectSystemApps,
 		cfg.Routing.Mode,
 	)

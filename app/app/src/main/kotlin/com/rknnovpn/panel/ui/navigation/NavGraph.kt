@@ -38,7 +38,9 @@ fun NavGraph(
             )
         }
         composable(AUDIT_ROUTE) {
-            AuditScreen()
+            AuditScreen(
+                onNavigateBack = { navController.popBackStack() },
+            )
         }
     }
 }
