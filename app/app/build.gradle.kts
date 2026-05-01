@@ -20,8 +20,8 @@ android {
         applicationId = "com.rknnovpn.panel"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2206
-        versionName = "v2.2.6"
+        versionCode = 2208
+        versionName = "v2.2.8"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -116,4 +116,6 @@ dependencies {
     // Debug tooling
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    testImplementation("junit:junit:4.13.2")
 }

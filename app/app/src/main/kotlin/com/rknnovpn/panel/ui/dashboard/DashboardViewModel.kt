@@ -1,5 +1,6 @@
 package com.rknnovpn.panel.ui.dashboard
 
+import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -10,6 +11,7 @@ import com.rknnovpn.panel.model.DaemonConnectionState
 import com.rknnovpn.panel.model.DaemonStatus
 import com.rknnovpn.panel.model.Node
 import com.rknnovpn.panel.model.ProfileConfig
+import com.rknnovpn.panel.model.RuntimeOperationResult
 import com.rknnovpn.panel.model.TrafficStats
 import com.rknnovpn.panel.repository.CommandOutcome
 import com.rknnovpn.panel.repository.ProfileRepository
@@ -55,6 +57,7 @@ data class DashboardUiState(
 
 private const val TRAFFIC_HISTORY_SIZE = 120
 private const val TAG = "DashboardViewModel"
+private const val INITIAL_BOOT_ERROR_SUPPRESSION_MS = 180_000L
 
 /** Peak rate used to normalize sparkline samples. */
 private const val PEAK_RATE_FOR_NORMALIZATION = 10_000_000f // 10 MB/s
@@ -72,6 +75,8 @@ class DashboardViewModel @Inject constructor(
     /** Mutable ring buffer backing the sparkline. */
     private val _trafficRing = ArrayDeque<Float>(TRAFFIC_HISTORY_SIZE)
     private var latestStatus: DaemonStatus? = null
+    private val appStartedAtEpochSeconds = System.currentTimeMillis() / 1000
+    private var userRequestedRuntimeOperation = false
 
     init {
         observeDaemonStatus()
@@ -128,6 +133,7 @@ class DashboardViewModel @Inject constructor(
             }
             return
         }
+        userRequestedRuntimeOperation = true
         _uiState.update {
             it.copy(
                 runtimeActionActive = true,
@@ -188,6 +194,7 @@ class DashboardViewModel @Inject constructor(
                 }
                 return@launch
             }
+            userRequestedRuntimeOperation = true
             _uiState.update {
                 it.copy(
                     connectionState = ConnectionState.CONNECTING,
@@ -218,6 +225,7 @@ class DashboardViewModel @Inject constructor(
 
     private fun disconnect() {
         viewModelScope.launch {
+            userRequestedRuntimeOperation = true
             _uiState.update {
                 it.copy(
                     connectionState = ConnectionState.CONNECTING,
@@ -293,7 +301,11 @@ class DashboardViewModel @Inject constructor(
         viewModelScope.launch {
             statusRepository.lastPollError.collect { pollError ->
                 if (pollError != null) {
-                    _uiState.update { it.copy(errorMessage = pollError) }
+                    if (shouldSuppressInitialPollError()) {
+                        Log.d(TAG, "Suppressing initial boot poll error: $pollError")
+                    } else {
+                        _uiState.update { it.copy(errorMessage = pollError) }
+                    }
                 }
             }
         }
@@ -340,14 +352,25 @@ class DashboardViewModel @Inject constructor(
                 status.health.lastUserMessage,
                 status.health.stageReport,
             )
-            val lastOperationFailure = status.lastOperation
+            val lastFailedOperation = status.lastOperation
                 ?.takeIf { operation -> !operation.succeeded && status.activeOperation == null }
-                ?.let { operation ->
-                    messages.formatOperationFailure(
-                        operation.kind.operationNameRes(),
-                        operation.errorMessage.ifBlank { operation.errorCode },
-                    )
-                }
+            val lastOperationFailure = lastFailedOperation?.let { operation ->
+                messages.formatOperationFailure(
+                    operation.kind.operationNameRes(),
+                    operation.errorMessage.ifBlank { operation.errorCode },
+                )
+            }
+            val visibleLastOperationFailure = if (
+                lastFailedOperation != null &&
+                shouldShowLastOperationFailure(status, lastFailedOperation)
+            ) {
+                lastOperationFailure
+            } else {
+                null
+            }
+            val hideStaleStatusError = status.state == ConnectionState.ERROR &&
+                lastFailedOperation != null &&
+                !shouldShowLastOperationFailure(status, lastFailedOperation)
             val activeOperationStuckMessage = status.activeOperation
                 ?.takeIf { operation -> operation.stuck }
                 ?.let { operation ->
@@ -378,15 +401,15 @@ class DashboardViewModel @Inject constructor(
                 errorMessage = when {
                     activeOperationStuckMessage != null -> activeOperationStuckMessage
                     operationalDegraded -> null
-                    lastOperationFailure != null -> lastOperationFailure
-                    status.state == ConnectionState.ERROR -> healthIssueMessage
+                    visibleLastOperationFailure != null -> visibleLastOperationFailure
+                    status.state == ConnectionState.ERROR && !hideStaleStatusError -> healthIssueMessage
                     else -> null
                 },
                 statusMessage = if (
                     activeOperationStuckMessage == null &&
                     !operationalDegraded &&
-                    lastOperationFailure == null &&
-                    status.state != ConnectionState.ERROR &&
+                    visibleLastOperationFailure == null &&
+                    (status.state != ConnectionState.ERROR || hideStaleStatusError) &&
                     status.activeOperation == null
                 ) {
                     it.statusMessage
@@ -396,6 +419,24 @@ class DashboardViewModel @Inject constructor(
             )
         }
     }
+
+    private fun shouldShowLastOperationFailure(
+        status: DaemonStatus,
+        operation: RuntimeOperationResult,
+    ): Boolean = DashboardErrorPolicy.shouldShowLastOperationFailure(
+        status = status,
+        operation = operation,
+        userRequestedRuntimeOperation = userRequestedRuntimeOperation,
+        appStartedAtEpochSeconds = appStartedAtEpochSeconds,
+    )
+
+    private fun shouldSuppressInitialPollError(): Boolean =
+        DashboardErrorPolicy.shouldSuppressInitialPollError(
+            latestStatus = latestStatus,
+            userRequestedRuntimeOperation = userRequestedRuntimeOperation,
+            deviceUptimeMs = SystemClock.elapsedRealtime(),
+            initialBootErrorSuppressionMs = INITIAL_BOOT_ERROR_SUPPRESSION_MS,
+        )
 
     private fun formatStuckOperation(stepDetail: String, step: String): String {
         val currentStep = stepDetail.ifBlank { step }.trim()

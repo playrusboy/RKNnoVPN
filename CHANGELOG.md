@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.2.8
+
+- Suppressed early Dashboard daemon/module poll errors during the first boot window before the daemon reports its first successful status.
+- Ignored stale failed runtime operations from a previous APK process when the user has not requested a new runtime action.
+- Fixed app routing copy for "Proxy apps as processes" in English and Russian.
+- Fixed sing-box DNS rendering so direct/bootstrap DNS servers no longer detour through a missing `direct` outbound.
+- Sped up module boot cleanup by using `pidof` for daemon process discovery.
+- Synchronized app, daemon, daemonctl, module, update feed, and bundled script version metadata to `v2.2.8`.
+
 ## v2.2.6
 
 - Fixed VLESS subscription imports so WebSocket, gRPC, HTTP, HTTPUpgrade, and XHTTP transport settings are preserved instead of silently falling back to incomplete transport configs.

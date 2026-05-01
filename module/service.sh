@@ -262,6 +262,27 @@ sleep "$SETTLE_DELAY"
 
 first_pid_by_cmd_path() {
     wanted="$1"
+    wanted_name="${wanted##*/}"
+
+    if command -v pidof >/dev/null 2>&1; then
+        for pid in $(pidof "$wanted_name" 2>/dev/null); do
+            [ "$pid" = "$$" ] && continue
+            [ -r "/proc/$pid/cmdline" ] || continue
+            cmd="$(tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null)"
+            case "$cmd" in
+                *"$wanted"*)
+                    echo "$pid"
+                    return 0
+                    ;;
+            esac
+        done
+    fi
+
+    case "$wanted_name" in
+        *.sh) ;;
+        *) return 1 ;;
+    esac
+
     for p in /proc/[0-9]*; do
         pid="${p##*/}"
         [ "$pid" = "$$" ] && continue

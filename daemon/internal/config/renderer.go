@@ -100,7 +100,6 @@ func buildDNS(cfg *Config, profile *NodeProfile) map[string]interface{} {
 			"type":   "udp",
 			"tag":    "bootstrap-dns",
 			"server": cfg.DNS.BootstrapIP,
-			"detour": "direct",
 		},
 	}
 
@@ -209,7 +208,7 @@ func buildDNSServer(tag, address, detour string) map[string]interface{} {
 	server := map[string]interface{}{
 		"tag": tag,
 	}
-	if detour != "" {
+	if detour != "" && detour != "direct" {
 		server["detour"] = detour
 	}
 

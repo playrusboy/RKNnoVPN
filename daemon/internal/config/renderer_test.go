@@ -56,8 +56,8 @@ func TestRenderSingboxConfigAvoidsRemovedSingBox113Fields(t *testing.T) {
 				t.Fatalf("default remote DNS must detour through proxy: %#v", server)
 			}
 		case "direct-dns", "bootstrap-dns":
-			if server["detour"] != "direct" {
-				t.Fatalf("direct/bootstrap DNS must explicitly detour direct: %#v", server)
+			if _, ok := server["detour"]; ok {
+				t.Fatalf("direct/bootstrap DNS must not detour to empty direct outbound: %#v", server)
 			}
 		}
 	}
@@ -156,8 +156,10 @@ func TestRenderXHTTPProfileRoutesRemoteDNSDirect(t *testing.T) {
 	}
 	for _, rawServer := range rendered["dns"].(map[string]any)["servers"].([]any) {
 		server := rawServer.(map[string]any)
-		if server["tag"] == "remote-dns" && server["detour"] != "direct" {
-			t.Fatalf("xhttp sidecar remote DNS must avoid depending on the same proxy: %#v", server)
+		if server["tag"] == "remote-dns" {
+			if _, ok := server["detour"]; ok {
+				t.Fatalf("xhttp sidecar remote DNS must avoid empty direct detour: %#v", server)
+			}
 		}
 	}
 }

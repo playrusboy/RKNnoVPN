@@ -138,7 +138,7 @@
     <string name="app_picker_title">Per-app proxy</string>
     <string name="app_picker_banner">Selected apps are fully proxied as Android processes. Everything else connects directly.</string>
     <string name="app_picker_banner_bypass">Selected apps connect directly. Everything else routes through proxy.</string>
-    <string name="app_picker_banner_rules">Selected apps are forced through proxy before domain/IP rule-sets are evaluated.</string>
+    <string name="app_picker_banner_rules">Selected apps are fully proxied as Android processes. This takes priority over domain/IP rule-sets.</string>
     <string name="app_picker_banner_disabled">App process rules are inactive for the current routing mode. Enable app proxy mode or switch Routing to Rule-sets in Settings.</string>
     <string name="enable_app_proxy_mode">Enable app proxy mode</string>
     <string name="template_browsers">Browsers</string>
@@ -169,7 +169,7 @@
     <string name="routing_direct">Direct</string>
     <string name="app_process_proxy_title">Proxy apps as processes</string>
     <string name="app_process_proxy_desc">Open the app list to choose Android packages that should be fully proxied.</string>
-    <string name="app_process_proxy_desc_rules">In Rule-sets mode, selected packages are forced through proxy before geo/domain/IP rules.</string>
+    <string name="app_process_proxy_desc_rules">Choose Android apps whose traffic should be fully proxied. In Rule-sets mode, this process-level choice takes priority over geo/domain/IP rules.</string>
     <string name="app_process_proxy_open">Choose apps</string>
     <string name="routing_rule_editor">Rule-sets and custom rules</string>
     <string name="routing_rule_editor_desc">Rule-sets mode uses built-in geo/ad SRS rule-sets plus these custom domain/IP rules. Direct rules bypass the proxy, proxy rules force RKNnoVPN, and block rules reject traffic.</string>
