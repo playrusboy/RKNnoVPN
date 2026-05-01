@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.1.4
+
+- Added the standard Magisk installer envelope (`META-INF/com/google/android/update-binary` and `updater-script`) to the module ZIP so Magisk can launch module updates reliably from the Modules tab.
+- Added release manifest checks that require the Magisk installer envelope in future release ZIPs.
+- Synchronized app, daemon, daemonctl, module, and update feed metadata to `v2.1.4`.
+
 ## v2.1.3
 
 - Show a reboot-required state when KernelSU/APatch has staged the module install or update but has not applied it yet.

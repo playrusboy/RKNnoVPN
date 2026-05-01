@@ -46,6 +46,8 @@ expected_code="$(version_code "$daemon_version")"
 [ "$update_code" = "$expected_code" ] || fail "update.json versionCode $update_code does not match expected $expected_code"
 
 for required in \
+  module/META-INF/com/google/android/update-binary \
+  module/META-INF/com/google/android/updater-script \
   module/scripts/lib/rknnovpn_env.sh \
   module/scripts/lib/rknnovpn_install.sh \
   module/scripts/lib/rknnovpn_installer_flow.sh \
@@ -62,6 +64,14 @@ for required in \
   module/uninstall.sh; do
   [ -f "$required" ] || fail "required module file missing: $required"
 done
+
+if [ "$(tr -d '\r\n' < module/META-INF/com/google/android/updater-script)" != "#MAGISK" ]; then
+  fail "Magisk updater-script must contain only #MAGISK"
+fi
+
+if ! grep -q 'install_module' module/META-INF/com/google/android/update-binary; then
+  fail "Magisk update-binary must invoke install_module"
+fi
 
 expected_zip="https://github.com/youtubediscord/RKNnoVPN/releases/download/${daemon_version}/rknnovpn-${daemon_version}-module.zip"
 expected_changelog="https://github.com/youtubediscord/RKNnoVPN/releases/tag/${daemon_version}"
