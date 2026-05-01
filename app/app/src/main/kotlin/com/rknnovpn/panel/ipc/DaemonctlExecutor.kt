@@ -100,14 +100,16 @@ class DaemonctlExecutor @Inject constructor() {
             val result = withTimeoutOrNull(timeoutMs) {
                 executeRaw(method, params)
             }
+            val checkedResult = withModuleInstallStateHint(result ?: DaemonctlResult.Timeout(timeoutMs, method))
             if (
                 allowModuleRepair &&
-                result is DaemonctlResult.DaemonUnavailable &&
-                triggerModuleDaemonRepair(result.reason)
+                checkedResult is DaemonctlResult.DaemonUnavailable &&
+                isRepairableDaemonUnavailable(checkedResult.reason) &&
+                triggerModuleDaemonRepair(checkedResult.reason)
             ) {
                 return@withContext retryAfterModuleDaemonRepair(method, params, timeoutMs)
             }
-            result ?: DaemonctlResult.Timeout(timeoutMs, method)
+            checkedResult
         } catch (e: Exception) {
             Log.e(TAG, "execute($method) failed unexpectedly", e)
             DaemonctlResult.UnexpectedError(e)
@@ -291,6 +293,74 @@ class DaemonctlExecutor @Inject constructor() {
             false
         } finally {
             terminateProcess(process, "app repair launch")
+        }
+    }
+
+    private fun isRepairableDaemonUnavailable(reason: String): Boolean {
+        val text = reason.lowercase()
+        return !text.contains("reboot required") &&
+            !text.contains("module is disabled") &&
+            !text.contains("module is marked for removal") &&
+            !text.contains("service.sh is missing")
+    }
+
+    private fun withModuleInstallStateHint(result: DaemonctlResult): DaemonctlResult {
+        if (result !is DaemonctlResult.DaemonUnavailable && result !is DaemonctlResult.DaemonNotFound) {
+            return result
+        }
+        return when (probeModuleInstallState()) {
+            "pending_update" -> DaemonctlResult.DaemonUnavailable(
+                "module update is staged; reboot required"
+            )
+            "pending_remove" -> DaemonctlResult.DaemonUnavailable(
+                "module is marked for removal; reboot required"
+            )
+            "disabled" -> DaemonctlResult.DaemonUnavailable("module is disabled")
+            "missing" -> DaemonctlResult.DaemonNotFound(daemonctlPath)
+            "service_missing" -> DaemonctlResult.DaemonUnavailable("service.sh is missing")
+            "daemonctl_missing" -> DaemonctlResult.DaemonNotFound(daemonctlPath)
+            else -> result
+        }
+    }
+
+    private fun probeModuleInstallState(): String {
+        val commandString = """
+            if [ -d /data/adb/modules_update/rknnovpn ] ||
+               [ -d /data/adb/ksu/modules_update/rknnovpn ] ||
+               [ -d /data/adb/ap/modules_update/rknnovpn ]; then
+              echo pending_update
+            elif [ -e /data/adb/modules/rknnovpn/remove ]; then
+              echo pending_remove
+            elif [ -e /data/adb/modules/rknnovpn/disable ]; then
+              echo disabled
+            elif [ ! -e /data/adb/modules/rknnovpn ]; then
+              echo missing
+            elif [ ! -x /data/adb/modules/rknnovpn/service.sh ]; then
+              echo service_missing
+            elif [ ! -x /data/adb/modules/rknnovpn/bin/daemonctl ]; then
+              echo daemonctl_missing
+            else
+              echo active
+            fi
+        """.trimIndent()
+        var process: Process? = null
+        return try {
+            process = startRootProcess(commandString)
+            if (!process.waitFor(1, TimeUnit.SECONDS)) {
+                terminateProcess(process, "module state probe timeout")
+                return "unknown"
+            }
+            readStreamSafely(process.inputStream, "module-state-stdout")
+                .lineSequence()
+                .firstOrNull()
+                ?.trim()
+                .orEmpty()
+                .ifBlank { "unknown" }
+        } catch (e: Exception) {
+            Log.d(TAG, "Module install state probe failed: ${e.message}")
+            "unknown"
+        } finally {
+            terminateProcess(process, "module state probe")
         }
     }
 

@@ -165,6 +165,26 @@ create_directory_structure() {
     ui_print "  [*] Directories created under ${RKNNOVPN_DIR}/"
 }
 
+prepare_install_logs() {
+    INSTALL_LOG="${RKNNOVPN_DIR}/logs/install.log"
+    mkdir -p "${RKNNOVPN_DIR}/logs" 2>/dev/null || return 0
+    touch "$INSTALL_LOG" \
+        "${RKNNOVPN_DIR}/logs/service.log" \
+        "${RKNNOVPN_DIR}/logs/daemon.log" \
+        "${RKNNOVPN_DIR}/logs/sing-box.log" 2>/dev/null || true
+    chown 0:0 "${RKNNOVPN_DIR}/logs" "$INSTALL_LOG" \
+        "${RKNNOVPN_DIR}/logs/service.log" \
+        "${RKNNOVPN_DIR}/logs/daemon.log" \
+        "${RKNNOVPN_DIR}/logs/sing-box.log" 2>/dev/null || true
+    chmod 0700 "${RKNNOVPN_DIR}/logs" 2>/dev/null || true
+    chmod 0600 "$INSTALL_LOG" \
+        "${RKNNOVPN_DIR}/logs/service.log" \
+        "${RKNNOVPN_DIR}/logs/daemon.log" \
+        "${RKNNOVPN_DIR}/logs/sing-box.log" 2>/dev/null || true
+    echo "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo '----') install started: $(module_version 2>/dev/null)" >> "$INSTALL_LOG" 2>/dev/null || true
+    ui_print "  [*] Install logs prepared at ${RKNNOVPN_DIR}/logs/"
+}
+
 preserve_existing_config() {
     CONFIG_FILE="${RKNNOVPN_DIR}/config/config.json"
 
@@ -600,6 +620,7 @@ rknnovpn_installer_run() {
     ui_print ""
     ui_print "  --- Installation ---"
     create_directory_structure
+    prepare_install_logs
     preserve_existing_config
     install_default_config
     mark_manual_start_required

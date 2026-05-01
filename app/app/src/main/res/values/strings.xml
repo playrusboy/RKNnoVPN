@@ -293,6 +293,9 @@
     <string name="error_daemon_not_installed">Daemon not installed</string>
     <string name="error_daemon_not_found">Daemon not found</string>
     <string name="error_daemon_not_running">Module daemon is not running. Reboot the device or check module logs.</string>
+    <string name="error_module_reboot_required">The module is installed or updated and is waiting for a reboot. KernelSU/APatch will apply it after reboot; service.log and daemon.log will appear after that.</string>
+    <string name="error_module_disabled">The RKNnoVPN module is disabled in the root manager. Enable the module and reboot the device.</string>
+    <string name="error_module_install_incomplete">The module install looks incomplete: service.sh is missing. Reinstall the module and reboot the device.</string>
     <string name="error_invalid_daemon_response">Invalid daemon response</string>
     <string name="error_unexpected_with_reason">Unexpected error: %1$s</string>
     <string name="error_operation_failed_with_reason">%1$s failed: %2$s</string>

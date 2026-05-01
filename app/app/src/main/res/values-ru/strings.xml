@@ -294,6 +294,9 @@
     <string name="error_daemon_not_installed">Демон не установлен</string>
     <string name="error_daemon_not_found">Демон не найден</string>
     <string name="error_daemon_not_running">Демон модуля не запущен. Перезагрузите устройство или проверьте логи модуля.</string>
+    <string name="error_module_reboot_required">Модуль установлен или обновлён и ждёт перезагрузки. KernelSU/APatch применит его после reboot; затем появятся логи service.log и daemon.log.</string>
+    <string name="error_module_disabled">Модуль RKNnoVPN отключён в root-менеджере. Включите модуль и перезагрузите устройство.</string>
+    <string name="error_module_install_incomplete">Установка модуля выглядит неполной: service.sh не найден. Переустановите модуль и перезагрузите устройство.</string>
     <string name="error_invalid_daemon_response">Некорректный ответ демона</string>
     <string name="error_unexpected_with_reason">Неожиданная ошибка: %1$s</string>
     <string name="error_operation_failed_with_reason">Не удалось выполнить действие «%1$s»: %2$s</string>

@@ -52,13 +52,23 @@ class UserMessageFormatter @Inject constructor(
         is DaemonClientResult.RootDenied -> get(R.string.error_root_access_denied)
         is DaemonClientResult.Timeout -> get(R.string.error_request_timed_out_with_method, result.method)
         is DaemonClientResult.DaemonNotFound -> get(R.string.error_daemon_not_installed)
-        is DaemonClientResult.DaemonUnavailable -> get(R.string.error_daemon_not_running)
+        is DaemonClientResult.DaemonUnavailable -> formatDaemonUnavailable(result.reason)
         is DaemonClientResult.ParseError -> get(R.string.error_invalid_daemon_response)
         is DaemonClientResult.Failure -> formatControlPlaneFailure(
             result.throwable.message,
             R.string.error_unexpected_with_reason,
         )
         is DaemonClientResult.Ok -> get(R.string.dns_ok)
+    }
+
+    private fun formatDaemonUnavailable(reason: String): String {
+        val text = reason.lowercase()
+        return when {
+            text.contains("reboot required") -> get(R.string.error_module_reboot_required)
+            text.contains("module is disabled") -> get(R.string.error_module_disabled)
+            text.contains("service.sh is missing") -> get(R.string.error_module_install_incomplete)
+            else -> get(R.string.error_daemon_not_running)
+        }
     }
 
     private fun formatConfigError(result: DaemonClientResult.DaemonError): String =
