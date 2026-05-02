@@ -2,6 +2,7 @@ package ipc
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,8 +23,16 @@ const (
 )
 
 // Handler is a function that processes a JSON-RPC method call.
-// It receives raw params and returns a result or an error.
-type Handler func(params *json.RawMessage) (interface{}, *RPCError)
+// It receives a per-request context, raw params, and returns a result or an error.
+type Handler func(ctx context.Context, params *json.RawMessage) (interface{}, *RPCError)
+
+type LegacyHandler func(params *json.RawMessage) (interface{}, *RPCError)
+
+func WithoutContext(handler LegacyHandler) Handler {
+	return func(_ context.Context, params *json.RawMessage) (interface{}, *RPCError) {
+		return handler(params)
+	}
+}
 
 // Server is a JSON-RPC 2.0 server over a Unix domain socket.
 type Server struct {
@@ -173,7 +182,7 @@ func (s *Server) handleConn(conn net.Conn) {
 		return
 	}
 
-	resp := s.processRequest(line)
+	resp := s.processRequest(context.Background(), line)
 	respBytes, err := json.Marshal(resp)
 	if err != nil {
 		log.Printf("ipc: marshal response error: %v", err)
@@ -234,7 +243,7 @@ func readFrame(reader *bufio.Reader) ([]byte, error) {
 	}
 }
 
-func (s *Server) processRequest(data []byte) *Response {
+func (s *Server) processRequest(parent context.Context, data []byte) *Response {
 	var req Request
 	if err := json.Unmarshal(data, &req); err != nil {
 		return NewErrorResponse(0, CodeParseError, "parse error: "+err.Error(), nil)
@@ -260,11 +269,51 @@ func (s *Server) processRequest(data []byte) *Response {
 			"method not found: "+req.Method, data)
 	}
 
-	result, rpcErr := handler(req.Params)
-	if rpcErr != nil {
-		return NewErrorResponse(req.ID, rpcErr.Code, rpcErr.Message, rpcErr.Data)
+	ctx, cancel := context.WithTimeout(parent, timeoutForMethod(req.Method))
+	defer cancel()
+	type handlerResult struct {
+		result interface{}
+		err    *RPCError
 	}
-	return NewResponse(req.ID, result)
+	done := make(chan handlerResult, 1)
+	go func() {
+		result, rpcErr := handler(ctx, req.Params)
+		done <- handlerResult{result: result, err: rpcErr}
+	}()
+	select {
+	case <-ctx.Done():
+		return NewErrorResponse(req.ID, CodeInternalError, "request timed out: "+req.Method, map[string]interface{}{
+			"method":  req.Method,
+			"timeout": timeoutForMethod(req.Method).String(),
+		})
+	case handled := <-done:
+		if handled.err != nil {
+			return NewErrorResponse(req.ID, handled.err.Code, handled.err.Message, handled.err.Data)
+		}
+		return NewResponse(req.ID, handled.result)
+	}
+}
+
+func timeoutForMethod(method string) time.Duration {
+	switch method {
+	case "backend.status", "profile.get", "version", "ipc.contract", "config-list":
+		return 5 * time.Second
+	case "backend.start", "backend.stop", "backend.restart", "backend.reset", "backend.applyDesiredState",
+		"config-import", "profile.apply", "profile.commitImportBatch", "profile.dns.patch",
+		"profile.inbound.patch", "profile.importNodes", "profile.importNodesBatch",
+		"profile.node.remove", "profile.node.upsert", "profile.patch", "profile.routing.patch",
+		"profile.setActiveNode", "subscription.preview", "subscription.refresh":
+		return 60 * time.Second
+	case "diagnostics.health", "diagnostics.report", "diagnostics.testNodes", "self-check",
+		"logs", "audit", "app.list":
+		return 30 * time.Second
+	case "update-check":
+		return 30 * time.Second
+	case "update-download", "update-install":
+		return 10 * time.Minute
+	default:
+		return 15 * time.Second
+	}
 }
 
 func replacedMethodHint(method string) string {

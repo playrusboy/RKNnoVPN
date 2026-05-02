@@ -135,6 +135,19 @@ internal fun parseVersionInfo(element: JsonElement): VersionInfo {
     )
 }
 
+internal fun Json.parseCompatibilityCheckInfo(element: JsonElement): CompatibilityCheckInfo {
+    val obj = element.jsonObject
+    return CompatibilityCheckInfo(
+        version = parseVersionInfo(obj["version"] ?: JsonObject(emptyMap())),
+        contract = decodeFromJsonElement(
+            IpcContractInfo.serializer(),
+            obj["contract"] ?: JsonObject(emptyMap()),
+        ),
+        requiredMethods = obj.stringList("requiredMethods", "required_methods"),
+        missingMethods = obj.stringList("missingMethods", "missing_methods"),
+    )
+}
+
 private fun JsonObject.stringValue(vararg keys: String): String =
     keys.firstNotNullOfOrNull { key -> this[key]?.jsonPrimitive?.contentOrNull }.orEmpty()
 

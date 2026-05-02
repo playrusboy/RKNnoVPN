@@ -128,6 +128,108 @@ func (h ProfileHandlers) ProfileSetActiveNode(params *json.RawMessage) (interfac
 	return h.applyProfile(next, request.Reload, "profile.setActiveNode", 1)
 }
 
+func (h ProfileHandlers) ProfilePatch(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	request, err := DecodeProfilePatchParams(params)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
+	}
+	current, rpcErr := h.currentProfile()
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if request.HasActiveNodeID {
+		if request.ActiveNodeID == "" {
+			current = profiledoc.ClearActiveNode(current)
+		} else {
+			current, err = profiledoc.SetActiveNode(current, request.ActiveNodeID)
+			if err != nil {
+				return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
+			}
+		}
+	}
+	if request.Routing != nil {
+		current.Routing = *request.Routing
+	}
+	if request.DNS != nil {
+		current.DNS = *request.DNS
+	}
+	if request.Inbounds != nil {
+		current.Inbounds = *request.Inbounds
+	}
+	return h.applyProfile(current, request.Reload, "profile.patch", -1)
+}
+
+func (h ProfileHandlers) ProfileNodeUpsert(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	request, err := DecodeNodeUpsertParams(params)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
+	}
+	current, rpcErr := h.currentProfile()
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	next, err := profiledoc.UpsertNode(current, request.Node)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
+	}
+	return h.applyProfile(next, request.Reload, "profile.node.upsert", 1)
+}
+
+func (h ProfileHandlers) ProfileNodeRemove(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	request, err := DecodeNodeRemoveParams(params)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
+	}
+	current, rpcErr := h.currentProfile()
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	next, err := profiledoc.RemoveNode(current, request.NodeID)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
+	}
+	return h.applyProfile(next, request.Reload, "profile.node.remove", 1)
+}
+
+func (h ProfileHandlers) ProfileRoutingPatch(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	request, err := DecodeRoutingPatchParams(params)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
+	}
+	current, rpcErr := h.currentProfile()
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	current.Routing = request.Routing
+	return h.applyProfile(current, request.Reload, "profile.routing.patch", -1)
+}
+
+func (h ProfileHandlers) ProfileDNSPatch(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	request, err := DecodeDNSPatchParams(params)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
+	}
+	current, rpcErr := h.currentProfile()
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	current.DNS = request.DNS
+	return h.applyProfile(current, request.Reload, "profile.dns.patch", -1)
+}
+
+func (h ProfileHandlers) ProfileInboundPatch(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	request, err := DecodeInboundPatchParams(params)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
+	}
+	current, rpcErr := h.currentProfile()
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	current.Inbounds = request.Inbounds
+	return h.applyProfile(current, request.Reload, "profile.inbound.patch", -1)
+}
+
 func (h ProfileHandlers) SubscriptionPreview(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	request, err := DecodeSubscriptionURLParams(params)
 	if err != nil {

@@ -1,13 +1,20 @@
 {
-  "version": 2,
+  "version": 3,
   "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR", "CONFIG_ERROR", "RUNTIME_BUSY", "RESET_IN_PROGRESS"],
   "compatibilityPolicies": ["release-mismatch-allowed", "requires-schema", "requires-runtime-schema"],
   "requestExamples": {
     "DiagnosticsReportRequest": {"lines": 120},
-    "BackendStatusRequest": {"includeHealthRefresh": true},
+    "BackendStatusRequest": {"includeHealthRefresh": true, "includeCompatibility": true},
     "CommitImportBatchRequest": {"batchId": "import-1", "reload": true},
+    "CompatibilityCheckRequest": {"requiredMethods": ["backend.status"]},
     "ImportNodesBatchRequest": {"batchId": "import-1", "totalBatches": 2, "nodes": [{"id": "node-1", "name": "Local", "protocol": "SOCKS", "server": "127.0.0.1", "port": 10808}]},
     "LogsRequest": {"lines": 100},
+    "DNSPatchRequest": {"dns": {"remoteDns": "https://1.1.1.1/dns-query", "directDns": "https://dns.google/dns-query", "bootstrapIp": "1.1.1.1", "ipv6Mode": "MIRROR", "fakeDns": false}},
+    "InboundPatchRequest": {"inbounds": {"socksPort": 10808, "httpPort": 10809, "allowLan": false}},
+    "NodeRemoveRequest": {"nodeId": "node-1", "reload": true},
+    "NodeUpsertRequest": {"node": {"id": "node-1", "name": "Local", "protocol": "SOCKS", "server": "127.0.0.1", "port": 10808, "outbound": {}, "source": {"type": "MANUAL"}}, "reload": true},
+    "ProfilePatchRequest": {"activeNodeId": null, "reload": true},
+    "RoutingPatchRequest": {"routing": {"mode": "PROXY_ALL", "bypassRussia": true, "alwaysDirectSystemApps": true}},
     "ResolveUidRequest": {"uid": 10123},
     "SelfCheckRequest": {"lines": 80},
     "SetActiveNodeRequest": {"nodeId": "node-1"},
@@ -78,6 +85,7 @@
     "profile.apply.v2",
     "profile.document.v2",
     "profile.importNodes.v2",
+    "profile.patch.v1",
     "profile.subscription.v2",
     "runtime.logs",
     "runtime.v2",
@@ -93,6 +101,7 @@
     "backend.start",
     "backend.status",
     "backend.stop",
+    "compat.check",
     "config-list",
     "diagnostics.health",
     "diagnostics.report",
@@ -101,9 +110,15 @@
     "logs",
     "profile.apply",
     "profile.commitImportBatch",
+    "profile.dns.patch",
     "profile.get",
+    "profile.inbound.patch",
     "profile.importNodes",
     "profile.importNodesBatch",
+    "profile.node.remove",
+    "profile.node.upsert",
+    "profile.patch",
+    "profile.routing.patch",
     "profile.setActiveNode",
     "self-check",
     "subscription.preview",
@@ -206,6 +221,13 @@
       }
     },
     {
+      "method": "compat.check",
+      "capability": "ipc.contract.v1",
+      "request": "CompatibilityCheckRequest",
+      "result": "CompatibilityCheckResult",
+      "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR"]
+    },
+    {
       "method": "config-import",
       "capability": "config.import.v2",
       "compatibility": "requires-schema",
@@ -289,11 +311,37 @@
       }
     },
     {
+      "method": "profile.dns.patch",
+      "capability": "profile.patch.v1",
+      "compatibility": "requires-schema",
+      "mutating": true,
+      "async": true,
+      "request": "DNSPatchRequest",
+      "result": "ProfileApplyResult",
+      "operation": {
+        "type": "profile-apply",
+        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation"
+      }
+    },
+    {
       "method": "profile.get",
       "capability": "profile.document.v2",
       "request": "empty",
       "result": "ProfileDocument",
       "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR"]
+    },
+    {
+      "method": "profile.inbound.patch",
+      "capability": "profile.patch.v1",
+      "compatibility": "requires-schema",
+      "mutating": true,
+      "async": true,
+      "request": "InboundPatchRequest",
+      "result": "ProfileApplyResult",
+      "operation": {
+        "type": "profile-apply",
+        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation"
+      }
     },
     {
       "method": "profile.importNodes",
@@ -314,6 +362,58 @@
       "request": "ImportNodesBatchRequest",
       "result": "ImportNodesBatchResult",
       "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR"]
+    },
+    {
+      "method": "profile.node.remove",
+      "capability": "profile.patch.v1",
+      "compatibility": "requires-schema",
+      "mutating": true,
+      "async": true,
+      "request": "NodeRemoveRequest",
+      "result": "ProfileApplyResult",
+      "operation": {
+        "type": "profile-apply",
+        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation"
+      }
+    },
+    {
+      "method": "profile.node.upsert",
+      "capability": "profile.patch.v1",
+      "compatibility": "requires-schema",
+      "mutating": true,
+      "async": true,
+      "request": "NodeUpsertRequest",
+      "result": "ProfileApplyResult",
+      "operation": {
+        "type": "profile-apply",
+        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation"
+      }
+    },
+    {
+      "method": "profile.patch",
+      "capability": "profile.patch.v1",
+      "compatibility": "requires-schema",
+      "mutating": true,
+      "async": true,
+      "request": "ProfilePatchRequest",
+      "result": "ProfileApplyResult",
+      "operation": {
+        "type": "profile-apply",
+        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation"
+      }
+    },
+    {
+      "method": "profile.routing.patch",
+      "capability": "profile.patch.v1",
+      "compatibility": "requires-schema",
+      "mutating": true,
+      "async": true,
+      "request": "RoutingPatchRequest",
+      "result": "ProfileApplyResult",
+      "operation": {
+        "type": "profile-apply",
+        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation"
+      }
     },
     {
       "method": "profile.setActiveNode",

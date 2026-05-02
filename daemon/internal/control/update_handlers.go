@@ -25,7 +25,7 @@ type UpdateHandlers struct {
 }
 
 func (h UpdateHandlers) UpdateCheck(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	info, err := updater.CheckForUpdate(h.currentUpdateVersion(params))
+	info, err := updater.CheckForUpdateAndPersist(h.DataDir, h.currentUpdateVersion(params))
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInternalError,

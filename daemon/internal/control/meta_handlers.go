@@ -16,8 +16,32 @@ type MetaHandlers struct {
 	Exec    diagnostics.ExecCommandFunc
 }
 
+type CompatibilityCheckRequest struct {
+	RequiredMethods []string `json:"requiredMethods"`
+}
+
 func (h MetaHandlers) IPCContract(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	return ipc.NewContract(ProtocolVersion, config.CurrentSchemaVersion, ipc.SupportedCapabilities()), nil
+}
+
+func (h MetaHandlers) CompatibilityCheck(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	request := CompatibilityCheckRequest{}
+	if params != nil {
+		if err := decodeStrict(*params, &request); err != nil {
+			return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: "invalid compat.check params: " + err.Error()}
+		}
+	}
+	version, rpcErr := h.VersionInfo(nil)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	contract := ipc.NewContract(ProtocolVersion, config.CurrentSchemaVersion, ipc.SupportedCapabilities())
+	return map[string]interface{}{
+		"version":         version,
+		"contract":        contract,
+		"requiredMethods": request.RequiredMethods,
+		"missingMethods":  missingContractMethods(contract, request.RequiredMethods),
+	}, nil
 }
 
 func (h MetaHandlers) VersionInfo(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -43,4 +67,21 @@ func (h MetaHandlers) VersionInfo(params *json.RawMessage) (interface{}, *ipc.RP
 		"panel_min_version": h.Version,
 	})
 	return addCompatibilityIdentityFields(info, h.Version, moduleVersion["version"], daemonPID, socketInode), nil
+}
+
+func missingContractMethods(contract ipc.Contract, required []string) []string {
+	if len(required) == 0 {
+		return nil
+	}
+	known := make(map[string]bool, len(contract.Methods))
+	for _, method := range contract.Methods {
+		known[method.Method] = true
+	}
+	var missing []string
+	for _, method := range required {
+		if !known[method] {
+			missing = append(missing, method)
+		}
+	}
+	return missing
 }

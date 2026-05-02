@@ -449,10 +449,41 @@ if [ ! -x "$DAEMON_BIN" ]; then
     exit 1
 fi
 
-# Check that config exists
-if [ ! -f "$CONFIG_FILE" ]; then
-    log_error "Config file not found: ${CONFIG_FILE}"
-    log_error "Copy config.json to ${RKNNOVPN_DIR}/config/ and reboot"
+ensure_config_file() {
+    if [ -f "$CONFIG_FILE" ]; then
+        return 0
+    fi
+
+    DEFAULT_CONFIG="${RKNNOVPN_DIR}/defaults/config.json"
+    log_warn "Config file not found: ${CONFIG_FILE}; creating default control-plane config"
+    mkdir -p "${RKNNOVPN_DIR}/config" 2>/dev/null || return 1
+    if [ -f "$DEFAULT_CONFIG" ]; then
+        cp -f "$DEFAULT_CONFIG" "$CONFIG_FILE" 2>/dev/null || return 1
+    else
+        cat > "$CONFIG_FILE" <<'EOF'
+{
+  "schema_version": 5,
+  "proxy": {"mode": "tproxy", "tproxy_port": 10853, "dns_port": 10856, "gid": 23333, "mark": 8227, "api_port": 0},
+  "transport": {"protocol": "reality", "tls_server": "", "fingerprint": "chrome", "extra": {}},
+  "node": {"address": "", "port": 443, "protocol": "vless", "uuid": "", "flow": ""},
+  "runtime_v2": {"backend_kind": "ROOT_TPROXY", "fallback_policy": "OFFER_RESET"},
+  "routing": {"mode": "all", "bypass_lan": true, "bypass_china": false, "bypass_russia": true, "custom_direct": [], "custom_proxy": [], "custom_block": [], "always_direct_apps": [], "always_direct_system_apps": true},
+  "apps": {"mode": "all", "list": [], "app_groups": {}},
+  "dns": {"hijack_per_uid": true, "proxy_dns": "https://1.1.1.1/dns-query", "direct_dns": "https://dns.google/dns-query", "bootstrap_ip": "1.1.1.1", "fake_ip": false},
+  "ipv6": {"mode": "mirror"},
+  "sharing": {"enabled": false, "interfaces": []},
+  "health": {"enabled": true, "interval_sec": 30, "threshold": 3, "check_url": "https://www.gstatic.com/generate_204", "timeout_sec": 5, "dns_probe_domains": ["connectivitycheck.gstatic.com", "cloudflare.com", "example.com"], "egress_urls": ["https://www.gstatic.com/generate_204", "https://cp.cloudflare.com/generate_204"], "dns_is_hard_readiness": false},
+  "rescue": {"enabled": true, "max_attempts": 3, "cooldown_sec": 60},
+  "autostart": false
+}
+EOF
+    fi
+    chown 0:0 "$CONFIG_FILE" 2>/dev/null
+    chmod 0600 "$CONFIG_FILE" 2>/dev/null
+}
+
+if ! ensure_config_file; then
+    log_error "Config file not found and could not be created: ${CONFIG_FILE}"
     exit 1
 fi
 

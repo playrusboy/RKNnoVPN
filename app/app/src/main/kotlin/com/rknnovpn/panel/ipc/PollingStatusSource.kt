@@ -10,12 +10,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -24,7 +27,7 @@ import javax.inject.Singleton
  *
  * Polling intervals adapt to the connection state:
  * - **Connected / Connecting**: every [FAST_INTERVAL_MS] (2 s) for responsive traffic stats.
- * - **Disconnected / Error / Unknown**: every [SLOW_INTERVAL_MS] (10 s) to conserve resources.
+ * - **Disconnected / Error / Unknown**: every [SLOW_INTERVAL_MS] (30 s) to conserve resources.
  *
  * The poller is explicitly started/stopped by the UI layer (typically in
  * Activity.onResume / onPause) so we never poll in the background.
@@ -44,6 +47,16 @@ class PollingStatusSource @Inject constructor(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var pollingJob: Job? = null
+    private val pollMutex = Mutex()
+    private val pollRequests = Channel<Unit>(capacity = Channel.CONFLATED)
+
+    init {
+        scope.launch {
+            for (_ in pollRequests) {
+                pollOnceSerialized()
+            }
+        }
+    }
 
     // ---- Exposed state ----
 
@@ -92,7 +105,7 @@ class PollingStatusSource @Inject constructor(
      * Useful after the user triggers start/stop so the UI updates instantly.
      */
     fun pollNow() {
-        scope.launch { pollOnce() }
+        pollRequests.trySend(Unit)
     }
 
     fun publishBackendStatus(status: BackendStatusV2) {
@@ -107,10 +120,14 @@ class PollingStatusSource @Inject constructor(
 
     private suspend fun pollLoop() {
         while (scope.isActive) {
-            pollOnce()
+            pollOnceSerialized()
             val interval = computeInterval()
             delay(interval)
         }
+    }
+
+    private suspend fun pollOnceSerialized() = pollMutex.withLock {
+        pollOnce()
     }
 
     private suspend fun pollOnce() {

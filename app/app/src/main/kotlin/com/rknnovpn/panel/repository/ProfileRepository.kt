@@ -141,21 +141,18 @@ class ProfileRepository @Inject constructor(
     // ---- Node CRUD ----
 
     /** Add a node to the profile. */
-    suspend fun addNode(node: Node): Boolean = mutatePanel("addNode") { config ->
-        config.copy(nodes = config.nodes + node)
+    suspend fun addNode(node: Node): Boolean = mutateDelta("addNode") {
+        client.profileNodeUpsert(node)
     }
 
     /** Remove a node by ID. */
-    suspend fun removeNode(nodeId: String): Boolean = mutatePanel("removeNode") { config ->
-        config.copy(
-            nodes = config.nodes.filter { it.id != nodeId },
-            activeNodeId = if (config.activeNodeId == nodeId) null else config.activeNodeId
-        )
+    suspend fun removeNode(nodeId: String): Boolean = mutateDelta("removeNode") {
+        client.profileNodeRemove(nodeId)
     }
 
     /** Replace a node, matching by ID. */
-    suspend fun updateNode(updated: Node): Boolean = mutatePanel("updateNode") { config ->
-        config.copy(nodes = config.nodes.map { if (it.id == updated.id) updated else it })
+    suspend fun updateNode(updated: Node): Boolean = mutateDelta("updateNode") {
+        client.profileNodeUpsert(updated)
     }
 
     /** Set the active node for this profile. */
@@ -172,9 +169,6 @@ class ProfileRepository @Inject constructor(
             }
             if (current.nodes.none { it.id == nodeId && !it.stale }) {
                 _error.value = messages.get(com.rknnovpn.panel.R.string.node_not_found)
-                return@withLock false
-            }
-            if (!ensureRuntimeIdle("setActiveNode")) {
                 return@withLock false
             }
             when (val result = client.profileSetActiveNode(nodeId)) {
@@ -197,8 +191,8 @@ class ProfileRepository @Inject constructor(
     }
 
     /** Let the daemon selector use automatic node selection. */
-    suspend fun clearActiveNode(): Boolean = mutatePanel("clearActiveNode") { config ->
-        config.copy(activeNodeId = null)
+    suspend fun clearActiveNode(): Boolean = mutateDelta("clearActiveNode") {
+        client.profileClearActiveNode()
     }
 
     /** Import nodes from direct import content or refresh a subscription URL. */
@@ -280,9 +274,6 @@ class ProfileRepository @Inject constructor(
         _error.value = null
         _notice.value = null
         try {
-            if (!ensureRuntimeIdle("setProfile")) {
-                return@withLock false
-            }
             when (val result = client.profileApply(config, reload = true)) {
                 is DaemonClientResult.Ok -> {
                     applyMutationSuccess("setProfile", result.data)
@@ -325,11 +316,8 @@ class ProfileRepository @Inject constructor(
                 }
                 return@withLock false
             }
-            if (!ensureRuntimeIdle(tag)) {
-                return@withLock false
-            }
             val updated = transform(current)
-            when (val result = client.profileApply(updated)) {
+            when (val result = applyDeltaOrFull(current, updated)) {
                 is DaemonClientResult.Ok -> {
                     applyMutationSuccess(tag, result.data)
                 }
@@ -348,9 +336,9 @@ class ProfileRepository @Inject constructor(
         }
     }
 
-    private suspend fun mutatePanel(
+    private suspend fun mutateDelta(
         tag: String,
-        transform: (ProfileConfig) -> ProfileConfig,
+        call: suspend (ProfileConfig) -> DaemonClientResult<ConfigMutationInfo>,
     ): Boolean = mutex.withLock {
         _loading.value = true
         _error.value = null
@@ -362,17 +350,13 @@ class ProfileRepository @Inject constructor(
                 }
                 return@withLock false
             }
-            if (!ensureRuntimeIdle(tag)) {
-                return@withLock false
-            }
-            val updated = transform(current)
-            when (val result = client.profileApply(updated)) {
+            when (val result = call(current)) {
                 is DaemonClientResult.Ok -> {
                     applyMutationSuccess(tag, result.data)
                 }
                 else -> {
                     val msg = describeFailure(result)
-                Log.w(TAG, "$tag profile update failed: $msg")
+                    Log.w(TAG, "$tag profile update failed: $msg")
                     if (result.configWasSaved()) {
                         return refreshAfterSavedFailure(tag, msg)
                     }
@@ -383,6 +367,25 @@ class ProfileRepository @Inject constructor(
         } finally {
             _loading.value = false
         }
+    }
+
+    private suspend fun applyDeltaOrFull(
+        current: ProfileConfig,
+        updated: ProfileConfig,
+    ): DaemonClientResult<ConfigMutationInfo> {
+        val onlyRoutingChanged = updated.copy(routing = current.routing) == current
+        if (onlyRoutingChanged && updated.routing != current.routing) {
+            return client.profileRoutingPatch(updated.routing)
+        }
+        val onlyDnsChanged = updated.copy(dns = current.dns) == current
+        if (onlyDnsChanged && updated.dns != current.dns) {
+            return client.profileDNSPatch(updated.dns)
+        }
+        val onlyInboundsChanged = updated.copy(inbounds = current.inbounds) == current
+        if (onlyInboundsChanged && updated.inbounds != current.inbounds) {
+            return client.profileInboundPatch(updated.inbounds)
+        }
+        return client.profileApply(updated)
     }
 
     /** Refresh without acquiring the mutex (caller already holds it). */
@@ -594,27 +597,6 @@ class ProfileRepository @Inject constructor(
     private fun publishRuntimeStatus(info: ConfigMutationInfo) {
         info.runtimeStatus?.let(poller::publishBackendStatus)
         messages.formatConfigMutationNotice(info)?.let { _notice.value = it }
-    }
-
-    private suspend fun ensureRuntimeIdle(tag: String): Boolean {
-        return when (val result = client.backendStatus()) {
-            is DaemonClientResult.Ok -> {
-                poller.publishBackendStatus(result.data)
-                if (result.data.activeOperation != null) {
-                    _error.value = messages.get(com.rknnovpn.panel.R.string.error_runtime_busy)
-                    Log.w(TAG, "$tag blocked: runtime operation is active (${result.data.activeOperation.kind})")
-                    false
-                } else {
-                    true
-                }
-            }
-            else -> {
-                val msg = describeFailure(result)
-                Log.w(TAG, "$tag runtime idle check failed: $msg")
-                _error.value = msg
-                false
-            }
-        }
     }
 
     private fun <T> DaemonClientResult<T>.configWasSaved(): Boolean {

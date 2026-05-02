@@ -26,10 +26,12 @@ type RuntimeHandlers struct {
 	Stop                  func() (runtimev2.Status, error)
 	Restart               func() (runtimev2.Status, error)
 	Reset                 func() (runtimev2.Status, error)
+	UpdateCheckState      func() (*updater.UpdateCheckState, error)
 }
 
 type BackendStatusRequest struct {
 	IncludeHealthRefresh bool `json:"includeHealthRefresh"`
+	IncludeCompatibility bool `json:"includeCompatibility"`
 }
 
 func (h RuntimeHandlers) BackendStatus(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -43,24 +45,14 @@ func (h RuntimeHandlers) BackendStatus(params *json.RawMessage) (interface{}, *i
 			Message: err.Error(),
 		}
 	}
-	if h.RefreshCompatibility != nil {
+	if request.IncludeCompatibility && h.RefreshCompatibility != nil {
 		h.RefreshCompatibility()
 	}
-	status := h.refreshActiveProgress()
 	if request.IncludeHealthRefresh {
 		h.refreshHealth()
-		return h.finalizeStatus(h.status()), nil
+		return h.statusPayload(h.status(), request.IncludeCompatibility), nil
 	}
-	if status.ActiveOperation != nil {
-		return h.finalizeStatus(status), nil
-	}
-	if h.IsRunningOrDegraded != nil && h.IsRunningOrDegraded() {
-		healthSnapshot := h.currentHealth()
-		if healthSnapshot.CheckedAt.IsZero() || time.Since(healthSnapshot.CheckedAt) > 10*time.Second {
-			go h.refreshHealth()
-		}
-	}
-	return h.finalizeStatus(h.status()), nil
+	return h.statusPayload(h.status(), request.IncludeCompatibility), nil
 }
 
 func (h RuntimeHandlers) BackendApplyDesiredState(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -149,6 +141,51 @@ func (h RuntimeHandlers) finalizeStatus(status runtimev2.Status) runtimev2.Statu
 		status.Traffic = h.RuntimeStats(status)
 	}
 	return h.statusWithUpdateInstallState(status)
+}
+
+func (h RuntimeHandlers) statusPayload(status runtimev2.Status, includeCompatibility bool) interface{} {
+	status = h.finalizeStatus(status)
+	if includeCompatibility {
+		return status
+	}
+	return backendStatusResponse{
+		DesiredState:    status.DesiredState,
+		AppliedState:    status.AppliedState,
+		Canonical:       status.Canonical,
+		Health:          status.Health,
+		UptimeSeconds:   status.UptimeSeconds,
+		Traffic:         status.Traffic,
+		Capabilities:    status.Capabilities,
+		ActiveOperation: status.ActiveOperation,
+		LastOperation:   status.LastOperation,
+		UpdateInstall:   status.UpdateInstall,
+		UpdateCheck:     h.updateCheckState(),
+	}
+}
+
+type backendStatusResponse struct {
+	DesiredState    runtimev2.DesiredState        `json:"desiredState"`
+	AppliedState    runtimev2.AppliedState        `json:"appliedState"`
+	Canonical       runtimev2.CanonicalStatus     `json:"canonical"`
+	Health          runtimev2.HealthSnapshot      `json:"health"`
+	UptimeSeconds   int64                         `json:"uptimeSeconds,omitempty"`
+	Traffic         runtimev2.TrafficStats        `json:"traffic,omitempty"`
+	Capabilities    []runtimev2.BackendCapability `json:"capabilities"`
+	ActiveOperation *runtimev2.OperationStatus    `json:"activeOperation,omitempty"`
+	LastOperation   *runtimev2.OperationResult    `json:"lastOperation,omitempty"`
+	UpdateInstall   *runtimev2.UpdateInstallState `json:"updateInstall,omitempty"`
+	UpdateCheck     *updater.UpdateCheckState     `json:"updateCheck,omitempty"`
+}
+
+func (h RuntimeHandlers) updateCheckState() *updater.UpdateCheckState {
+	if h.UpdateCheckState == nil {
+		return nil
+	}
+	state, err := h.UpdateCheckState()
+	if err != nil {
+		return &updater.UpdateCheckState{Error: err.Error()}
+	}
+	return state
 }
 
 func (h RuntimeHandlers) statusWithUpdateInstallState(status runtimev2.Status) runtimev2.Status {

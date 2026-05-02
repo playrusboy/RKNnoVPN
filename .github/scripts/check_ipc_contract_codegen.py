@@ -35,7 +35,7 @@ INSTALL_STATE_STORE = REPO_ROOT / "daemon/internal/updater/install_state.go"
 INSTALL_TRANSACTION = REPO_ROOT / "daemon/internal/updater/install_transaction.go"
 CONTROL_RUNTIME_HANDLERS = REPO_ROOT / "daemon/internal/control/runtime_handlers.go"
 APP_KOTLIN_ROOT = REPO_ROOT / "app/app/src/main/kotlin"
-BOOTSTRAP_METHODS = {"backend.status", "ipc.contract", "version"}
+BOOTSTRAP_METHODS = {"backend.status", "compat.check", "ipc.contract", "version"}
 CONFIG_TRANSACTION_REQUIRED_STAGES = {
     "validate",
     "render",

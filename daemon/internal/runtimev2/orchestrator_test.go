@@ -2,6 +2,7 @@ package runtimev2
 
 import (
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -824,6 +825,38 @@ func TestActorFailedAndBlockedOperationsDoNotRollBackGeneration(t *testing.T) {
 	waitForSignal(t, done)
 }
 
+func TestRefreshHealthCoalescesConcurrentCalls(t *testing.T) {
+	backend := &fakeBackend{kind: BackendRootTProxy}
+	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)
+	if health := o.RefreshHealth(); health.CheckedAt.IsZero() {
+		t.Fatalf("expected primed health snapshot, got %#v", health)
+	}
+	atomic.StoreInt32(&backend.refreshCalls, 0)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	backend.refreshStarted = started
+	backend.refreshBlock = release
+
+	done := make(chan struct{})
+	go func() {
+		o.RefreshHealth()
+		close(done)
+	}()
+	waitForSignal(t, started)
+
+	health := o.RefreshHealth()
+	if health.CheckedAt.IsZero() {
+		t.Fatalf("expected concurrent refresh to return cached health, got %#v", health)
+	}
+
+	close(release)
+	waitForSignal(t, done)
+	if calls := atomic.LoadInt32(&backend.refreshCalls); calls != 1 {
+		t.Fatalf("expected one backend health refresh, got %d", calls)
+	}
+}
+
 type fakeBackend struct {
 	kind           BackendKind
 	stopCalls      int
@@ -841,6 +874,9 @@ type fakeBackend struct {
 	networkStarted chan struct{}
 	networkBlock   chan struct{}
 	currentHealth  HealthSnapshot
+	refreshStarted chan struct{}
+	refreshBlock   chan struct{}
+	refreshCalls   int32
 }
 
 func (f *fakeBackend) Kind() BackendKind         { return f.kind }
@@ -873,6 +909,8 @@ func (f *fakeBackend) HandleNetworkChange(int64) (*ResetReport, error) {
 }
 func (f *fakeBackend) CurrentHealth() HealthSnapshot { return f.currentHealth }
 func (f *fakeBackend) RefreshHealth() HealthSnapshot {
+	atomic.AddInt32(&f.refreshCalls, 1)
+	signalAndWait(f.refreshStarted, f.refreshBlock)
 	return HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true, CheckedAt: time.Now()}
 }
 func (f *fakeBackend) TestNodes(DesiredState, string, int, []string) ([]NodeProbeResult, error) {

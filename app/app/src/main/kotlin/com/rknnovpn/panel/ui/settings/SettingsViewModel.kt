@@ -7,6 +7,7 @@ import com.rknnovpn.panel.BuildConfig
 import com.rknnovpn.panel.i18n.UserMessageFormatter
 import com.rknnovpn.panel.ipc.DaemonClient
 import com.rknnovpn.panel.ipc.DaemonClientResult
+import com.rknnovpn.panel.model.CachedUpdateCheckState
 import com.rknnovpn.panel.model.ConnectionState
 import com.rknnovpn.panel.model.DaemonStatus
 import com.rknnovpn.panel.model.DnsIpv6Mode
@@ -862,6 +863,7 @@ class SettingsViewModel @Inject constructor(
                                 )
                             }
                         }
+                    applyCachedUpdateCheck(status.updateCheck)
                     _uiState.update {
                         val resetResult = status.lastOperation
                             ?.takeIf { operation -> it.isResetting && operation.kind == "reset" && status.activeOperation == null }
@@ -917,6 +919,29 @@ class SettingsViewModel @Inject constructor(
                         pendingDaemonOperationKinds = emptySet()
                     }
                 }
+        }
+    }
+
+    private fun applyCachedUpdateCheck(updateCheck: CachedUpdateCheckState?) {
+        if (updateCheck == null || updateCheck.lastCheckedAt.isNullOrBlank()) {
+            return
+        }
+        lastCheckedHasUpdate = updateCheck.hasUpdate
+        _updateState.update { current ->
+            if (current.status !in setOf(UpdateStatus.IDLE, UpdateStatus.UP_TO_DATE, UpdateStatus.AVAILABLE)) {
+                return@update current
+            }
+            current.copy(
+                currentVersion = updateCheck.currentVersion.ifBlank { current.currentVersion },
+                latestVersion = updateCheck.latestVersion.ifBlank { current.latestVersion },
+                changelog = updateCheck.changelog.ifBlank { current.changelog },
+                status = when {
+                    updateCheck.error.isNotBlank() -> UpdateStatus.ERROR
+                    updateCheck.hasUpdate -> UpdateStatus.AVAILABLE
+                    else -> UpdateStatus.UP_TO_DATE
+                },
+                errorMessage = updateCheck.error,
+            )
         }
     }
 

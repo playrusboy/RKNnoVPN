@@ -46,6 +46,13 @@ data class VersionInfo(
     val methods: List<IpcMethodContractInfo> = emptyList(),
 )
 
+data class CompatibilityCheckInfo(
+    val version: VersionInfo,
+    val contract: IpcContractInfo,
+    val requiredMethods: List<String> = emptyList(),
+    val missingMethods: List<String> = emptyList(),
+)
+
 data class UpdateCheckInfo(
     val currentVersion: String,
     val latestVersion: String,

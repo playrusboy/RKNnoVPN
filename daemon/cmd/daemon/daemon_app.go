@@ -17,6 +17,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/rescue"
 	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/updater"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/watcher"
 )
 
@@ -218,6 +219,7 @@ func (a *daemonApp) start() error {
 		return fmt.Errorf("ipc start: %w", err)
 	}
 	a.daemon.refreshRuntimeV2Compatibility()
+	a.daemon.startUpdateCheckScheduler()
 	a.maybeAutostart()
 	return nil
 }
@@ -235,6 +237,28 @@ func (a *daemonApp) maybeAutostart() {
 	} else if cfg.Autostart {
 		log.Printf("autostart skipped: manual reset flag is present")
 	}
+}
+
+func (d *daemon) startUpdateCheckScheduler() {
+	go func() {
+		state, checked, err := updater.MaybeCheckForUpdate(d.dataDir, Version, time.Now())
+		if err != nil {
+			log.Printf("[updater] background update check failed: %v", err)
+			return
+		}
+		if !checked {
+			return
+		}
+		if state != nil && state.HasUpdate {
+			log.Printf("[updater] update available: current=%s latest=%s", state.CurrentVersion, state.LatestVersion)
+		} else {
+			log.Printf("[updater] background update check completed")
+		}
+	}()
+}
+
+func (d *daemon) cachedUpdateCheckState() (*updater.UpdateCheckState, error) {
+	return updater.ReadUpdateCheckState(d.dataDir)
 }
 
 func (a *daemonApp) runSignalLoop() {

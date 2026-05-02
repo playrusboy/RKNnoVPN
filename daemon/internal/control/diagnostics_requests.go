@@ -18,7 +18,7 @@ type DiagnosticsReportRequest struct {
 }
 
 func DecodeBackendStatusParams(params *json.RawMessage) (BackendStatusRequest, error) {
-	request := BackendStatusRequest{}
+	request := BackendStatusRequest{IncludeCompatibility: true}
 	if params == nil {
 		return request, nil
 	}

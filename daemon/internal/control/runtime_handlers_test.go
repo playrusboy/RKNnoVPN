@@ -54,6 +54,48 @@ func TestBackendStatusCanRefreshHealthInline(t *testing.T) {
 	}
 }
 
+func TestBackendStatusCanOmitCompatibility(t *testing.T) {
+	params := json.RawMessage(`{"includeCompatibility":false}`)
+	var refreshCompatibilityCalls int
+	handlers := RuntimeHandlers{
+		DataDir: t.TempDir(),
+		Status: func() runtimev2.Status {
+			return runtimev2.Status{
+				AppliedState: runtimev2.AppliedState{Phase: runtimev2.PhaseStopped},
+				Compatibility: runtimev2.CompatibilityStatus{
+					ControlProtocolVersion: 5,
+					SchemaVersion:          5,
+				},
+			}
+		},
+		RefreshCompatibility: func() {
+			refreshCompatibilityCalls++
+		},
+	}
+
+	payload, rpcErr := handlers.BackendStatus(&params)
+	if rpcErr != nil {
+		t.Fatalf("backend.status failed: %#v", rpcErr)
+	}
+	if refreshCompatibilityCalls != 0 {
+		t.Fatalf("expected no compatibility refresh, got %d calls", refreshCompatibilityCalls)
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(data, &obj); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := obj["compatibility"]; ok {
+		t.Fatalf("expected compatibility to be omitted, got %s", data)
+	}
+	if _, ok := obj["desiredState"]; !ok {
+		t.Fatalf("expected status payload fields, got %s", data)
+	}
+}
+
 func TestBackendStatusRejectsUnknownParams(t *testing.T) {
 	params := json.RawMessage(`{"refreshHealth":true}`)
 	handlers := RuntimeHandlers{

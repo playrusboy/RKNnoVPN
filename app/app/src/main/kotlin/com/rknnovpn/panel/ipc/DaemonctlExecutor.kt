@@ -184,9 +184,9 @@ class DaemonctlExecutor @Inject constructor() {
         val ctl = daemonctlShellRef()
         val machineMode = "RKNNOVPN_DAEMONCTL_RAW=1"
         return when {
-            paramsEmpty -> "$prelude $machineMode $ctl ${shellQuote(method)}"
-            useStdin -> "$prelude $machineMode RKNNOVPN_STDIN_PARAMS=1 $ctl ${shellQuote(method)}"
-            else -> "$prelude $machineMode $ctl ${shellQuote(method)} ${shellQuote(paramsJson)}"
+            paramsEmpty -> "$prelude $machineMode $ctl --raw ${shellQuote(method)}"
+            useStdin -> "$prelude $machineMode RKNNOVPN_STDIN_PARAMS=1 $ctl --raw ${shellQuote(method)}"
+            else -> "$prelude $machineMode $ctl --raw ${shellQuote(method)} ${shellQuote(paramsJson)}"
         }
     }
 

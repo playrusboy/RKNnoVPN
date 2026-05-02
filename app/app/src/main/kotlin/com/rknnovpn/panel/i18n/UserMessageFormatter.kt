@@ -68,6 +68,9 @@ class UserMessageFormatter @Inject constructor(
             text.contains("reboot required") -> get(R.string.error_module_reboot_required)
             text.contains("module is disabled") -> get(R.string.error_module_disabled)
             text.contains("service.sh is missing") -> get(R.string.error_module_install_incomplete)
+            text.contains("repair is running") ||
+                text.contains("repair is still starting") -> get(R.string.error_daemon_repair_running)
+            text.contains("repair failed") -> get(R.string.error_daemon_repair_failed)
             else -> get(R.string.error_daemon_not_running)
         }
     }

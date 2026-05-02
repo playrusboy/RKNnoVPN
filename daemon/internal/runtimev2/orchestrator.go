@@ -34,6 +34,7 @@ type Orchestrator struct {
 	last              *OperationResult
 	opSeq             uint64
 	activeStuckLogged bool
+	healthRefreshMu   sync.Mutex
 
 	watchdogAfter  time.Duration
 	logger         func(OperationLogEvent)
@@ -603,6 +604,14 @@ func (o *Orchestrator) RunOperation(kind OperationKind, phase Phase, fn func(gen
 }
 
 func (o *Orchestrator) RefreshHealth() HealthSnapshot {
+	if !o.healthRefreshMu.TryLock() {
+		o.mu.Lock()
+		health := o.health
+		o.mu.Unlock()
+		return health
+	}
+	defer o.healthRefreshMu.Unlock()
+
 	o.mu.Lock()
 	backendKind := o.applied.BackendKind
 	if backendKind == "" {

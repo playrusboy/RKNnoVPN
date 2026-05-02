@@ -35,6 +35,40 @@ type SetActiveNodeRequest struct {
 	Reload bool
 }
 
+type ProfilePatchRequest struct {
+	Reload          bool
+	HasActiveNodeID bool
+	ActiveNodeID    string
+	Routing         *profiledoc.RoutingConfig
+	DNS             *profiledoc.DNSConfig
+	Inbounds        *profiledoc.InboundsConfig
+}
+
+type NodeUpsertRequest struct {
+	Node   profiledoc.Node
+	Reload bool
+}
+
+type NodeRemoveRequest struct {
+	NodeID string
+	Reload bool
+}
+
+type RoutingPatchRequest struct {
+	Routing profiledoc.RoutingConfig
+	Reload  bool
+}
+
+type DNSPatchRequest struct {
+	DNS    profiledoc.DNSConfig
+	Reload bool
+}
+
+type InboundPatchRequest struct {
+	Inbounds profiledoc.InboundsConfig
+	Reload   bool
+}
+
 type SubscriptionURLRequest struct {
 	URL string
 }
@@ -188,6 +222,165 @@ func DecodeSetActiveNodeParams(params *json.RawMessage) (SetActiveNodeRequest, e
 		result.Reload = *p.Reload
 	}
 	result.NodeID = p.NodeID
+	return result, nil
+}
+
+func DecodeProfilePatchParams(params *json.RawMessage) (ProfilePatchRequest, error) {
+	result := ProfilePatchRequest{Reload: true}
+	if params == nil {
+		return result, fmt.Errorf("params required: profile patch object")
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(*params, &raw); err != nil {
+		return result, fmt.Errorf("invalid params: %w", err)
+	}
+	if value, ok := raw["reload"]; ok {
+		if err := json.Unmarshal(value, &result.Reload); err != nil {
+			return result, fmt.Errorf("invalid reload: %w", err)
+		}
+	}
+	if value, ok := raw["activeNodeId"]; ok {
+		result.HasActiveNodeID = true
+		if !bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			if err := json.Unmarshal(value, &result.ActiveNodeID); err != nil {
+				return result, fmt.Errorf("invalid activeNodeId: %w", err)
+			}
+		}
+	}
+	if value, ok := raw["routing"]; ok {
+		var routing profiledoc.RoutingConfig
+		if err := json.Unmarshal(value, &routing); err != nil {
+			return result, fmt.Errorf("invalid routing: %w", err)
+		}
+		result.Routing = &routing
+	}
+	if value, ok := raw["dns"]; ok {
+		var dns profiledoc.DNSConfig
+		if err := json.Unmarshal(value, &dns); err != nil {
+			return result, fmt.Errorf("invalid dns: %w", err)
+		}
+		result.DNS = &dns
+	}
+	if value, ok := raw["inbounds"]; ok {
+		var inbounds profiledoc.InboundsConfig
+		if err := json.Unmarshal(value, &inbounds); err != nil {
+			return result, fmt.Errorf("invalid inbounds: %w", err)
+		}
+		result.Inbounds = &inbounds
+	}
+	if !result.HasActiveNodeID && result.Routing == nil && result.DNS == nil && result.Inbounds == nil {
+		return result, fmt.Errorf("profile patch must include at least one supported field")
+	}
+	return result, nil
+}
+
+func DecodeNodeUpsertParams(params *json.RawMessage) (NodeUpsertRequest, error) {
+	result := NodeUpsertRequest{Reload: true}
+	if params == nil {
+		return result, fmt.Errorf("params required: {\"node\": {...}}")
+	}
+	var p struct {
+		Node   *profiledoc.Node `json:"node"`
+		Reload *bool            `json:"reload"`
+	}
+	if err := json.Unmarshal(*params, &p); err != nil {
+		return result, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.Node == nil {
+		return result, fmt.Errorf("node is required")
+	}
+	if p.Reload != nil {
+		result.Reload = *p.Reload
+	}
+	result.Node = *p.Node
+	return result, nil
+}
+
+func DecodeNodeRemoveParams(params *json.RawMessage) (NodeRemoveRequest, error) {
+	result := NodeRemoveRequest{Reload: true}
+	if params == nil {
+		return result, fmt.Errorf("params required: {\"nodeId\": \"...\"}")
+	}
+	var p struct {
+		NodeID string `json:"nodeId"`
+		Reload *bool  `json:"reload"`
+	}
+	if err := json.Unmarshal(*params, &p); err != nil {
+		return result, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.NodeID == "" {
+		return result, fmt.Errorf("nodeId is required")
+	}
+	if p.Reload != nil {
+		result.Reload = *p.Reload
+	}
+	result.NodeID = p.NodeID
+	return result, nil
+}
+
+func DecodeRoutingPatchParams(params *json.RawMessage) (RoutingPatchRequest, error) {
+	result := RoutingPatchRequest{Reload: true}
+	if params == nil {
+		return result, fmt.Errorf("params required: {\"routing\": {...}}")
+	}
+	var p struct {
+		Routing *profiledoc.RoutingConfig `json:"routing"`
+		Reload  *bool                     `json:"reload"`
+	}
+	if err := json.Unmarshal(*params, &p); err != nil {
+		return result, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.Routing == nil {
+		return result, fmt.Errorf("routing is required")
+	}
+	if p.Reload != nil {
+		result.Reload = *p.Reload
+	}
+	result.Routing = *p.Routing
+	return result, nil
+}
+
+func DecodeDNSPatchParams(params *json.RawMessage) (DNSPatchRequest, error) {
+	result := DNSPatchRequest{Reload: true}
+	if params == nil {
+		return result, fmt.Errorf("params required: {\"dns\": {...}}")
+	}
+	var p struct {
+		DNS    *profiledoc.DNSConfig `json:"dns"`
+		Reload *bool                 `json:"reload"`
+	}
+	if err := json.Unmarshal(*params, &p); err != nil {
+		return result, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.DNS == nil {
+		return result, fmt.Errorf("dns is required")
+	}
+	if p.Reload != nil {
+		result.Reload = *p.Reload
+	}
+	result.DNS = *p.DNS
+	return result, nil
+}
+
+func DecodeInboundPatchParams(params *json.RawMessage) (InboundPatchRequest, error) {
+	result := InboundPatchRequest{Reload: true}
+	if params == nil {
+		return result, fmt.Errorf("params required: {\"inbounds\": {...}}")
+	}
+	var p struct {
+		Inbounds *profiledoc.InboundsConfig `json:"inbounds"`
+		Reload   *bool                      `json:"reload"`
+	}
+	if err := json.Unmarshal(*params, &p); err != nil {
+		return result, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.Inbounds == nil {
+		return result, fmt.Errorf("inbounds is required")
+	}
+	if p.Reload != nil {
+		result.Reload = *p.Reload
+	}
+	result.Inbounds = *p.Inbounds
 	return result, nil
 }
 

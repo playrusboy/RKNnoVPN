@@ -109,6 +109,18 @@ data class UpdateInstallState(
 )
 
 @Serializable
+data class CachedUpdateCheckState(
+    val lastCheckedAt: String? = null,
+    val currentVersion: String = "",
+    val latestVersion: String = "",
+    val hasUpdate: Boolean = false,
+    val changelog: String = "",
+    val moduleSize: Long = 0L,
+    val apkSize: Long = 0L,
+    val error: String = "",
+)
+
+@Serializable
 data class BackendHealthSnapshot(
     val coreReady: Boolean = false,
     val dnsReady: Boolean = false,
@@ -201,6 +213,7 @@ data class BackendStatusV2(
     val activeOperation: RuntimeOperationStatus? = null,
     val lastOperation: RuntimeOperationResult? = null,
     val updateInstall: UpdateInstallState? = null,
+    val updateCheck: CachedUpdateCheckState? = null,
 )
 
 @Serializable

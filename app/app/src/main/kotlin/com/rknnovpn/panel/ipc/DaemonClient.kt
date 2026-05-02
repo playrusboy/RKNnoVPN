@@ -7,13 +7,17 @@ import com.rknnovpn.panel.model.BackendHealthSnapshot
 import com.rknnovpn.panel.model.BackendStatusV2
 import com.rknnovpn.panel.model.DaemonStatus
 import com.rknnovpn.panel.model.DesiredStateV2
+import com.rknnovpn.panel.model.DnsConfig
+import com.rknnovpn.panel.model.InboundsConfig
 import com.rknnovpn.panel.model.Node
 import com.rknnovpn.panel.model.NodeProbeResultV2
 import com.rknnovpn.panel.model.ProfileConfig
+import com.rknnovpn.panel.model.RoutingConfig
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
@@ -41,6 +45,7 @@ class DaemonClient @Inject constructor(
         const val MIN_CONTROL_PROTOCOL_VERSION = 5
         const val MIN_SCHEMA_VERSION = 5
         val REQUIRED_METHODS: Set<String> = GeneratedDaemonContract.APK_REQUIRED_METHODS
+        private const val COMPATIBILITY_CACHE_TTL_MS = 5_000L
     }
 
     private val json = Json {
@@ -181,6 +186,89 @@ class DaemonClient @Inject constructor(
         )
     }
 
+    suspend fun profileClearActiveNode(
+        reload: Boolean = true,
+    ): DaemonClientResult<ConfigMutationInfo> {
+        requireCompatible("profile.patch", allowModuleRepair = true)?.let { return it.asFailure() }
+        return callConfigMutation(
+            "profile.patch",
+            buildJsonObject {
+                put("activeNodeId", JsonNull)
+                put("reload", reload)
+            },
+        )
+    }
+
+    suspend fun profileNodeUpsert(
+        node: Node,
+        reload: Boolean = true,
+    ): DaemonClientResult<ConfigMutationInfo> {
+        requireCompatible("profile.node.upsert", allowModuleRepair = true)?.let { return it.asFailure() }
+        return callConfigMutation(
+            "profile.node.upsert",
+            buildJsonObject {
+                put("node", json.encodeToJsonElement(Node.serializer(), node))
+                put("reload", reload)
+            },
+        )
+    }
+
+    suspend fun profileNodeRemove(
+        nodeId: String,
+        reload: Boolean = true,
+    ): DaemonClientResult<ConfigMutationInfo> {
+        requireCompatible("profile.node.remove", allowModuleRepair = true)?.let { return it.asFailure() }
+        return callConfigMutation(
+            "profile.node.remove",
+            buildJsonObject {
+                put("nodeId", nodeId)
+                put("reload", reload)
+            },
+        )
+    }
+
+    suspend fun profileRoutingPatch(
+        routing: RoutingConfig,
+        reload: Boolean = true,
+    ): DaemonClientResult<ConfigMutationInfo> {
+        requireCompatible("profile.routing.patch", allowModuleRepair = true)?.let { return it.asFailure() }
+        return callConfigMutation(
+            "profile.routing.patch",
+            buildJsonObject {
+                put("routing", json.encodeToJsonElement(RoutingConfig.serializer(), routing))
+                put("reload", reload)
+            },
+        )
+    }
+
+    suspend fun profileDNSPatch(
+        dns: DnsConfig,
+        reload: Boolean = true,
+    ): DaemonClientResult<ConfigMutationInfo> {
+        requireCompatible("profile.dns.patch", allowModuleRepair = true)?.let { return it.asFailure() }
+        return callConfigMutation(
+            "profile.dns.patch",
+            buildJsonObject {
+                put("dns", json.encodeToJsonElement(DnsConfig.serializer(), dns))
+                put("reload", reload)
+            },
+        )
+    }
+
+    suspend fun profileInboundPatch(
+        inbounds: InboundsConfig,
+        reload: Boolean = true,
+    ): DaemonClientResult<ConfigMutationInfo> {
+        requireCompatible("profile.inbound.patch", allowModuleRepair = true)?.let { return it.asFailure() }
+        return callConfigMutation(
+            "profile.inbound.patch",
+            buildJsonObject {
+                put("inbounds", json.encodeToJsonElement(InboundsConfig.serializer(), inbounds))
+                put("reload", reload)
+            },
+        )
+    }
+
     /** List all stored config sections the daemon currently understands. */
     suspend fun configList(): DaemonClientResult<List<ProfileSummary>> {
         requireCompatible("config-list")?.let { return it.asFailure() }
@@ -220,14 +308,24 @@ class DaemonClient @Inject constructor(
         }
     }
 
-    suspend fun backendStatus(includeHealthRefresh: Boolean = false): DaemonClientResult<BackendStatusV2> {
-        val params = if (includeHealthRefresh) {
-            buildJsonObject { put("includeHealthRefresh", true) }
-        } else {
-            emptyJsonObject()
+    suspend fun backendStatus(
+        includeHealthRefresh: Boolean = false,
+        includeCompatibility: Boolean = false,
+    ): DaemonClientResult<BackendStatusV2> {
+        val params = buildJsonObject {
+            if (includeHealthRefresh) {
+                put("includeHealthRefresh", true)
+            }
+            if (!includeCompatibility) {
+                put("includeCompatibility", false)
+            }
         }
         val timeoutMs = if (includeHealthRefresh) 30_000L else 5_000L
-        return call("backend.status", params = params, timeoutMs = timeoutMs) {
+        return call(
+            "backend.status",
+            params = params,
+            timeoutMs = timeoutMs,
+        ) {
             json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
         }
     }
@@ -404,8 +502,38 @@ class DaemonClient @Inject constructor(
             json.decodeFromJsonElement(IpcContractInfo.serializer(), element)
         }
 
+    suspend fun compatibilityCheck(
+        requiredMethods: Collection<String> = emptyList(),
+        allowModuleRepair: Boolean = false,
+    ): DaemonClientResult<CompatibilityCheckInfo> {
+        val params = buildJsonObject {
+            putJsonArray("requiredMethods") {
+                requiredMethods.distinct().forEach { add(it) }
+            }
+        }
+        return call("compat.check", params = params, allowModuleRepair = allowModuleRepair) { element ->
+            json.parseCompatibilityCheckInfo(element)
+        }
+    }
+
     suspend fun version(allowModuleRepair: Boolean = false): DaemonClientResult<VersionInfo> =
         call("version", allowModuleRepair = allowModuleRepair, transform = ::parseVersionInfo)
+
+    suspend fun moduleState(): DaemonctlResult =
+        executor.execute(
+            method = "module.state",
+            params = emptyJsonObject(),
+            timeoutMs = 5_000L,
+            allowModuleRepair = false,
+        )
+
+    suspend fun moduleRepair(): DaemonctlResult =
+        executor.execute(
+            method = "module.repair",
+            params = emptyJsonObject(),
+            timeoutMs = 5_000L,
+            allowModuleRepair = false,
+        )
 
     // ---- Internal helpers ----
 
@@ -444,10 +572,10 @@ class DaemonClient @Inject constructor(
         reload: Boolean,
     ): DaemonClientResult<ConfigMutationInfo> {
         requireCompatible("profile.importNodesBatch", allowModuleRepair = true)?.let {
-            return payloadTooLargeError()
+            return it.asFailure()
         }
         requireCompatible("profile.commitImportBatch", allowModuleRepair = true)?.let {
-            return payloadTooLargeError()
+            return it.asFailure()
         }
         val batches = splitImportNodeBatches(nodes)
         if (batches.isEmpty()) {
@@ -537,65 +665,73 @@ class DaemonClient @Inject constructor(
         vararg requiredMethods: String,
         allowModuleRepair: Boolean = false,
     ): DaemonClientResult<Unit>? {
-        return when (val result = version(allowModuleRepair)) {
+        val now = System.currentTimeMillis()
+        val required = requiredMethods.toList()
+        val bootstrapMethods = listOf("compat.check", "ipc.contract", "version")
+        val compatibilityRequired = required + listOf("compat.check")
+        compatibilityCache
+            ?.takeIf { cache -> cache.isFresh(now, COMPATIBILITY_CACHE_TTL_MS) }
+            ?.takeIf { cache -> cache.supports(required + bootstrapMethods) }
+            ?.let { cache ->
+                val cachedIssue = ipcCompatibilityIssue(
+                    info = cache.info,
+                    contract = cache.contract,
+                    apkVersion = BuildConfig.VERSION_NAME,
+                    requiredMethods = compatibilityRequired,
+                    minControlProtocolVersion = MIN_CONTROL_PROTOCOL_VERSION,
+                    minSchemaVersion = MIN_SCHEMA_VERSION,
+                )
+                return if (cachedIssue == null) {
+                    null
+                } else {
+                    DaemonClientResult.DaemonError(DaemonClientErrorCodes.COMPATIBILITY, cachedIssue)
+                }
+            }
+        return when (val result = compatibilityCheck(required + bootstrapMethods, allowModuleRepair)) {
             is DaemonClientResult.Ok -> {
-                val info = result.data
-                if ("ipc.contract" !in info.supportedMethods) {
+                val info = result.data.version
+                if (bootstrapMethods.any { it !in info.supportedMethods }) {
                     return DaemonClientResult.DaemonError(
                         DaemonClientErrorCodes.COMPATIBILITY,
-                        "APK и модуль несовместимы: daemon не рекламирует IPC contract",
+                        "APK и модуль несовместимы: daemon не рекламирует compatibility check",
                     )
                 }
+                val contract = result.data.contract
                 val fingerprint = info.compatibilityFingerprint()
                 compatibilityCache
                     ?.takeIf { it.fingerprint == fingerprint }
-                    ?.takeIf { cache -> cache.supports(requiredMethods.toList() + listOf("ipc.contract", "version")) }
+                    ?.takeIf { cache -> cache.supports(required + bootstrapMethods) }
                     ?.let { cache ->
                         val cachedIssue = ipcCompatibilityIssue(
                             info = info,
                             contract = cache.contract,
                             apkVersion = BuildConfig.VERSION_NAME,
-                            requiredMethods = requiredMethods.toList(),
+                            requiredMethods = compatibilityRequired,
                             minControlProtocolVersion = MIN_CONTROL_PROTOCOL_VERSION,
                             minSchemaVersion = MIN_SCHEMA_VERSION,
                         )
                         return if (cachedIssue == null) {
+                            compatibilityCache = cache.copy(info = info, checkedAtMs = now)
                             null
                         } else {
                             DaemonClientResult.DaemonError(DaemonClientErrorCodes.COMPATIBILITY, cachedIssue)
                         }
                     }
-                val contract = when (val contractResult = ipcContract(allowModuleRepair)) {
-                    is DaemonClientResult.Ok -> contractResult.data
-                    is DaemonClientResult.DaemonError -> return DaemonClientResult.DaemonError(
-                        DaemonClientErrorCodes.COMPATIBILITY,
-                        "APK и модуль несовместимы: daemon не отдал IPC contract (${contractResult.message})",
-                        contractResult.details,
-                    )
-                    is DaemonClientResult.ParseError -> return DaemonClientResult.DaemonError(
-                        DaemonClientErrorCodes.COMPATIBILITY,
-                        "APK и модуль несовместимы: некорректный IPC contract",
-                    )
-                    is DaemonClientResult.RootDenied -> return contractResult
-                    is DaemonClientResult.Timeout -> return contractResult
-                    is DaemonClientResult.DaemonNotFound -> return contractResult
-                    is DaemonClientResult.DaemonUnavailable -> return contractResult
-                    is DaemonClientResult.Failure -> return contractResult
-                }
                 val issue = ipcCompatibilityIssue(
                     info = info,
                     contract = contract,
                     apkVersion = BuildConfig.VERSION_NAME,
-                    requiredMethods = requiredMethods.toList(),
+                    requiredMethods = compatibilityRequired,
                     minControlProtocolVersion = MIN_CONTROL_PROTOCOL_VERSION,
                     minSchemaVersion = MIN_SCHEMA_VERSION,
                 )
                 if (issue == null) {
                     compatibilityCache = CompatibilityCache(
+                        info = info,
                         fingerprint = fingerprint,
                         contract = contract,
                         supportedMethods = contract.methods.mapTo(mutableSetOf()) { it.method },
-                        checkedAtMs = System.currentTimeMillis(),
+                        checkedAtMs = now,
                     )
                     null
                 } else {
@@ -605,7 +741,7 @@ class DaemonClient @Inject constructor(
             is DaemonClientResult.DaemonError ->
                 DaemonClientResult.DaemonError(
                     DaemonClientErrorCodes.COMPATIBILITY,
-                    "APK и модуль несовместимы: daemon не сообщает capabilities (${result.message})",
+                    "APK и модуль несовместимы: daemon не выполнил compatibility check (${result.message})",
                     result.details,
                 )
             is DaemonClientResult.RootDenied -> result
@@ -614,7 +750,7 @@ class DaemonClient @Inject constructor(
             is DaemonClientResult.DaemonUnavailable -> result
             is DaemonClientResult.ParseError -> DaemonClientResult.DaemonError(
                 DaemonClientErrorCodes.COMPATIBILITY,
-                "APK и модуль несовместимы: некорректный ответ version",
+                "APK и модуль несовместимы: некорректный ответ compat.check",
             )
             is DaemonClientResult.Failure -> result
         }
@@ -623,6 +759,7 @@ class DaemonClient @Inject constructor(
 }
 
 private data class CompatibilityCache(
+    val info: VersionInfo,
     val fingerprint: String,
     val contract: IpcContractInfo,
     val supportedMethods: Set<String>,
@@ -630,6 +767,9 @@ private data class CompatibilityCache(
 ) {
     fun supports(methods: Collection<String>): Boolean =
         supportedMethods.isNotEmpty() && methods.all { it in supportedMethods }
+
+    fun isFresh(nowMs: Long, ttlMs: Long): Boolean =
+        nowMs - checkedAtMs in 0..ttlMs
 }
 
 private fun VersionInfo.compatibilityFingerprint(): String {
