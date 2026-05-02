@@ -29,7 +29,7 @@ func activeNodeSelectorSwitchTarget(oldCfg *config.Config, newCfg *config.Config
 	}
 	oldActive := strings.TrimSpace(oldCfg.Profile.ActiveNodeID)
 	newActive := strings.TrimSpace(newCfg.Profile.ActiveNodeID)
-	if newActive == "" || oldActive == newActive {
+	if oldActive == newActive {
 		return ""
 	}
 	if !sameConfigExceptActiveNodeProjection(oldCfg, newCfg) {
@@ -39,12 +39,36 @@ func activeNodeSelectorSwitchTarget(oldCfg *config.Config, newCfg *config.Config
 	if len(profiles) <= 1 {
 		return ""
 	}
-	for _, profile := range profiles {
-		if profile.ID == newActive {
-			return strings.TrimSpace(profile.Tag)
+	oldProfile := activeProfileByID(oldCfg, oldActive)
+	newProfile := activeProfileByID(newCfg, newActive)
+	if config.RequiresXraySidecar(oldProfile) || config.RequiresXraySidecar(newProfile) {
+		return ""
+	}
+	if newActive == "" {
+		for _, profile := range profiles {
+			if config.RequiresXraySidecar(profile) {
+				return ""
+			}
 		}
+		return "auto"
+	}
+	if newProfile != nil {
+		return strings.TrimSpace(newProfile.Tag)
 	}
 	return ""
+}
+
+func activeProfileByID(cfg *config.Config, id string) *config.NodeProfile {
+	id = strings.TrimSpace(id)
+	if cfg == nil || id == "" {
+		return nil
+	}
+	for _, profile := range config.ProfilesFromConfigNodes(cfg) {
+		if profile.ID == id {
+			return profile
+		}
+	}
+	return nil
 }
 
 func sameConfigExceptActiveNodeProjection(oldCfg *config.Config, newCfg *config.Config) bool {
@@ -100,6 +124,41 @@ func switchSingboxSelector(cfg *config.Config, selectorTag string, outboundTag s
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 64*1024))
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("clash selector HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if err := verifySingboxSelector(client, cfg, selectorTag, outboundTag, secret); err != nil {
+		return err
+	}
+	return nil
+}
+
+func verifySingboxSelector(client *http.Client, cfg *config.Config, selectorTag string, outboundTag string, secret string) error {
+	endpoint := fmt.Sprintf(
+		"http://127.0.0.1:%d/proxies/%s",
+		cfg.Proxy.APIPort,
+		neturl.PathEscape(selectorTag),
+	)
+	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+secret)
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(response.Body, 64*1024))
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("clash selector verify HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var parsed struct {
+		Now string `json:"now"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return fmt.Errorf("parse clash selector verify response: %w", err)
+	}
+	if strings.TrimSpace(parsed.Now) != outboundTag {
+		return fmt.Errorf("selector %s selected %q, want %q", selectorTag, parsed.Now, outboundTag)
 	}
 	return nil
 }

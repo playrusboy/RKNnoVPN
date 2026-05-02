@@ -19,12 +19,12 @@ func (p rootProbeIO) BootstrapDNS(cfg *config.Config, host string, timeout time.
 	return p.d.probeNodeBootstrapDNS(cfg, host, timeout)
 }
 
-func (p rootProbeIO) ClashDelay(apiPort int, outboundTag string, testURL string, timeoutMS int) (int64, int, error) {
-	return testClashDelay(apiPort, outboundTag, testURL, timeoutMS)
+func (p rootProbeIO) ClashDelay(apiPort int, apiSecret string, outboundTag string, testURL string, timeoutMS int) (int64, int, error) {
+	return testClashDelay(apiPort, apiSecret, outboundTag, testURL, timeoutMS)
 }
 
-func (p rootProbeIO) TransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int) (rootruntime.URLProbeMetrics, error) {
-	metrics, err := testTransparentURLProbe(cfg, testURL, timeoutMS)
+func (p rootProbeIO) TransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int, includeThroughput bool) (rootruntime.URLProbeMetrics, error) {
+	metrics, err := testTransparentURLProbe(cfg, testURL, timeoutMS, includeThroughput)
 	return rootruntime.URLProbeMetrics{
 		LatencyMS:     metrics.LatencyMS,
 		StatusCode:    metrics.StatusCode,

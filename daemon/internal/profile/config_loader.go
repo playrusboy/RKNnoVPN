@@ -47,9 +47,16 @@ func LoadConfigProjection(configPath string) (LoadedConfig, error) {
 		}
 	}
 	if profileFound {
+		oldAPIPort := cfg.Proxy.APIPort
+		oldAPISecret := cfg.Proxy.APISecret
 		cfg, _, err = ApplyToConfig(cfg, profileDoc)
 		if err != nil {
 			return LoadedConfig{}, fmt.Errorf("apply profile: %w", err)
+		}
+		if cfg.Proxy.APIPort != oldAPIPort || cfg.Proxy.APISecret != oldAPISecret {
+			if err := cfg.Save(configPath); err != nil {
+				return LoadedConfig{}, fmt.Errorf("persist profile config projection: %w", err)
+			}
 		}
 		return LoadedConfig{Config: cfg, ProfilePath: profilePath, ProfileFound: true}, nil
 	}

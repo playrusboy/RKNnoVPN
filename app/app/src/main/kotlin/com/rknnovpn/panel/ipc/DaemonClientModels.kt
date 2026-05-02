@@ -110,6 +110,7 @@ data class RejectedSubscriptionNode(
 
 @Serializable
 data class SubscriptionPreviewInfo(
+    val previewId: String = "",
     val source: SubscriptionSource = SubscriptionSource(),
     val subscription: Subscription = Subscription(providerKey = "", url = ""),
     val nodes: List<Node> = emptyList(),

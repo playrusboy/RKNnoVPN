@@ -662,10 +662,12 @@ def check_diagnostics_state_surface() -> list[str]:
         (
             '"diagnostics.health":        g.Diagnostics.DiagnosticsHealth',
             '"diagnostics.health":        ipc.WithoutContext(g.Diagnostics.DiagnosticsHealth)',
+            '"diagnostics.health":         g.Diagnostics.DiagnosticsHealthContext',
         ),
         (
             '"diagnostics.testNodes":     g.Diagnostics.DiagnosticsTestNodes',
             '"diagnostics.testNodes":     ipc.WithoutContext(g.Diagnostics.DiagnosticsTestNodes)',
+            '"diagnostics.testNodes":      g.Diagnostics.DiagnosticsTestNodesContext',
         ),
     ]:
         if not any(snippet in registry for snippet in snippets):

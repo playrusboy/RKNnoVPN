@@ -1,7 +1,10 @@
 package control
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,46 +27,44 @@ func NewSubscriptionPreviewCache() *SubscriptionPreviewCache {
 	return &SubscriptionPreviewCache{previews: make(map[string]cachedSubscriptionPreview)}
 }
 
-func (c *SubscriptionPreviewCache) Put(rawURL string, preview subscription.PreviewResult, now time.Time) {
+func (c *SubscriptionPreviewCache) Put(preview subscription.PreviewResult, now time.Time) (string, error) {
 	if c == nil {
-		return
+		return "", fmt.Errorf("subscription preview cache is not configured")
 	}
 	if now.IsZero() {
 		now = time.Now()
 	}
-	key := subscriptionPreviewCacheKey(rawURL, preview.Source)
-	if key == "" {
-		return
+	previewID, err := newSubscriptionPreviewID()
+	if err != nil {
+		return "", err
 	}
+	preview.PreviewID = previewID
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cleanupLocked(now)
-	c.previews[key] = cachedSubscriptionPreview{preview: preview, createdAt: now}
+	c.previews[previewID] = cachedSubscriptionPreview{preview: preview, createdAt: now}
+	return previewID, nil
 }
 
-func (c *SubscriptionPreviewCache) Take(rawURL string, now time.Time) (subscription.PreviewResult, bool) {
+func (c *SubscriptionPreviewCache) Take(previewID string, now time.Time) (subscription.PreviewResult, bool) {
 	if c == nil {
+		return subscription.PreviewResult{}, false
+	}
+	previewID = strings.TrimSpace(previewID)
+	if previewID == "" {
 		return subscription.PreviewResult{}, false
 	}
 	if now.IsZero() {
 		now = time.Now()
 	}
-	source, err := subscription.NewSubscriptionSource(rawURL)
-	if err != nil {
-		return subscription.PreviewResult{}, false
-	}
-	key := subscriptionPreviewCacheKey(rawURL, source)
-	if key == "" {
-		return subscription.PreviewResult{}, false
-	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cleanupLocked(now)
-	cached, ok := c.previews[key]
+	cached, ok := c.previews[previewID]
 	if !ok {
 		return subscription.PreviewResult{}, false
 	}
-	delete(c.previews, key)
+	delete(c.previews, previewID)
 	if now.Sub(cached.createdAt) > subscriptionPreviewTTL {
 		return subscription.PreviewResult{}, false
 	}
@@ -71,19 +72,17 @@ func (c *SubscriptionPreviewCache) Take(rawURL string, now time.Time) (subscript
 }
 
 func (c *SubscriptionPreviewCache) cleanupLocked(now time.Time) {
-	for key, cached := range c.previews {
+	for previewID, cached := range c.previews {
 		if now.Sub(cached.createdAt) > subscriptionPreviewTTL {
-			delete(c.previews, key)
+			delete(c.previews, previewID)
 		}
 	}
 }
 
-func subscriptionPreviewCacheKey(rawURL string, source subscription.SubscriptionSource) string {
-	if source.URL != "" {
-		return source.URL
+func newSubscriptionPreviewID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("generate subscription preview id: %w", err)
 	}
-	if parsed, err := subscription.NewSubscriptionSource(rawURL); err == nil {
-		return parsed.URL
-	}
-	return fmt.Sprintf("raw:%s", rawURL)
+	return hex.EncodeToString(raw[:]), nil
 }

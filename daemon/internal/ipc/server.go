@@ -302,7 +302,7 @@ func timeoutForMethod(method string) time.Duration {
 		"config-import", "profile.apply", "profile.commitImportBatch", "profile.dns.patch",
 		"profile.inbound.patch", "profile.importNodes", "profile.importNodesBatch",
 		"profile.node.remove", "profile.node.upsert", "profile.patch", "profile.routing.patch",
-		"profile.setActiveNode", "subscription.preview", "subscription.refresh":
+		"profile.setActiveNode", "subscription.commitPreview", "subscription.preview", "subscription.refresh":
 		return 60 * time.Second
 	case "diagnostics.health", "diagnostics.report", "diagnostics.testNodes", "self-check",
 		"logs", "audit", "app.list":

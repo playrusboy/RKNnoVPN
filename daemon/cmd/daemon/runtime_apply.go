@@ -55,9 +55,24 @@ func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, op
 				if selectorSwitchTag != "" && !fullRestart && !netstackReapplyAfter {
 					if err := switchSingboxSelector(cfg, singboxProxySelectorTag, selectorSwitchTag); err == nil {
 						log.Printf("runtime reload plan: mode=selector-switch selector=%s outbound=%s", singboxProxySelectorTag, selectorSwitchTag)
+						d.runtimeV2.SetActiveOperationStep(
+							generation,
+							"selector-switch",
+							"ok",
+							"",
+							"selector="+singboxProxySelectorTag+" outbound="+selectorSwitchTag,
+						)
+						d.coreMgr.MarkSelectorActive(cfg.ResolveProfile())
 						return nil
 					} else {
 						log.Printf("runtime selector switch failed; falling back to hot-swap: %v", err)
+						d.runtimeV2.SetActiveOperationStep(
+							generation,
+							"selector-switch",
+							"failed",
+							"SELECTOR_SWITCH_FAILED",
+							err.Error(),
+						)
 					}
 				}
 				return d.reloadRuntimeAfterConfigChange(

@@ -29,7 +29,7 @@ func testTCPConnect(host string, port int, timeout time.Duration) (int64, error)
 	return time.Since(start).Milliseconds(), nil
 }
 
-func testClashDelay(apiPort int, outboundTag string, testURL string, timeoutMS int) (int64, int, error) {
+func testClashDelay(apiPort int, apiSecret string, outboundTag string, testURL string, timeoutMS int) (int64, int, error) {
 	if apiPort <= 0 {
 		return 0, 0, fmt.Errorf("api_disabled")
 	}
@@ -46,7 +46,14 @@ func testClashDelay(apiPort int, outboundTag string, testURL string, timeoutMS i
 		values.Encode(),
 	)
 	client := &http.Client{Timeout: time.Duration(timeoutMS+1000) * time.Millisecond}
-	resp, err := client.Get(endpoint)
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	if secret := strings.TrimSpace(apiSecret); secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -71,7 +78,7 @@ type urlProbeMetrics struct {
 	ThroughputBps int64
 }
 
-func testTransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int) (urlProbeMetrics, error) {
+func testTransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int, includeThroughput bool) (urlProbeMetrics, error) {
 	var metrics urlProbeMetrics
 	if cfg == nil {
 		return metrics, fmt.Errorf("config is nil")
@@ -142,13 +149,17 @@ func testTransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int) 
 		return metrics, err
 	}
 	defer resp.Body.Close()
-	bytesRead, _ := io.Copy(io.Discard, io.LimitReader(resp.Body, 4*1024*1024))
 	elapsed := time.Since(start)
 	metrics.LatencyMS = elapsed.Milliseconds()
 	metrics.StatusCode = resp.StatusCode
-	metrics.ResponseBytes = bytesRead
-	if bytesRead > 0 && elapsed > 0 {
-		metrics.ThroughputBps = int64(float64(bytesRead) / elapsed.Seconds())
+	if includeThroughput {
+		bytesRead, _ := io.Copy(io.Discard, io.LimitReader(resp.Body, 4*1024*1024))
+		elapsed = time.Since(start)
+		metrics.LatencyMS = elapsed.Milliseconds()
+		metrics.ResponseBytes = bytesRead
+		if bytesRead > 0 && elapsed > 0 {
+			metrics.ThroughputBps = int64(float64(bytesRead) / elapsed.Seconds())
+		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
 		return metrics, fmt.Errorf("transparent URL probe HTTP %d", resp.StatusCode)

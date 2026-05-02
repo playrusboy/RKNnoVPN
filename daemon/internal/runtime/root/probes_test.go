@@ -14,8 +14,10 @@ import (
 
 type fakeProbeIO struct {
 	urlErr           error
+	tcpErr           error
 	dnsBootstrap     *bool
 	transparentCalls *int
+	throughputModes  *[]bool
 	clashCalls       *int
 }
 
@@ -41,15 +43,18 @@ func (f *countingProbeIO) BootstrapDNS(cfg *config.Config, host string, timeout 
 	return true
 }
 
-func (f *countingProbeIO) ClashDelay(apiPort int, outboundTag string, testURL string, timeoutMS int) (int64, int, error) {
+func (f *countingProbeIO) ClashDelay(apiPort int, apiSecret string, outboundTag string, testURL string, timeoutMS int) (int64, int, error) {
 	return 0, 0, nil
 }
 
-func (f *countingProbeIO) TransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int) (URLProbeMetrics, error) {
+func (f *countingProbeIO) TransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int, includeThroughput bool) (URLProbeMetrics, error) {
 	return URLProbeMetrics{}, nil
 }
 
 func (f fakeProbeIO) TCPConnect(host string, port int, timeout time.Duration) (int64, error) {
+	if f.tcpErr != nil {
+		return 0, f.tcpErr
+	}
 	return 12, nil
 }
 
@@ -60,16 +65,19 @@ func (f fakeProbeIO) BootstrapDNS(cfg *config.Config, host string, timeout time.
 	return true
 }
 
-func (f fakeProbeIO) ClashDelay(apiPort int, outboundTag string, testURL string, timeoutMS int) (int64, int, error) {
+func (f fakeProbeIO) ClashDelay(apiPort int, apiSecret string, outboundTag string, testURL string, timeoutMS int) (int64, int, error) {
 	if f.clashCalls != nil {
 		*f.clashCalls++
 	}
 	return 0, 0, f.urlErr
 }
 
-func (f fakeProbeIO) TransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int) (URLProbeMetrics, error) {
+func (f fakeProbeIO) TransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int, includeThroughput bool) (URLProbeMetrics, error) {
 	if f.transparentCalls != nil {
 		*f.transparentCalls++
+	}
+	if f.throughputModes != nil {
+		*f.throughputModes = append(*f.throughputModes, includeThroughput)
 	}
 	return URLProbeMetrics{}, f.urlErr
 }
@@ -175,6 +183,61 @@ func TestRunNodeProbesUsesTransparentURLProbeForActiveNodeWithoutClashAPI(t *tes
 	}
 	if clashCalls != 0 {
 		t.Fatalf("clash probe calls = %d, want 0", clashCalls)
+	}
+}
+
+func TestRunNodeProbesControlsTransparentThroughputMode(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Profile.Nodes = []json.RawMessage{mustRawNode(t, "node-a")}
+	modes := []bool{}
+
+	RunNodeProbes(NodeProbeInput{
+		Config:            cfg,
+		State:             core.StateRunning,
+		TimeoutMS:         1000,
+		IncludeThroughput: false,
+		IO: fakeProbeIO{
+			throughputModes: &modes,
+		},
+	})
+	RunNodeProbes(NodeProbeInput{
+		Config:            cfg,
+		State:             core.StateRunning,
+		TimeoutMS:         1000,
+		IncludeThroughput: true,
+		IO: fakeProbeIO{
+			throughputModes: &modes,
+		},
+	})
+
+	if len(modes) != 2 || modes[0] || !modes[1] {
+		t.Fatalf("transparent throughput modes = %#v, want [false true]", modes)
+	}
+}
+
+func TestRunNodeProbesSkipsTunnelProbeAfterTCPFailure(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Proxy.APIPort = 9090
+	cfg.Profile.Nodes = []json.RawMessage{mustRawNode(t, "node-a")}
+	clashCalls := 0
+
+	results := RunNodeProbes(NodeProbeInput{
+		Config:    cfg,
+		State:     core.StateRunning,
+		TimeoutMS: 1000,
+		IO: fakeProbeIO{
+			tcpErr:     errors.New("connect timeout"),
+			clashCalls: &clashCalls,
+		},
+	})
+	if len(results) != 1 {
+		t.Fatalf("results length = %d, want 1", len(results))
+	}
+	if results[0].URLStatus != "not_run" || results[0].Verdict != "unusable" || results[0].ErrorClass != "tcp_direct_failed" {
+		t.Fatalf("tcp failure should skip tunnel probe, got %#v", results[0])
+	}
+	if clashCalls != 0 {
+		t.Fatalf("clash delay calls = %d, want 0", clashCalls)
 	}
 }
 

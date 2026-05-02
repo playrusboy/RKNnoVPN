@@ -6,6 +6,7 @@
     "DiagnosticsReportRequest": {"lines": 120},
     "BackendStatusRequest": {"includeHealthRefresh": true, "includeCompatibility": true},
     "CommitImportBatchRequest": {"batchId": "import-1", "reload": true},
+    "CommitSubscriptionPreviewRequest": {"previewId": "0123456789abcdef0123456789abcdef"},
     "CompatibilityCheckRequest": {"requiredMethods": ["backend.status"]},
     "ImportNodesBatchRequest": {"batchId": "import-1", "totalBatches": 2, "nodes": [{"id": "node-1", "name": "Local", "protocol": "SOCKS", "server": "127.0.0.1", "port": 10808}]},
     "LogsRequest": {"lines": 100},
@@ -19,7 +20,7 @@
     "SelfCheckRequest": {"lines": 80},
     "SetActiveNodeRequest": {"nodeId": "node-1"},
     "SubscriptionURLRequest": {"url": "https://example.com/sub"},
-    "TestNodesRequest": {"url": "https://www.gstatic.com/generate_204"}
+    "TestNodesRequest": {"url": "https://www.gstatic.com/generate_204", "mode": "fast"}
   },
   "operationPolicies": {
     "applyDesiredState": {
@@ -121,6 +122,7 @@
     "profile.routing.patch",
     "profile.setActiveNode",
     "self-check",
+    "subscription.commitPreview",
     "subscription.preview",
     "subscription.refresh",
     "update-check",
@@ -435,6 +437,19 @@
       "request": "SelfCheckRequest",
       "result": "SelfCheckReport",
       "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR"]
+    },
+    {
+      "method": "subscription.commitPreview",
+      "capability": "profile.subscription.v2",
+      "compatibility": "requires-schema",
+      "mutating": true,
+      "async": true,
+      "request": "CommitSubscriptionPreviewRequest",
+      "result": "SubscriptionRefreshResult",
+      "operation": {
+        "type": "profile-apply",
+        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation"
+      }
     },
     {
       "method": "subscription.preview",

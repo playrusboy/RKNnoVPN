@@ -55,6 +55,44 @@ func TestFromConfigDoesNotCreateNodeFromLegacyConfigOnlyState(t *testing.T) {
 	}
 }
 
+func TestApplyToConfigEnablesLocalClashAPIForMultiNodeProfile(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Profile.ActiveNodeID = "node-a"
+	cfg.Profile.Nodes = []json.RawMessage{
+		json.RawMessage(`{"id":"node-a","name":"A","protocol":"SOCKS","server":"127.0.0.1","port":1080,"outbound":{"protocol":"socks","settings":{"address":"127.0.0.1","port":1080}},"source":{"type":"MANUAL"}}`),
+		json.RawMessage(`{"id":"node-b","name":"B","protocol":"SOCKS","server":"127.0.0.2","port":1081,"outbound":{"protocol":"socks","settings":{"address":"127.0.0.2","port":1081}},"source":{"type":"MANUAL"}}`),
+	}
+	doc := FromConfig(cfg)
+
+	next, _, err := ApplyToConfig(cfg, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Proxy.APIPort != config.DefaultClashAPIPort || next.Proxy.APISecret == "" {
+		t.Fatalf("multi-node profile should enable local clash API with secret: %#v", next.Proxy)
+	}
+}
+
+func TestApplyToConfigGeneratesClashAPISecretForExistingPort(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Proxy.APIPort = 19191
+	cfg.Proxy.APISecret = ""
+	cfg.Profile.ActiveNodeID = "node-a"
+	cfg.Profile.Nodes = []json.RawMessage{
+		json.RawMessage(`{"id":"node-a","name":"A","protocol":"SOCKS","server":"127.0.0.1","port":1080,"outbound":{"protocol":"socks","settings":{"address":"127.0.0.1","port":1080}},"source":{"type":"MANUAL"}}`),
+		json.RawMessage(`{"id":"node-b","name":"B","protocol":"SOCKS","server":"127.0.0.2","port":1081,"outbound":{"protocol":"socks","settings":{"address":"127.0.0.2","port":1081}},"source":{"type":"MANUAL"}}`),
+	}
+	doc := FromConfig(cfg)
+
+	next, _, err := ApplyToConfig(cfg, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Proxy.APIPort != 19191 || next.Proxy.APISecret == "" {
+		t.Fatalf("multi-node profile should preserve clash API port and generate secret: %#v", next.Proxy)
+	}
+}
+
 func TestProfileRoutingProjectsRussiaAndSeparateRuleIPs(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Routing.BypassRussia = true

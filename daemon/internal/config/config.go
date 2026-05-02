@@ -2,6 +2,8 @@ package config
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -263,6 +265,7 @@ type NodeProfile struct {
 }
 
 const XraySidecarSocksPort = 10859
+const DefaultClashAPIPort = 19090
 
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() *Config {
@@ -689,6 +692,38 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("rescue.max_attempts must be >= 1, got %d", c.Rescue.MaxAttempts)
 	}
 	return nil
+}
+
+func (c *Config) EnsureLocalClashAPIForMultiNode() (bool, error) {
+	if c == nil {
+		return false, nil
+	}
+	renderable, _, err := renderableProfileNodesWithSkips(c, ProfilesFromConfigNodes(c))
+	if err != nil || len(renderable) <= 1 {
+		return false, nil
+	}
+	changed := false
+	if c.Proxy.APIPort <= 0 {
+		c.Proxy.APIPort = DefaultClashAPIPort
+		changed = true
+	}
+	if strings.TrimSpace(c.Proxy.APISecret) == "" {
+		secret, err := randomAPISecret()
+		if err != nil {
+			return false, err
+		}
+		c.Proxy.APISecret = secret
+		changed = true
+	}
+	return changed, nil
+}
+
+func randomAPISecret() (string, error) {
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("generate clash API secret: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
 }
 
 // ResolveProfile merges Node + Transport into a flat NodeProfile

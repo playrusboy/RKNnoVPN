@@ -84,11 +84,19 @@ class DaemonctlExecutor @Inject constructor() {
         // Keep the single bridge lane for short, frequent calls; long RPCs use
         // one-shot daemonctl so they cannot block status/compat polling.
         private val BRIDGE_METHODS = setOf(
+            "app.resolveUid",
             "backend.status",
             "compat.check",
             "config-list",
             "ipc.contract",
             "profile.get",
+            "profile.dns.patch",
+            "profile.inbound.patch",
+            "profile.node.remove",
+            "profile.node.upsert",
+            "profile.patch",
+            "profile.routing.patch",
+            "profile.setActiveNode",
             "version",
         )
 
@@ -201,7 +209,7 @@ class DaemonctlExecutor @Inject constructor() {
         method: String,
         params: JsonObject,
     ): DaemonctlResult? {
-        if (!canUseBridge(method)) return null
+        if (!canUseBridge(method, params)) return null
         return bridgeMutex.withLock {
             val now = System.currentTimeMillis()
             if (now < bridgeDisabledUntilMs) return@withLock null
@@ -237,8 +245,13 @@ class DaemonctlExecutor @Inject constructor() {
         }
     }
 
-    private fun canUseBridge(method: String): Boolean =
-        method in BRIDGE_METHODS
+    private fun canUseBridge(method: String, params: JsonObject): Boolean {
+        if (method in BRIDGE_METHODS) return true
+        if (method == "profile.patch") {
+            return params.keys.all { it == "activeNodeId" || it == "reload" }
+        }
+        return false
+    }
 
     private fun activeBridgeSession(): BridgeSession? =
         bridgeSession?.takeIf { it.process.isAlive }

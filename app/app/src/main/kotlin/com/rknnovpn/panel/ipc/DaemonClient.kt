@@ -45,7 +45,6 @@ class DaemonClient @Inject constructor(
         const val MIN_CONTROL_PROTOCOL_VERSION = 5
         const val MIN_SCHEMA_VERSION = 5
         val REQUIRED_METHODS: Set<String> = GeneratedDaemonContract.APK_REQUIRED_METHODS
-        private const val COMPATIBILITY_CACHE_TTL_MS = 60_000L
     }
 
     private val json = Json {
@@ -289,12 +288,19 @@ class DaemonClient @Inject constructor(
         return callConfigMutation("subscription.refresh", params)
     }
 
+    suspend fun subscriptionCommitPreview(previewId: String): DaemonClientResult<ConfigMutationInfo> {
+        requireCompatible("subscription.commitPreview", allowModuleRepair = true)?.let { return it.asFailure() }
+        val params = buildJsonObject { put("previewId", previewId) }
+        return callConfigMutation("subscription.commitPreview", params)
+    }
+
     suspend fun nodeTest(
         nodeIds: List<String> = emptyList(),
         url: String = "",
         timeoutMs: Int = 5_000,
+        mode: String = "fast",
     ): DaemonClientResult<NodeTestInfo> {
-        when (val result = diagnosticsTestNodes(nodeIds, url, timeoutMs)) {
+        when (val result = diagnosticsTestNodes(nodeIds, url, timeoutMs, mode)) {
             is DaemonClientResult.Ok -> {
                 return DaemonClientResult.Ok(result.data.toNodeTestInfo(url))
             }
@@ -381,8 +387,10 @@ class DaemonClient @Inject constructor(
         nodeIds: List<String> = emptyList(),
         url: String = "",
         timeoutMs: Int = 5_000,
+        mode: String = "fast",
     ): DaemonClientResult<List<NodeProbeResultV2>> {
         requireCompatible("diagnostics.testNodes")?.let { return it.asFailure() }
+        val normalizedMode = if (mode == "full" || mode == "throughput") "full" else "fast"
         val params = buildJsonObject {
             putJsonArray("node_ids") {
                 nodeIds.forEach { add(it) }
@@ -391,8 +399,9 @@ class DaemonClient @Inject constructor(
                 put("url", url)
             }
             put("timeout_ms", timeoutMs)
+            put("mode", normalizedMode)
         }
-        return call("diagnostics.testNodes", params, timeoutMs = timeoutMs.toLong() + 5_000L) {
+        return call("diagnostics.testNodes", params, timeoutMs = nodeProbeCallTimeoutMs(nodeIds.size, timeoutMs, normalizedMode)) {
             json.parseNodeProbeResults(it)
         }
     }
@@ -482,6 +491,7 @@ class DaemonClient @Inject constructor(
         apkPath: String = "",
     ): DaemonClientResult<UpdateInstallInfo> {
         requireCompatible("update-install")?.let { return it.asFailure() }
+        compatibilityCache = null
         val params = buildJsonObject {
             if (modulePath.isNotBlank()) {
                 put("module_path", modulePath)
@@ -527,13 +537,15 @@ class DaemonClient @Inject constructor(
             allowModuleRepair = false,
         )
 
-    suspend fun moduleRepair(): DaemonctlResult =
-        executor.execute(
+    suspend fun moduleRepair(): DaemonctlResult {
+        compatibilityCache = null
+        return executor.execute(
             method = "module.repair",
             params = emptyJsonObject(),
             timeoutMs = 5_000L,
             allowModuleRepair = false,
         )
+    }
 
     // ---- Internal helpers ----
 
@@ -544,27 +556,52 @@ class DaemonClient @Inject constructor(
         allowModuleRepair: Boolean = false,
         transform: (JsonElement) -> T
     ): DaemonClientResult<T> {
-        return executor.execute(method, params, timeoutMs, allowModuleRepair)
-            .toDaemonClientResult(transform)
+        val result = executor.execute(method, params, timeoutMs, allowModuleRepair)
+        invalidateCompatibilityCacheOnTransportChange(result)
+        return result.toDaemonClientResult(transform)
+    }
+
+    private fun nodeProbeCallTimeoutMs(selectedNodeCount: Int, perProbeTimeoutMs: Int, mode: String): Long {
+        val workers = 6
+        val batches = if (selectedNodeCount > 0) {
+            ((selectedNodeCount + workers - 1) / workers).coerceAtLeast(1)
+        } else {
+            // Empty node_ids means "all nodes"; leave room for several bounded batches.
+            6
+        }
+        val stages = if (mode == "full") 4L else 3L
+        val perNodeWorstCase = perProbeTimeoutMs.toLong().coerceAtLeast(1_000L) * stages
+        return (perNodeWorstCase * batches + 5_000L).coerceIn(15_000L, 60_000L)
     }
 
     private suspend fun callConfigMutation(
         method: String,
         params: JsonObject,
     ): DaemonClientResult<ConfigMutationInfo> {
-        return executor.execute(method, params, timeoutMs = 60_000L, allowModuleRepair = true)
-            .toDaemonClientResultEnvelope { element ->
-                val info = json.parseConfigMutationInfo(element)
-                if (!info.ok) {
-                    DaemonClientResult.DaemonError(
-                        DaemonClientErrorCodes.CONFIG_ERROR,
-                        info.message.ifBlank { "configuration was not applied" },
-                        element,
-                    )
-                } else {
-                    DaemonClientResult.Ok(info)
-                }
+        val result = executor.execute(method, params, timeoutMs = 60_000L, allowModuleRepair = true)
+        invalidateCompatibilityCacheOnTransportChange(result)
+        return result.toDaemonClientResultEnvelope { element ->
+            val info = json.parseConfigMutationInfo(element)
+            if (!info.ok) {
+                DaemonClientResult.DaemonError(
+                    DaemonClientErrorCodes.CONFIG_ERROR,
+                    info.message.ifBlank { "configuration was not applied" },
+                    element,
+                )
+            } else {
+                DaemonClientResult.Ok(info)
             }
+        }
+    }
+
+    private fun invalidateCompatibilityCacheOnTransportChange(result: DaemonctlResult) {
+        if (result is DaemonctlResult.DaemonUnavailable ||
+            result is DaemonctlResult.DaemonNotFound ||
+            result is DaemonctlResult.Timeout ||
+            result is DaemonctlResult.Error && result.code == DaemonClientErrorCodes.METHOD_NOT_FOUND
+        ) {
+            compatibilityCache = null
+        }
     }
 
     private suspend fun profileImportNodesBatched(
@@ -665,12 +702,10 @@ class DaemonClient @Inject constructor(
         vararg requiredMethods: String,
         allowModuleRepair: Boolean = false,
     ): DaemonClientResult<Unit>? {
-        val now = System.currentTimeMillis()
         val required = requiredMethods.toList()
         val bootstrapMethods = listOf("compat.check", "ipc.contract", "version")
         val compatibilityRequired = required + listOf("compat.check")
         compatibilityCache
-            ?.takeIf { cache -> cache.isFresh(now, COMPATIBILITY_CACHE_TTL_MS) }
             ?.takeIf { cache -> cache.supports(required + bootstrapMethods) }
             ?.let { cache ->
                 val cachedIssue = ipcCompatibilityIssue(
@@ -711,7 +746,7 @@ class DaemonClient @Inject constructor(
                             minSchemaVersion = MIN_SCHEMA_VERSION,
                         )
                         return if (cachedIssue == null) {
-                            compatibilityCache = cache.copy(info = info, checkedAtMs = now)
+                            compatibilityCache = cache.copy(info = info)
                             null
                         } else {
                             DaemonClientResult.DaemonError(DaemonClientErrorCodes.COMPATIBILITY, cachedIssue)
@@ -731,7 +766,6 @@ class DaemonClient @Inject constructor(
                         fingerprint = fingerprint,
                         contract = contract,
                         supportedMethods = contract.methods.mapTo(mutableSetOf()) { it.method },
-                        checkedAtMs = now,
                     )
                     null
                 } else {
@@ -763,13 +797,9 @@ private data class CompatibilityCache(
     val fingerprint: String,
     val contract: IpcContractInfo,
     val supportedMethods: Set<String>,
-    val checkedAtMs: Long,
 ) {
     fun supports(methods: Collection<String>): Boolean =
         supportedMethods.isNotEmpty() && methods.all { it in supportedMethods }
-
-    fun isFresh(nowMs: Long, ttlMs: Long): Boolean =
-        nowMs - checkedAtMs in 0..ttlMs
 }
 
 private fun VersionInfo.compatibilityFingerprint(): String {

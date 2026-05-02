@@ -147,6 +147,15 @@ func (h ProfileHandlers) ProfilePatch(params *json.RawMessage) (interface{}, *ip
 		return nil, rpcErr
 	}
 	if request.HasActiveNodeID {
+		activeOnlyPatch := request.Routing == nil && request.DNS == nil && request.Inbounds == nil
+		if activeOnlyPatch && current.ActiveNodeID == request.ActiveNodeID {
+			if request.ActiveNodeID != "" {
+				if _, err := profiledoc.SetActiveNode(current, request.ActiveNodeID); err != nil {
+					return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
+				}
+			}
+			return h.profileNoop(current, "profile.patch", 0)
+		}
 		if request.ActiveNodeID == "" {
 			current = profiledoc.ClearActiveNode(current)
 		} else {
@@ -256,7 +265,11 @@ func (h ProfileHandlers) SubscriptionPreviewContext(ctx context.Context, params 
 	if err != nil {
 		return nil, subscriptionRPCError(request.URL, preview.FetchStatus, preview.FetchHeaders, nil, err)
 	}
-	h.subscriptionPreviewCache().Put(request.URL, preview, h.now())
+	previewID, cacheErr := h.subscriptionPreviewCache().Put(preview, h.now())
+	if cacheErr != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: cacheErr.Error()}
+	}
+	preview.PreviewID = previewID
 	return preview, nil
 }
 
@@ -273,17 +286,35 @@ func (h ProfileHandlers) SubscriptionRefreshContext(ctx context.Context, params 
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
-	refresh, err := h.refreshSubscriptionFromPreviewCache(request.URL, current)
+	refresh, err := h.subscriptionClient().ApplyRefreshContext(ctx, request.URL, current)
 	if err != nil {
 		return nil, subscriptionRPCError(request.URL, refresh.FetchStatus, refresh.FetchHeaders, &refresh, err)
 	}
-	if refresh.Source.URL == "" {
-		refresh, err = h.subscriptionClient().ApplyRefreshContext(ctx, request.URL, current)
-	}
+	return h.applySubscriptionRefresh(refresh, "subscription.refresh")
+}
+
+func (h ProfileHandlers) SubscriptionCommitPreview(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	request, err := DecodeCommitSubscriptionPreviewParams(params)
 	if err != nil {
-		return nil, subscriptionRPCError(request.URL, refresh.FetchStatus, refresh.FetchHeaders, &refresh, err)
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
 	}
-	result, applyErr := h.applyProfile(refresh.Profile, true, "subscription.refresh", len(refresh.Nodes))
+	current, rpcErr := h.currentProfile()
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	preview, ok := h.subscriptionPreviewCache().Take(request.PreviewID, h.now())
+	if !ok {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: "subscription preview is missing or expired"}
+	}
+	refresh, err := subscription.ApplyPreview(current, preview)
+	if err != nil {
+		return nil, subscriptionRPCError(preview.Source.URL, refresh.FetchStatus, refresh.FetchHeaders, &refresh, err)
+	}
+	return h.applySubscriptionRefresh(refresh, "subscription.commitPreview")
+}
+
+func (h ProfileHandlers) applySubscriptionRefresh(refresh subscription.RefreshResult, action string) (interface{}, *ipc.RPCError) {
+	result, applyErr := h.applyProfile(refresh.Profile, true, action, len(refresh.Nodes))
 	if applyErr != nil {
 		return nil, applyErr
 	}
@@ -407,14 +438,6 @@ func (h ProfileHandlers) importBatchStore() *ImportBatchStore {
 		return h.ImportBatches
 	}
 	return defaultImportBatchStore
-}
-
-func (h ProfileHandlers) refreshSubscriptionFromPreviewCache(rawURL string, current profiledoc.Document) (subscription.RefreshResult, error) {
-	preview, ok := h.subscriptionPreviewCache().Take(rawURL, h.now())
-	if !ok {
-		return subscription.RefreshResult{}, nil
-	}
-	return subscription.ApplyPreview(current, preview)
 }
 
 func (h ProfileHandlers) subscriptionPreviewCache() *SubscriptionPreviewCache {

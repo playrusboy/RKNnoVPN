@@ -8,10 +8,12 @@ import com.rknnovpn.panel.`import`.LinkParser
 import com.rknnovpn.panel.i18n.UserMessageFormatter
 import com.rknnovpn.panel.ipc.DaemonClient
 import com.rknnovpn.panel.ipc.DaemonClientResult
+import com.rknnovpn.panel.ipc.NodeTestResult
 import com.rknnovpn.panel.model.Node
 import com.rknnovpn.panel.model.NodeSourceType
 import com.rknnovpn.panel.model.ProfileConfig
 import com.rknnovpn.panel.repository.ProfileRepository
+import com.rknnovpn.panel.repository.ProfileFreshness
 import com.rknnovpn.panel.repository.SubscriptionImportPreview
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.net.URI
@@ -23,6 +25,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 private const val TAG = "NodeListViewModel"
+private const val NODE_TEST_BATCH_SIZE = 6
 
 enum class NodeSortMode { SOURCE_ORDER, NAME, LATENCY, THROUGHPUT, COUNTRY }
 enum class ImportSheetTab { PASTE_URI, SCAN_QR, SUBSCRIPTION }
@@ -44,6 +47,8 @@ data class NodeListUiState(
     val isTestingNodes: Boolean = false,
     /** Error message from the last operation, or null. */
     val errorMessage: String? = null,
+    val profileBannerMessage: String? = null,
+    val profileBannerIsError: Boolean = false,
     /** Informational status from the last operation, or null. */
     val statusMessage: String? = null,
 )
@@ -71,6 +76,7 @@ class NodeListViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(NodeListUiState())
     val uiState: StateFlow<NodeListUiState> = _uiState.asStateFlow()
+    private var sourceOrderNodes: List<Node> = emptyList()
 
     init {
         observeProfile()
@@ -139,7 +145,7 @@ class NodeListViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(
                 sortMode = mode,
-                nodes = sortNodes(state.nodes, mode),
+                nodes = sortNodes(sourceOrderNodes, mode),
             )
         }
     }
@@ -228,42 +234,23 @@ class NodeListViewModel @Inject constructor(
         if (nodeIds.isEmpty() || _uiState.value.isTestingNodes) return
         _uiState.update { it.copy(isTestingNodes = true, errorMessage = null, statusMessage = null) }
         try {
-            when (val result = daemonClient.nodeTest(nodeIds)) {
-                is DaemonClientResult.Ok -> {
-                    val byId = result.data.results.associateBy { it.id }
-                    _uiState.update { state ->
-                        state.copy(
-                            nodes = state.nodes.map { node ->
-                                val test = byId[node.id] ?: return@map node
-                                node.copy(
-                                    latencyMs = test.tcpMs ?: -1,
-                                    responseMs = test.urlMs,
-                                    throughputBps = test.throughputBps,
-                                    testStatus = when {
-                                        test.tcpError != null -> messages.get(
-                                            com.rknnovpn.panel.R.string.node_test_status_tcp_error,
-                                            messages.formatNodeTestIssue(test.tcpError),
-                                        )
-                                        test.urlError != null -> messages.get(
-                                            com.rknnovpn.panel.R.string.node_test_status_url_error,
-                                            messages.formatNodeTestIssue(test.urlError),
-                                        )
-                                        test.verdict == "unusable" ->
-                                            messages.get(com.rknnovpn.panel.R.string.node_test_status_unusable)
-                                        test.urlMs != null ->
-                                            messages.get(com.rknnovpn.panel.R.string.node_test_status_ok)
-                                        else ->
-                                            messages.get(com.rknnovpn.panel.R.string.node_test_status_tcp_ok)
-                                    },
-                                )
-                            },
-                        )
+            for (batch in nodeIds.chunked(NODE_TEST_BATCH_SIZE)) {
+                when (val result = daemonClient.nodeTest(batch, mode = "fast")) {
+                    is DaemonClientResult.Ok -> {
+                        val byId = result.data.results.associateBy { it.id }
+                        sourceOrderNodes = sourceOrderNodes.withNodeTestResults(byId)
+                        _uiState.update { state ->
+                            state.copy(
+                                nodes = sortNodes(sourceOrderNodes, state.sortMode),
+                            )
+                        }
                     }
-                }
-                else -> {
-                    val msg = describeError(result)
-                    Log.w(TAG, "Node test failed: $msg")
-                    _uiState.update { it.copy(errorMessage = msg, statusMessage = null) }
+                    else -> {
+                        val msg = describeError(result)
+                        Log.w(TAG, "Node test failed: $msg")
+                        _uiState.update { it.copy(errorMessage = msg, statusMessage = null) }
+                        return
+                    }
                 }
             }
         } finally {
@@ -540,9 +527,33 @@ class NodeListViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            profileRepository.freshness.collect { freshness ->
+                val lastError = profileRepository.error.value.orEmpty()
+                val banner = when (freshness) {
+                    ProfileFreshness.STALE -> messages.get(
+                        com.rknnovpn.panel.R.string.profile_stale_banner,
+                        lastError.ifBlank { messages.get(com.rknnovpn.panel.R.string.error_daemon_not_running) },
+                    )
+                    ProfileFreshness.ERROR -> messages.get(
+                        com.rknnovpn.panel.R.string.profile_error_banner,
+                        lastError.ifBlank { messages.get(com.rknnovpn.panel.R.string.error_daemon_not_running) },
+                    )
+                    ProfileFreshness.EMPTY,
+                    ProfileFreshness.FRESH -> null
+                }
+                _uiState.update {
+                    it.copy(
+                        profileBannerMessage = banner,
+                        profileBannerIsError = freshness == ProfileFreshness.ERROR,
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
             profileRepository.profile.collect { config ->
                 if (config != null) {
                     val nodes = config.nodes.map(::normalizeNode)
+                    sourceOrderNodes = nodes
                     val groups = nodes.map { it.group }.distinct()
                         .ifEmpty { listOf(messages.defaultGroupName()) }
                     _uiState.update { state ->
@@ -599,6 +610,33 @@ class NodeListViewModel @Inject constructor(
                 .thenBy { it.latencyMs ?: Int.MAX_VALUE },
         )
         NodeSortMode.COUNTRY -> nodes.sortedBy { extractCountryFromName(it.name) }
+    }
+
+    private fun List<Node>.withNodeTestResults(
+        byId: Map<String, NodeTestResult>,
+    ): List<Node> = map { node ->
+        val test = byId[node.id] ?: return@map node
+        node.copy(
+            latencyMs = test.tcpMs ?: -1,
+            responseMs = test.urlMs,
+            throughputBps = test.throughputBps,
+            testStatus = when {
+                test.tcpError != null -> messages.get(
+                    com.rknnovpn.panel.R.string.node_test_status_tcp_error,
+                    messages.formatNodeTestIssue(test.tcpError),
+                )
+                test.urlError != null -> messages.get(
+                    com.rknnovpn.panel.R.string.node_test_status_url_error,
+                    messages.formatNodeTestIssue(test.urlError),
+                )
+                test.verdict == "unusable" ->
+                    messages.get(com.rknnovpn.panel.R.string.node_test_status_unusable)
+                test.urlMs != null ->
+                    messages.get(com.rknnovpn.panel.R.string.node_test_status_ok)
+                else ->
+                    messages.get(com.rknnovpn.panel.R.string.node_test_status_tcp_ok)
+            },
+        )
     }
 
     private fun normalizeNode(node: Node): Node = if (messages.isDefaultGroupName(node.group)) {

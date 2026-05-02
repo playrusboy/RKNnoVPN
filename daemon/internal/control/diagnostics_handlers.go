@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
@@ -37,8 +38,8 @@ type DiagnosticsHandlers struct {
 	RuntimeStatus         RuntimeStatusFunc
 	NetstackReport        func(*config.Config) netstack.Report
 	NetstackRuntimeReport func(*config.Config) netstack.Report
-	TestNodes             func(url string, timeoutMS int, nodeIDs []string) []runtimev2.NodeProbeResult
-	TestNodesContext      func(ctx context.Context, url string, timeoutMS int, nodeIDs []string) []runtimev2.NodeProbeResult
+	TestNodes             func(url string, timeoutMS int, nodeIDs []string, mode string) []runtimev2.NodeProbeResult
+	TestNodesContext      func(ctx context.Context, url string, timeoutMS int, nodeIDs []string, mode string) []runtimev2.NodeProbeResult
 	CoreStartReport       func() core.RuntimeStageReport
 	CoreRuntimeReport     func() core.RuntimeStageReport
 	ReloadReport          func() core.RuntimeStageReport
@@ -100,6 +101,7 @@ func (h DiagnosticsHandlers) DiagnosticsTestNodesContext(ctx context.Context, pa
 		NodeIDs   []string `json:"node_ids"`
 		URL       string   `json:"url"`
 		TimeoutMS int      `json:"timeout_ms"`
+		Mode      string   `json:"mode"`
 	}
 	if params != nil {
 		if err := json.Unmarshal(*params, &p); err != nil {
@@ -116,12 +118,14 @@ func (h DiagnosticsHandlers) DiagnosticsTestNodesContext(ctx context.Context, pa
 		return nil, contextRPCError(err)
 	}
 
-	results := h.testNodes(ctx, p.URL, p.TimeoutMS, p.NodeIDs)
+	mode := normalizeNodeProbeMode(p.Mode)
+	results := h.testNodes(ctx, p.URL, p.TimeoutMS, p.NodeIDs, mode)
 	if err := ctx.Err(); err != nil {
 		return nil, contextRPCError(err)
 	}
 	return map[string]interface{}{
 		"url":     p.URL,
+		"mode":    mode,
 		"results": results,
 	}, nil
 }
@@ -164,7 +168,7 @@ func (h DiagnosticsHandlers) buildReportContext(ctx context.Context, lines int) 
 	leftovers := netstackReport.Leftovers
 	var nodeResults []runtimev2.NodeProbeResult
 	if cfg != nil && (h.TestNodes != nil || h.TestNodesContext != nil) {
-		nodeResults = h.testNodes(ctx, cfg.Health.URL, 2500, nil)
+		nodeResults = h.testNodes(ctx, cfg.Health.URL, 2500, nil, "fast")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -280,7 +284,7 @@ func (h DiagnosticsHandlers) BuildSelfCheckSummaryContext(ctx context.Context, l
 	netstackRuntimeReport := h.netstackRuntimeReport(cfg)
 	var nodeResults []runtimev2.NodeProbeResult
 	if cfg != nil && (h.TestNodes != nil || h.TestNodesContext != nil) {
-		nodeResults = h.testNodes(ctx, cfg.Health.URL, 2500, nil)
+		nodeResults = h.testNodes(ctx, cfg.Health.URL, 2500, nil, "fast")
 	}
 	if err := ctx.Err(); err != nil {
 		return diagnostics.Summary{}, err
@@ -419,14 +423,23 @@ func (h DiagnosticsHandlers) execForContext(ctx context.Context) diagnostics.Exe
 	}
 }
 
-func (h DiagnosticsHandlers) testNodes(ctx context.Context, url string, timeoutMS int, nodeIDs []string) []runtimev2.NodeProbeResult {
+func (h DiagnosticsHandlers) testNodes(ctx context.Context, url string, timeoutMS int, nodeIDs []string, mode string) []runtimev2.NodeProbeResult {
 	if h.TestNodesContext != nil {
-		return h.TestNodesContext(ctx, url, timeoutMS, nodeIDs)
+		return h.TestNodesContext(ctx, url, timeoutMS, nodeIDs, mode)
 	}
 	if h.TestNodes != nil {
-		return h.TestNodes(url, timeoutMS, nodeIDs)
+		return h.TestNodes(url, timeoutMS, nodeIDs, mode)
 	}
 	return nil
+}
+
+func normalizeNodeProbeMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "full", "throughput":
+		return "full"
+	default:
+		return "fast"
+	}
 }
 
 func (h DiagnosticsHandlers) now() time.Time {

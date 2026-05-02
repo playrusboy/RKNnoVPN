@@ -34,6 +34,27 @@ func TestActiveNodeSelectorSwitchTargetRejectsNonActiveNodeChange(t *testing.T) 
 	}
 }
 
+func TestActiveNodeSelectorSwitchTargetRejectsXraySidecarNodes(t *testing.T) {
+	oldCfg := selectorTestConfig("node-a")
+	oldCfg.Profile.Nodes = append(oldCfg.Profile.Nodes, selectorTestXHTTPNode())
+	newCfg := selectorTestConfig("node-xhttp")
+	newCfg.Profile.Nodes = append(newCfg.Profile.Nodes, selectorTestXHTTPNode())
+
+	if tag := activeNodeSelectorSwitchTarget(oldCfg, newCfg, rootruntime.ReloadPlan{}); tag != "" {
+		t.Fatalf("selector switch target should reject xray sidecar node, got %q", tag)
+	}
+}
+
+func TestActiveNodeSelectorSwitchTargetAllowsClearingToAuto(t *testing.T) {
+	oldCfg := selectorTestConfig("node-a")
+	newCfg := selectorTestConfig("")
+
+	tag := activeNodeSelectorSwitchTarget(oldCfg, newCfg, rootruntime.ReloadPlan{})
+	if tag != "auto" {
+		t.Fatalf("selector switch tag = %q, want auto", tag)
+	}
+}
+
 func TestSwitchSingboxSelectorSendsBearerPut(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -41,18 +62,22 @@ func TestSwitchSingboxSelectorSendsBearerPut(t *testing.T) {
 	}
 	defer listener.Close()
 
-	called := make(chan struct{}, 1)
+	called := make(chan struct{}, 2)
 	server := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() { called <- struct{}{} }()
-			if r.Method != http.MethodPut {
-				t.Errorf("method = %s, want PUT", r.Method)
-			}
 			if r.URL.Path != "/proxies/proxy" {
 				t.Errorf("path = %s, want /proxies/proxy", r.URL.Path)
 			}
 			if r.Header.Get("Authorization") != "Bearer test-secret" {
 				t.Errorf("unexpected auth header: %q", r.Header.Get("Authorization"))
+			}
+			if r.Method == http.MethodGet {
+				_, _ = w.Write([]byte(`{"name":"proxy","now":"node-node-b"}`))
+				return
+			}
+			if r.Method != http.MethodPut {
+				t.Errorf("method = %s, want PUT", r.Method)
 			}
 			var body struct {
 				Name string `json:"name"`
@@ -79,6 +104,37 @@ func TestSwitchSingboxSelectorSendsBearerPut(t *testing.T) {
 		t.Fatalf("switchSingboxSelector failed: %v", err)
 	}
 	<-called
+	<-called
+}
+
+func TestSwitchSingboxSelectorVerifiesSelectedOutbound(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	server := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				_, _ = w.Write([]byte(`{"name":"proxy","now":"node-node-a"}`))
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}),
+	}
+	go func() {
+		_ = server.Serve(listener)
+	}()
+	defer server.Close()
+
+	cfg := selectorTestConfig("node-b")
+	cfg.Proxy.APIPort = listener.Addr().(*net.TCPAddr).Port
+	cfg.Proxy.APISecret = "test-secret"
+
+	if err := switchSingboxSelector(cfg, "proxy", "node-node-b"); err == nil {
+		t.Fatal("expected selector verification mismatch")
+	}
 }
 
 func selectorTestConfig(activeNodeID string) *config.Config {
@@ -93,4 +149,31 @@ func selectorTestConfig(activeNodeID string) *config.Config {
 		json.RawMessage(`{"id":"node-b","name":"Node B","protocol":"socks","server":"127.0.0.2","port":1081,"source":{"type":"MANUAL"}}`),
 	}
 	return cfg
+}
+
+func selectorTestXHTTPNode() json.RawMessage {
+	return json.RawMessage(`{
+		"id":"node-xhttp",
+		"name":"XHTTP",
+		"server":"example.com",
+		"port":443,
+		"protocol":"vless",
+		"source":{"type":"MANUAL"},
+		"outbound":{
+			"protocol":"vless",
+			"settings":{
+				"vnext":[{
+					"address":"example.com",
+					"port":443,
+					"users":[{"id":"00000000-0000-0000-0000-000000000000","encryption":"none"}]
+				}]
+			},
+			"streamSettings":{
+				"network":"xhttp",
+				"security":"reality",
+				"realitySettings":{"serverName":"www.example.com","publicKey":"public-key"},
+				"xhttpSettings":{"path":"/","mode":"auto"}
+			}
+		}
+	}`)
 }

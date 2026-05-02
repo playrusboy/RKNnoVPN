@@ -16,6 +16,8 @@ internal fun BackendStatusV2.toDaemonStatus(
     val effectiveHealth = healthOverride ?: health
     val effectiveCanonical = canonical
     val canonicalReady = effectiveCanonical?.readiness?.ready ?: effectiveHealth.healthy
+    val canonicalOperationalReady =
+        effectiveCanonical?.readiness?.operationalHealthy ?: effectiveHealth.operationalHealthy
     val compatibilityIssue = compatibility?.blockingCompatibilityIssue(
         apkVersion = BuildConfig.VERSION_NAME,
         requiredMethods = DaemonClient.REQUIRED_METHODS,
@@ -30,7 +32,7 @@ internal fun BackendStatusV2.toDaemonStatus(
         BackendPhase.DNS_APPLIED,
         BackendPhase.OUTBOUND_CHECKED,
         BackendPhase.DEGRADED ->
-            if (canonicalReady) {
+            if (canonicalReady && canonicalOperationalReady) {
                 ConnectionState.CONNECTED
             } else {
                 ConnectionState.ERROR
