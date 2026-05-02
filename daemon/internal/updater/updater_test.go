@@ -4,7 +4,10 @@ import (
 	"archive/zip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,6 +103,32 @@ func TestDownloadUpdateRejectsMissingChecksumAsset(t *testing.T) {
 	}
 }
 
+func TestDownloadUpdateRejectsOversizedReleaseMetadata(t *testing.T) {
+	_, err := DownloadUpdate(&UpdateInfo{
+		ModuleURL:   "https://example.invalid/module.zip",
+		ApkURL:      "https://example.invalid/panel.apk",
+		ChecksumURL: "https://example.invalid/SHA256SUMS.txt",
+		ModuleSize:  maxModuleDownloadBytes + 1,
+		ApkSize:     int64(len("apk")),
+	}, t.TempDir(), nil)
+	if err == nil || !strings.Contains(err.Error(), "module.zip size") {
+		t.Fatalf("expected oversized module metadata to fail, got %v", err)
+	}
+}
+
+func TestDownloadFileRejectsOversizedContentLength(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "4")
+		_, _ = w.Write([]byte("data"))
+	}))
+	defer server.Close()
+
+	err := downloadFile(server.URL, filepath.Join(t.TempDir(), "artifact.bin"), 0, 3, nil)
+	if err == nil || !strings.Contains(err.Error(), "content length") {
+		t.Fatalf("expected content length cap error, got %v", err)
+	}
+}
+
 func TestBootstrapResolverIgnoresSystemLoopbackDNSServer(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -179,6 +208,20 @@ func TestValidateModuleStagingRejectsIncompleteBundle(t *testing.T) {
 
 	if err := validateModuleStaging(staging, binDir); err == nil {
 		t.Fatal("expected missing sing-box to reject staged module")
+	}
+}
+
+func TestExtractZipRejectsTooManyFiles(t *testing.T) {
+	zipPath := filepath.Join(t.TempDir(), "many.zip")
+	files := map[string]zipTestFile{}
+	for i := 0; i <= maxExtractedZipFiles; i++ {
+		files[fmt.Sprintf("file-%04d", i)] = zipTestFile{mode: 0644, body: ""}
+	}
+	writeZipForTest(t, zipPath, files)
+
+	err := extractZip(zipPath, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "file count") {
+		t.Fatalf("expected file count cap error, got %v", err)
 	}
 }
 

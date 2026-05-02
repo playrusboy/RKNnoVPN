@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	maxFrameBytes       = 2 * 1024 * 1024
+	maxFrameBytes        = 2 * 1024 * 1024
 	maxActiveConnections = 16
-	readTimeout         = 10 * time.Second
-	writeTimeout        = 10 * time.Second
+	readTimeout          = 10 * time.Second
+	writeTimeout         = 10 * time.Second
 )
 
 // Handler is a function that processes a JSON-RPC method call.

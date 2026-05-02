@@ -29,8 +29,8 @@ const (
 	DefaultDataDir   = modulecontract.DefaultModuleDir
 	DefaultModuleDir = modulecontract.DefaultModuleDir
 
-	maxExtractedZipBytes = 300 * 1024 * 1024
-	maxExtractedZipFiles = 1024
+	maxExtractedZipBytes  = 300 * 1024 * 1024
+	maxExtractedZipFiles  = 1024
 	maxExtractedPathDepth = 32
 )
 
