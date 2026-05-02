@@ -77,6 +77,7 @@ class NodeListViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(NodeListUiState())
     val uiState: StateFlow<NodeListUiState> = _uiState.asStateFlow()
     private var sourceOrderNodes: List<Node> = emptyList()
+    private var pendingSubscriptionOrder: List<String>? = null
 
     init {
         observeProfile()
@@ -227,6 +228,38 @@ class NodeListViewModel @Inject constructor(
         viewModelScope.launch {
             val ids = _uiState.value.nodes.filterNot { it.stale }.map { it.id }
             runNodeTests(ids)
+        }
+    }
+
+    fun moveSubscription(providerKey: String, direction: Int) {
+        if (direction == 0) return
+        _uiState.update { state ->
+            val from = state.subscriptions.indexOfFirst { it.providerKey == providerKey }
+            if (from < 0) return@update state
+            val to = (from + direction).coerceIn(state.subscriptions.indices)
+            if (from == to) return@update state
+            val reordered = state.subscriptions.toMutableList().apply {
+                add(to, removeAt(from))
+            }
+            pendingSubscriptionOrder = reordered.map { it.providerKey }
+            state.copy(subscriptions = reordered)
+        }
+    }
+
+    fun commitSubscriptionOrder() {
+        val order = pendingSubscriptionOrder ?: return
+        pendingSubscriptionOrder = null
+        viewModelScope.launch {
+            if (!profileRepository.reorderSubscriptions(order)) {
+                val err = profileRepository.error.value
+                _uiState.update {
+                    it.copy(
+                        errorMessage = err ?: messages.get(com.rknnovpn.panel.R.string.subscription_reorder_failed),
+                        statusMessage = null,
+                    )
+                }
+                profileRepository.refresh()
+            }
         }
     }
 
@@ -662,7 +695,7 @@ class NodeListViewModel @Inject constructor(
                 staleNodeCount = providerNodes.count { it.stale },
                 parseFailures = subscription.parseFailures,
             )
-        }.sortedBy { it.displayName.lowercase() }
+        }
 
     private fun hostLabel(url: String): String =
         runCatching { URI(url).host.orEmpty().removePrefix("www.") }.getOrDefault("")

@@ -339,6 +339,44 @@ class ProfileRepository @Inject constructor(
     suspend fun updateConfig(transform: (ProfileConfig) -> ProfileConfig): Boolean =
         mutate("updateConfig", transform)
 
+    suspend fun reorderSubscriptions(providerKeys: List<String>): Boolean = mutex.withLock {
+        _loading.value = true
+        _error.value = null
+        _notice.value = null
+        try {
+            val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
+                if (_error.value.isNullOrBlank()) {
+                    _error.value = messages.get(com.rknnovpn.panel.R.string.error_no_profile_loaded)
+                }
+                return@withLock false
+            }
+            val requested = providerKeys.map(String::trim).filter(String::isNotEmpty).distinct()
+            val requestedSet = requested.toSet()
+            val byProvider = current.subscriptions.associateBy { it.providerKey }
+            val reordered = requested.mapNotNull(byProvider::get) +
+                current.subscriptions.filter { it.providerKey !in requestedSet }
+            if (reordered == current.subscriptions) {
+                return@withLock true
+            }
+            when (val result = client.profileApply(current.copy(subscriptions = reordered), reload = false)) {
+                is DaemonClientResult.Ok -> {
+                    applyMutationSuccess("reorderSubscriptions", result.data)
+                }
+                else -> {
+                    val msg = describeFailure(result)
+                    Log.w(TAG, "reorderSubscriptions failed: $msg")
+                    if (result.configWasSaved()) {
+                        return@withLock refreshAfterSavedFailure("reorderSubscriptions", msg)
+                    }
+                    _error.value = msg
+                    false
+                }
+            }
+        } finally {
+            _loading.value = false
+        }
+    }
+
     // ---- Internal helpers ----
 
     /**

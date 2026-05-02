@@ -114,6 +114,8 @@
     <string name="node_section_nodes_count">%1$d servers</string>
     <string name="node_section_subscription_counts">Active %1$d, removed %2$d</string>
     <string name="node_section_subscription_counts_with_errors">Active %1$d, removed %2$d, parse errors %3$d</string>
+    <string name="drag_subscription">Drag subscription</string>
+    <string name="subscription_reorder_failed">Failed to reorder subscriptions</string>
 
     <!-- Import sheet -->
     <string name="import_nodes">Import nodes</string>

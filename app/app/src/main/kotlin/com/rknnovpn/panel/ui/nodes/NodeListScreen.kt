@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
@@ -57,8 +59,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.consume
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -219,6 +224,8 @@ fun NodeListScreen(
                                 onToggle = {
                                     expandedSections[section.id] = !expanded
                                 },
+                                onMoveSubscription = viewModel::moveSubscription,
+                                onCommitSubscriptionOrder = viewModel::commitSubscriptionOrder,
                             )
                         }
                         if (expanded) {
@@ -299,6 +306,7 @@ private data class NodeSection(
     val title: String,
     val subtitle: String,
     val nodes: List<Node>,
+    val providerKey: String? = null,
 )
 
 @Composable
@@ -306,7 +314,6 @@ private fun buildNodeSections(
     nodes: List<Node>,
     subscriptions: List<SubscriptionUiSummary>,
 ): List<NodeSection> {
-    val byProvider = subscriptions.associateBy { it.providerKey }
     val sections = mutableListOf<NodeSection>()
     val manualNodes = nodes.filter { it.source.type != NodeSourceType.SUBSCRIPTION }
     if (manualNodes.isNotEmpty()) {
@@ -320,40 +327,69 @@ private fun buildNodeSections(
     nodes
         .filter { it.source.type == NodeSourceType.SUBSCRIPTION }
         .groupBy { it.source.providerKey.ifBlank { it.source.url.ifBlank { "subscription" } } }
-        .toSortedMap(
-            compareBy<String> { key -> byProvider[key]?.displayName ?: key }
-                .thenBy { it },
-        )
-        .forEach { (providerKey, providerNodes) ->
-            val summary = byProvider[providerKey]
-            val title = summary?.displayName ?: providerNodes.firstOrNull()?.source?.url
-                ?.let(::hostLabel)
-                ?.ifBlank { null }
-                ?: stringResource(R.string.subscription_provider_fallback)
-            val activeCount = summary?.activeNodeCount ?: providerNodes.count { !it.stale }
-            val staleCount = summary?.staleNodeCount ?: providerNodes.count { it.stale }
-            val parseFailures = summary?.parseFailures ?: 0
-            sections += NodeSection(
-                id = "subscription-$providerKey",
-                title = title,
-                subtitle = if (parseFailures > 0) {
-                    stringResource(
-                        R.string.node_section_subscription_counts_with_errors,
-                        activeCount,
-                        staleCount,
-                        parseFailures,
+        .let { byProvider ->
+            val consumed = mutableSetOf<String>()
+            subscriptions.forEach { summary ->
+                val providerKey = summary.providerKey
+                val providerNodes = byProvider[providerKey].orEmpty()
+                if (providerNodes.isEmpty()) return@forEach
+                consumed += providerKey
+                sections += subscriptionSection(
+                    providerKey = providerKey,
+                    providerNodes = providerNodes,
+                    summary = summary,
+                )
+            }
+            byProvider
+                .filterKeys { it !in consumed }
+                .toSortedMap(
+                    compareBy<String> { key -> byProvider[key]?.firstOrNull()?.source?.url?.let(::hostLabel) ?: key }
+                        .thenBy { it },
+                )
+                .forEach { (providerKey, providerNodes) ->
+                    sections += subscriptionSection(
+                        providerKey = providerKey,
+                        providerNodes = providerNodes,
+                        summary = null,
                     )
-                } else {
-                    stringResource(
-                        R.string.node_section_subscription_counts,
-                        activeCount,
-                        staleCount,
-                    )
-                },
-                nodes = providerNodes,
-            )
+                }
         }
     return sections
+}
+
+@Composable
+private fun subscriptionSection(
+    providerKey: String,
+    providerNodes: List<Node>,
+    summary: SubscriptionUiSummary?,
+): NodeSection {
+    val title = summary?.displayName ?: providerNodes.firstOrNull()?.source?.url
+        ?.let(::hostLabel)
+        ?.ifBlank { null }
+        ?: stringResource(R.string.subscription_provider_fallback)
+    val activeCount = summary?.activeNodeCount ?: providerNodes.count { !it.stale }
+    val staleCount = summary?.staleNodeCount ?: providerNodes.count { it.stale }
+    val parseFailures = summary?.parseFailures ?: 0
+    return NodeSection(
+        id = "subscription-$providerKey",
+        title = title,
+        subtitle = if (parseFailures > 0) {
+            stringResource(
+                R.string.node_section_subscription_counts_with_errors,
+                activeCount,
+                staleCount,
+                parseFailures,
+            )
+        } else {
+            stringResource(
+                R.string.node_section_subscription_counts,
+                activeCount,
+                staleCount,
+            )
+        },
+        nodes = providerNodes,
+        providerKey = providerKey,
+    )
 }
 
 private fun hostLabel(url: String): String =
@@ -364,7 +400,10 @@ private fun NodeSectionHeader(
     section: NodeSection,
     expanded: Boolean,
     onToggle: () -> Unit,
+    onMoveSubscription: (String, Int) -> Unit,
+    onCommitSubscriptionOrder: () -> Unit,
 ) {
+    val providerKey = section.providerKey
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -398,6 +437,46 @@ private fun NodeSectionHeader(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+            if (providerKey != null) {
+                val thresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
+                var draggedPx by remember(providerKey) { mutableStateOf(0f) }
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .pointerInput(providerKey) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { draggedPx = 0f },
+                                onDragEnd = {
+                                    draggedPx = 0f
+                                    onCommitSubscriptionOrder()
+                                },
+                                onDragCancel = {
+                                    draggedPx = 0f
+                                    onCommitSubscriptionOrder()
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    draggedPx += dragAmount.y
+                                    while (draggedPx >= thresholdPx) {
+                                        onMoveSubscription(providerKey, 1)
+                                        draggedPx -= thresholdPx
+                                    }
+                                    while (draggedPx <= -thresholdPx) {
+                                        onMoveSubscription(providerKey, -1)
+                                        draggedPx += thresholdPx
+                                    }
+                                },
+                            )
+                        },
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.DragHandle,
+                        contentDescription = stringResource(R.string.drag_subscription),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

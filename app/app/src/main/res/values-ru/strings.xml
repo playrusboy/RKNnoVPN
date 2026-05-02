@@ -114,6 +114,8 @@
     <string name="node_section_nodes_count">Серверов: %1$d</string>
     <string name="node_section_subscription_counts">Активных %1$d, удалённых %2$d</string>
     <string name="node_section_subscription_counts_with_errors">Активных %1$d, удалённых %2$d, ошибок разбора %3$d</string>
+    <string name="drag_subscription">Перетащить подписку</string>
+    <string name="subscription_reorder_failed">Не удалось изменить порядок подписок</string>
 
     <!-- Import sheet -->
     <string name="import_nodes">Импорт серверов</string>

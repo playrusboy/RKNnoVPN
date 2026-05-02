@@ -2,6 +2,11 @@ package com.rknnovpn.panel.ipc
 
 import kotlinx.serialization.json.JsonElement
 
+enum class DaemonctlTransport {
+    ONE_SHOT,
+    BRIDGE,
+}
+
 /**
  * Sealed result type for every `daemonctl` invocation.
  *
@@ -17,6 +22,7 @@ sealed class DaemonctlResult {
     data class Success(
         val data: JsonElement,
         val envelope: JsonElement? = null,
+        val transport: DaemonctlTransport = DaemonctlTransport.ONE_SHOT,
     ) : DaemonctlResult()
 
     /**
@@ -28,6 +34,7 @@ sealed class DaemonctlResult {
         val message: String,
         val details: JsonElement? = null,
         val envelope: JsonElement? = null,
+        val transport: DaemonctlTransport = DaemonctlTransport.ONE_SHOT,
     ) : DaemonctlResult() {
         override fun toString(): String = "DaemonctlError($code: $message)"
     }

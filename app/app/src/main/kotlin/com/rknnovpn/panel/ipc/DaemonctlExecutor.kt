@@ -123,11 +123,12 @@ class DaemonctlExecutor @Inject constructor() {
         method: String,
         params: JsonObject = emptyJsonObject(),
         timeoutMs: Long = DEFAULT_TIMEOUT_MS,
-        allowModuleRepair: Boolean = true
+        allowModuleRepair: Boolean = true,
+        allowBridge: Boolean = true,
     ): DaemonctlResult = withContext(Dispatchers.IO) {
         try {
             val result = withTimeoutOrNull(timeoutMs) {
-                executeRaw(method, params)
+                executeRaw(method, params, allowBridge)
             }
             val checkedResult = withModuleInstallStateHint(
                 result ?: DaemonctlResult.Timeout(timeoutMs, method),
@@ -162,7 +163,7 @@ class DaemonctlExecutor @Inject constructor() {
         while (System.currentTimeMillis() < deadline) {
             delay(REPAIR_RETRY_DELAY_MS)
             val retry = withTimeoutOrNull(timeoutMs.coerceAtLeast(REPAIR_RETRY_TIMEOUT_MS)) {
-                executeRaw(method, params)
+                executeRaw(method, params, allowBridge = false)
             } ?: DaemonctlResult.Timeout(timeoutMs, method)
             lastResult = retry
             if (retry !is DaemonctlResult.DaemonUnavailable && retry !is DaemonctlResult.Timeout) {
@@ -175,7 +176,8 @@ class DaemonctlExecutor @Inject constructor() {
 
     private suspend fun executeRaw(
         method: String,
-        params: JsonObject
+        params: JsonObject,
+        allowBridge: Boolean,
     ): DaemonctlResult {
         val paramsJson = params.toString()
         val requestFrameBytes = jsonRpcRequestFrameByteSize(method, params)
@@ -190,7 +192,9 @@ class DaemonctlExecutor @Inject constructor() {
             )
         }
         val useStdin = params.isNotEmpty()
-        executeViaBridge(method, params)?.let { return it }
+        if (allowBridge) {
+            executeViaBridge(method, params)?.let { return it }
+        }
         val commandString = buildDaemonctlCommand(method, paramsJson, useStdin, params.isEmpty())
         Log.d(
             TAG,
@@ -234,7 +238,18 @@ class DaemonctlExecutor @Inject constructor() {
                     throw IOException("daemonctl bridge returned non-JSON output")
                 }
                 Log.d(TAG, "<<< daemonctl bridge method=$method")
-                parseResponse(exitCode = 0, stdout = stdout, stderr = "", method = method)
+                val result = parseResponse(
+                    exitCode = 0,
+                    stdout = stdout,
+                    stderr = "",
+                    method = method,
+                    transport = DaemonctlTransport.BRIDGE,
+                    expectedJsonRpcId = requestId,
+                )
+                if (result is DaemonctlResult.Error && result.isBridgeProtocolFailure()) {
+                    throw IOException(result.message)
+                }
+                result
             } catch (e: Exception) {
                 Log.d(TAG, "daemonctl bridge unavailable for $method: ${e.message}")
                 closeBridgeSession("bridge unavailable")
@@ -250,6 +265,12 @@ class DaemonctlExecutor @Inject constructor() {
             return params.keys.all { it == "activeNodeId" || it == "reload" }
         }
         return false
+    }
+
+    fun disableBridge(reason: String) {
+        Log.d(TAG, "daemonctl bridge disabled: $reason")
+        closeBridgeSession(reason)
+        bridgeDisabledUntilMs = System.currentTimeMillis() + BRIDGE_RETRY_COOLDOWN_MS
     }
 
     private fun activeBridgeSession(): BridgeSession? =
@@ -626,7 +647,9 @@ class DaemonctlExecutor @Inject constructor() {
         exitCode: Int,
         stdout: String,
         stderr: String,
-        method: String
+        method: String,
+        transport: DaemonctlTransport = DaemonctlTransport.ONE_SHOT,
+        expectedJsonRpcId: Int? = null,
     ): DaemonctlResult {
         // Old daemonctl binary that doesn't know the requested command.
         // It prints "error: unknown command ..." to stderr and exits 1.
@@ -646,7 +669,7 @@ class DaemonctlExecutor @Inject constructor() {
         if (stdout.isNotBlank()) {
             try {
                 val jsonElement = json.parseToJsonElement(stdout)
-                return parseJsonResponse(jsonElement, exitCode, stderr, method)
+                return parseJsonResponse(jsonElement, exitCode, stderr, method, transport, expectedJsonRpcId)
             } catch (e: Exception) {
                 stdoutParseError = e
                 Log.w(TAG, "Failed to parse stdout as JSON: ${stdout.take(100)}", e)
@@ -697,6 +720,8 @@ class DaemonctlExecutor @Inject constructor() {
         exitCode: Int,
         stderr: String,
         method: String,
+        transport: DaemonctlTransport,
+        expectedJsonRpcId: Int?,
     ): DaemonctlResult {
         val obj = try {
             jsonElement.jsonObject
@@ -708,7 +733,19 @@ class DaemonctlExecutor @Inject constructor() {
         }
 
         obj.daemonEnvelopeOrNull()?.let { envelope ->
-            return resultFromEnvelope(envelope)
+            return resultFromEnvelope(envelope, transport)
+        }
+
+        if (expectedJsonRpcId != null && obj["jsonrpc"] != null) {
+            val actualId = obj["id"]?.jsonPrimitive?.intOrNull
+            if (actualId != expectedJsonRpcId) {
+                return DaemonctlResult.Error(
+                    code = -32600,
+                    message = "Daemon bridge response id $actualId != request id $expectedJsonRpcId",
+                    details = jsonElement,
+                    transport = transport,
+                )
+            }
         }
 
         // JSON-RPC error field present. Error responses must carry the typed
@@ -732,11 +769,13 @@ class DaemonctlExecutor @Inject constructor() {
                         ?: "Unknown daemon error",
                     details = envelopeError?.get("details") ?: errJson["data"],
                     envelope = envelope,
+                    transport = transport,
                 )
             } catch (e: Exception) {
                 DaemonctlResult.Error(
                     code = -1,
-                    message = errorObj.toString()
+                    message = errorObj.toString(),
+                    transport = transport,
                 )
             }
         }
@@ -745,7 +784,8 @@ class DaemonctlExecutor @Inject constructor() {
             return DaemonctlResult.Error(
                 code = exitCode,
                 message = stderr.ifBlank { "daemonctl exited with code $exitCode" },
-                details = jsonElement
+                details = jsonElement,
+                transport = transport,
             )
         }
 
@@ -754,12 +794,13 @@ class DaemonctlExecutor @Inject constructor() {
         if (resultField != null) {
             val envelope = resultField.daemonEnvelopeOrNull()
             if (envelope != null) {
-                return resultFromEnvelope(envelope)
+                return resultFromEnvelope(envelope, transport)
             }
             return DaemonctlResult.Error(
                 code = -32600,
                 message = "Daemon result for $method is missing the typed IPC envelope",
                 details = resultField,
+                transport = transport,
             )
         }
 
@@ -767,8 +808,12 @@ class DaemonctlExecutor @Inject constructor() {
             code = -32600,
             message = "Daemon response for $method is missing result/error typed IPC envelope",
             details = jsonElement,
+            transport = transport,
         )
     }
+
+    private fun DaemonctlResult.Error.isBridgeProtocolFailure(): Boolean =
+        transport == DaemonctlTransport.BRIDGE && (code == -32600 || code == -32700)
 
     private fun shellQuote(value: String): String {
         if (value.isEmpty()) return "''"
@@ -816,10 +861,10 @@ class DaemonctlExecutor @Inject constructor() {
         return if (hasEnvelopeStatus && hasEnvelopePayload) this else null
     }
 
-    private fun resultFromEnvelope(envelope: JsonObject): DaemonctlResult {
+    private fun resultFromEnvelope(envelope: JsonObject, transport: DaemonctlTransport): DaemonctlResult {
         val ok = envelope["ok"]?.jsonPrimitive?.booleanOrNull ?: true
         return if (ok) {
-            DaemonctlResult.Success(envelope["result"] ?: JsonNull, envelope)
+            DaemonctlResult.Success(envelope["result"] ?: JsonNull, envelope, transport)
         } else {
             val envelopeError = envelope["error"]?.jsonObject
             DaemonctlResult.Error(
@@ -828,6 +873,7 @@ class DaemonctlExecutor @Inject constructor() {
                     ?: "Unknown daemon error",
                 details = envelopeError?.get("details"),
                 envelope = envelope,
+                transport = transport,
             )
         }
     }
