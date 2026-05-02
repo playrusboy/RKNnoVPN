@@ -170,7 +170,7 @@ jobs:
       - name: Build daemon
         working-directory: daemon
         run: |
-          if [[ "${GITHUB_REF_NAME}" == v* ]]; then
+          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             VERSION="${GITHUB_REF_NAME}"
           else
             VERSION="dev-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
@@ -183,7 +183,7 @@ jobs:
       - name: Build daemonctl
         working-directory: daemon
         run: |
-          if [[ "${GITHUB_REF_NAME}" == v* ]]; then
+          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             VERSION="${GITHUB_REF_NAME}"
           else
             VERSION="dev-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
@@ -452,7 +452,7 @@ jobs:
 
       - name: Stamp version in module.prop
         run: |
-          if [[ "${GITHUB_REF_NAME}" == v* ]]; then
+          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             VERSION="${GITHUB_REF_NAME}"
             CODE="$(tools/version.sh code "$VERSION")"
           else
@@ -506,7 +506,7 @@ jobs:
 
       - name: Stamp version
         run: |
-          if [[ "${GITHUB_REF_NAME}" == v* ]]; then
+          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             VERSION="${GITHUB_REF_NAME}"
             VER_NAME="$VERSION"
             VER_CODE="$(tools/version.sh code "$VERSION")"
@@ -528,7 +528,7 @@ jobs:
           STORE_FILE="${RUNNER_TEMP}/rknnovpn-release.jks"
           if [ -n "${RKNNOVPN_RELEASE_KEYSTORE_BASE64:-}" ]; then
             printf '%s' "${RKNNOVPN_RELEASE_KEYSTORE_BASE64}" | base64 -d > "${STORE_FILE}"
-          elif [[ "${GITHUB_REF_NAME}" == v* ]]; then
+          elif [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "ERROR: stable tag builds require RKNNOVPN_RELEASE_KEYSTORE_BASE64 signing secret" >&2
             exit 1
           else
@@ -584,9 +584,12 @@ jobs:
       - name: Resolve release version
         id: version
         run: |
-          if [[ "${GITHUB_REF_NAME}" == v* ]]; then
+          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             VERSION="${GITHUB_REF_NAME}"
             STABLE=true
+          elif [[ "${GITHUB_REF_NAME}" == v* ]]; then
+            echo "ERROR: release tags must be strict vMAJOR.MINOR.PATCH, got ${GITHUB_REF_NAME}" >&2
+            exit 1
           else
             VERSION="dev-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
             STABLE=false

@@ -1,10 +1,16 @@
 # Changelog
 
+## v2.3.1
+
+- Made `VERSION` the only manual release version source; module metadata is a stamped template and `update.json` remains workflow-generated release feed metadata.
+- Switched release `versionCode` generation to compact semver digits (`v2.3.1` -> `2301`) and kept a guard against the old oversized formula.
+- Hardened GitHub Actions release stamping so only strict `vMAJOR.MINOR.PATCH` tags are treated as stable releases.
+
 ## v2.3.0
 
 - Added a root `VERSION` file as the single manual release version source for local builds, Android Gradle metadata, and GitHub Actions release stamping.
-- Replaced the colliding APK/module `versionCode` formula with `major * 1000000 + minor * 10000 + patch * 100 + commits` and two-digit validation for minor, patch, and post-tag commit counts.
-- Removed hardcoded daemon, daemonctl, and bundled script release versions from source defaults; release builds stamp daemon binaries and scripts read module metadata at runtime.
+- Replaced the colliding APK/module `versionCode` formula with compact semver digits (`v2.3.0` -> `2300`, `v2.10.0` -> `21000`) and validation that fails clearly outside the supported range.
+- Removed hardcoded daemon, daemonctl, module template, and bundled script release versions from source defaults; release builds stamp artifacts and scripts read module metadata at runtime.
 - Synchronized module and update feed metadata to `v2.3.0`.
 
 ## v2.2.11

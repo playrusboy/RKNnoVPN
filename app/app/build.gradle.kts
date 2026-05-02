@@ -17,16 +17,15 @@ val rknnoVpnVersionName = (findProperty("rknnovpn.version") as String?)
 val rknnoVpnVersionCodeOverride = System.getenv("RKNNOVPN_VERSION_CODE")?.toIntOrNull()
 
 fun rknnoVpnVersionCode(versionName: String): Int {
-    val match = Regex("""^v?(\d+)\.(\d+)\.(\d+)(?:-(\d+)-g[0-9a-fA-F]+)?$""").matchEntire(versionName)
+    val match = Regex("""^v?(\d+)\.(\d+)\.(\d+)$""").matchEntire(versionName)
         ?: error("Invalid RKNnoVPN version: $versionName")
     val major = match.groupValues[1].toInt()
     val minor = match.groupValues[2].toInt()
     val patch = match.groupValues[3].toInt()
-    val commits = match.groupValues.getOrNull(4)?.takeIf { it.isNotEmpty() }?.toInt() ?: 0
-    require(minor < 100 && patch < 100 && commits < 100) {
-        "RKNnoVPN version components reserve two digits each: $versionName"
+    require(major < 10 && patch < 100) {
+        "RKNnoVPN versionCode supports major 0..9 and patch 0..99: $versionName"
     }
-    return major * 1_000_000 + minor * 10_000 + patch * 100 + commits
+    return "$major$minor${patch.toString().padStart(2, '0')}".toInt()
 }
 
 val rknnoVpnVersionCode = rknnoVpnVersionCodeOverride ?: rknnoVpnVersionCode(rknnoVpnVersionName)

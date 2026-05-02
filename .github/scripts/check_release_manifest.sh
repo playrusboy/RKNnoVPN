@@ -36,7 +36,11 @@ grep -q 'versionCode = rknnoVpnVersionCode' app/app/build.gradle.kts || fail "AP
 
 [ -n "$module_version" ] || fail "module version not found"
 [ -n "$module_code" ] || fail "module versionCode not found"
-[ "$module_code" = "$(version_code "$module_version")" ] || fail "module versionCode $module_code does not match $module_version"
+if [ "$module_version" = "dev" ]; then
+  [ "$module_code" = "0" ] || fail "module template versionCode must be 0 when version is dev"
+else
+  [ "$module_code" = "$(version_code "$module_version")" ] || fail "module versionCode $module_code does not match $module_version"
+fi
 [ -n "$update_version" ] || fail "update.json version not found"
 [ -n "$update_code" ] || fail "update.json versionCode not found"
 [ "$update_code" = "$(version_code "$update_version")" ] || fail "update.json versionCode $update_code does not match $update_version"
@@ -98,21 +102,18 @@ if grep -REn 's/v//;s/\\?\.//g|s/v//;s/\.//g' .github/workflows Makefile >/tmp/r
 fi
 rm -f /tmp/release-manifest-old-code.$$
 
-if grep -REn 'major \* 1000|minor \* 100 \+ patch' .github/workflows Makefile app/app/build.gradle.kts >/tmp/release-manifest-old-code.$$ 2>/dev/null; then
+if grep -REn 'major \* 1000|1000000|1_000_000|major \* 10_000|major \* 10000' .github/workflows Makefile app/app/build.gradle.kts tools/version.sh >/tmp/release-manifest-old-code.$$ 2>/dev/null; then
   cat /tmp/release-manifest-old-code.$$ >&2
   rm -f /tmp/release-manifest-old-code.$$
-  fail "old colliding versionCode formula is forbidden"
+  fail "non-canonical versionCode formula is forbidden"
 fi
 rm -f /tmp/release-manifest-old-code.$$
 
-if [ "$(version_code v1.8.0)" != "1080000" ] || [ "$(version_code v1.7.13)" != "1071300" ]; then
-  fail "canonical version_code formula must reserve separate two-digit minor, patch, and post-tag fields"
+if [ "$(version_code v2.3.0)" != "2300" ] || [ "$(version_code v1.8.0)" != "1800" ] || [ "$(version_code v1.7.13)" != "1713" ] || [ "$(version_code v2.10.0)" != "21000" ]; then
+  fail "canonical version_code formula must use compact semver digits"
 fi
 if [ "$(version_code v1.10.0)" = "$(version_code v2.0.0)" ]; then
   fail "canonical version_code formula collides for v1.10.0 and v2.0.0"
-fi
-if [ "$(version_code v2.1.99)" = "$(version_code v2.1.0-99-gabcdef0)" ]; then
-  fail "canonical version_code formula collides patch and post-tag builds"
 fi
 if ! grep -q 'VERSION' Makefile || ! grep -q 'rootProject.file("../VERSION")' app/app/build.gradle.kts; then
   fail "release version must stay centralized in the root VERSION file"
@@ -125,7 +126,7 @@ fi
 rm -f /tmp/release-manifest-hardcoded-version.$$
 
 if [ "$(version_code "$release_version")" != "$release_code" ]; then
-  fail "canonical version_code formula must reserve separate two-digit minor, patch, and post-tag fields"
+  fail "canonical version_code formula must use compact semver digits"
 fi
 
 echo "release manifest: ${release_version} (${release_code}) ok"

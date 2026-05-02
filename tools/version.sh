@@ -15,21 +15,20 @@ rknnovpn_current_version() {
 
 rknnovpn_version_code() {
   local version="${1#v}"
-  local major minor patch commits
-  if [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-([0-9]+)-g[0-9a-fA-F]+)?$ ]]; then
+  local major minor patch
+  if [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
     major="${BASH_REMATCH[1]}"
     minor="${BASH_REMATCH[2]}"
     patch="${BASH_REMATCH[3]}"
-    commits="${BASH_REMATCH[5]:-0}"
   else
     echo "invalid version: $1" >&2
     return 1
   fi
-  if (( 10#$minor > 99 || 10#$patch > 99 || 10#$commits > 99 )); then
-    echo "version components exceed two reserved digits: $1" >&2
+  if (( 10#$major > 9 || 10#$patch > 99 )); then
+    echo "versionCode supports major 0..9 and patch 0..99: $1" >&2
     return 1
   fi
-  echo $((10#$major * 1000000 + 10#$minor * 10000 + 10#$patch * 100 + 10#$commits))
+  printf '%d%d%02d\n' "$((10#$major))" "$((10#$minor))" "$((10#$patch))"
 }
 
 rknnovpn_ci_version() {
