@@ -193,7 +193,7 @@ func (m Manager) collectCleanupFindings() cleanupFindings {
 		{bin: "ip6tables-nft", table: "nat"},
 		{bin: "ip6tables-nft", table: "filter"},
 	} {
-		out, err := m.execCommand(spec.bin, "-w", "100", "-t", spec.table, "-S")
+		out, err := m.execCommand(spec.bin, "-w", "10", "-t", spec.table, "-S")
 		if err != nil {
 			if isMissingCommandError(err) || isMissingKernelTableOutput(out) {
 				continue

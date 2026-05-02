@@ -1,6 +1,9 @@
 package main
 
 import (
+	"log"
+	"strings"
+
 	applytx "github.com/youtubediscord/RKNnoVPN/daemon/internal/apply"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
@@ -10,19 +13,30 @@ import (
 )
 
 func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, operation runtimev2.OperationKind) error {
-	needsFullRestart := rootruntime.ReloadNeedsFullRestart(
+	reloadPlan := rootruntime.PlanReload(
 		rootruntime.BuildScriptEnv(d.currentConfig(), d.dataDir),
 		rootruntime.BuildScriptEnv(newCfg, d.dataDir),
 	)
+	if reload && d.isRuntimeRunningOrDegraded() && len(reloadPlan.ChangedKeys) > 0 {
+		mode := "hot-swap"
+		switch {
+		case reloadPlan.FullRestart:
+			mode = "full-restart"
+		case reloadPlan.NetstackReapplyAfter:
+			mode = "hot-swap+netstack"
+		}
+		log.Printf("runtime reload plan: mode=%s changed_env=%s", mode, strings.Join(reloadPlan.ChangedKeys, ","))
+	}
 
 	return applytx.ApplyRuntimeConfig(
 		applytx.RuntimeConfigApplyInput{
-			NewConfig:        newCfg,
-			ConfigPath:       d.cfgPath,
-			Reload:           reload,
-			Operation:        operation,
-			WasRunning:       d.isRuntimeRunningOrDegraded(),
-			NeedsFullRestart: needsFullRestart,
+			NewConfig:            newCfg,
+			ConfigPath:           d.cfgPath,
+			Reload:               reload,
+			Operation:            operation,
+			WasRunning:           d.isRuntimeRunningOrDegraded(),
+			NeedsFullRestart:     reloadPlan.FullRestart,
+			NeedsNetstackReapply: reloadPlan.NetstackReapplyAfter,
 		},
 		applytx.RuntimeConfigApplyDeps{
 			EnsureIdle:       d.failIfRuntimeOperationActive,
@@ -32,8 +46,15 @@ func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, op
 				_, err := d.runtimeV2.RunOperation(kind, phase, fn)
 				return err
 			},
-			ReloadRuntime: func(cfg *config.Config, generation int64, fullRestart bool) error {
-				return d.reloadRuntimeAfterConfigChange(cfg, "apply config", "config saved", generation, fullRestart)
+			ReloadRuntime: func(cfg *config.Config, generation int64, fullRestart bool, netstackReapplyAfter bool) error {
+				return d.reloadRuntimeAfterConfigChange(
+					cfg,
+					"apply config",
+					"config saved",
+					generation,
+					fullRestart,
+					netstackReapplyAfter,
+				)
 			},
 		},
 	)
@@ -52,17 +73,18 @@ func (d *daemon) commitAppliedRuntimeConfig(newCfg *config.Config) {
 	}
 }
 
-func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context string, savedLabel string, generation int64, fullRestart bool) error {
+func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context string, savedLabel string, generation int64, fullRestart bool, netstackReapplyAfter bool) error {
 	if err := d.failIfResetInProgress(); err != nil {
 		return err
 	}
 	return rootruntime.ReloadAfterConfigChange(
 		rootruntime.ConfigReloadInput{
-			Config:      cfg,
-			Context:     context,
-			SavedLabel:  savedLabel,
-			Generation:  generation,
-			FullRestart: fullRestart,
+			Config:               cfg,
+			Context:              context,
+			SavedLabel:           savedLabel,
+			Generation:           generation,
+			FullRestart:          fullRestart,
+			NetstackReapplyAfter: netstackReapplyAfter,
 		},
 		rootruntime.ConfigReloadDeps{
 			StopSubsystems: d.stopSubsystems,
@@ -77,11 +99,28 @@ func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context stri
 			ResetNetworkState: func(generation int64) runtimev2.ResetReport {
 				return d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
 			},
-			ResetRescueState:    d.rescueMgr.Reset,
-			StartSubsystems:     d.startSubsystems,
-			RefreshHealth:       d.runtimeV2.RefreshHealth,
-			ObserveReloadReport: d.setLastReloadReport,
+			ResetRescueState: d.rescueMgr.Reset,
+			StartSubsystems:  d.startSubsystems,
+			RefreshHealth:    d.runtimeV2.RefreshHealth,
+			ObserveReloadReport: func(report core.RuntimeStageReport) {
+				d.setLastReloadReport(report)
+				d.publishReloadOperationStep(generation, report)
+			},
 		},
+	)
+}
+
+func (d *daemon) publishReloadOperationStep(generation int64, report core.RuntimeStageReport) {
+	if d.runtimeV2 == nil || len(report.Stages) == 0 {
+		return
+	}
+	stage := report.Stages[len(report.Stages)-1]
+	d.runtimeV2.SetActiveOperationStep(
+		generation,
+		stage.Name,
+		stage.Status,
+		stage.Code,
+		stage.Detail,
 	)
 }
 

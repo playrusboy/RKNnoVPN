@@ -8,12 +8,13 @@ import (
 )
 
 type RuntimeConfigApplyInput struct {
-	NewConfig        *config.Config
-	ConfigPath       string
-	Reload           bool
-	Operation        runtimev2.OperationKind
-	WasRunning       bool
-	NeedsFullRestart bool
+	NewConfig            *config.Config
+	ConfigPath           string
+	Reload               bool
+	Operation            runtimev2.OperationKind
+	WasRunning           bool
+	NeedsFullRestart     bool
+	NeedsNetstackReapply bool
 }
 
 type RuntimeConfigApplyDeps struct {
@@ -21,7 +22,7 @@ type RuntimeConfigApplyDeps struct {
 	CommitConfig     func(*config.Config)
 	SyncDesiredState func() error
 	RunOperation     func(runtimev2.OperationKind, runtimev2.Phase, func(generation int64) error) error
-	ReloadRuntime    func(cfg *config.Config, generation int64, fullRestart bool) error
+	ReloadRuntime    func(cfg *config.Config, generation int64, fullRestart bool, netstackReapplyAfter bool) error
 }
 
 func ApplyRuntimeConfig(input RuntimeConfigApplyInput, deps RuntimeConfigApplyDeps) error {
@@ -58,7 +59,7 @@ func ApplyRuntimeConfig(input RuntimeConfigApplyInput, deps RuntimeConfigApplyDe
 		return fmt.Errorf("config saved: runtime reload hook is not configured")
 	}
 	if err := deps.RunOperation(operation, runtimev2.PhaseStarting, func(generation int64) error {
-		return deps.ReloadRuntime(input.NewConfig, generation, input.NeedsFullRestart)
+		return deps.ReloadRuntime(input.NewConfig, generation, input.NeedsFullRestart, input.NeedsNetstackReapply)
 	}); err != nil {
 		return fmt.Errorf("config saved: %w", err)
 	}

@@ -8,6 +8,8 @@ import com.rknnovpn.panel.model.ConnectionState
 import com.rknnovpn.panel.model.DaemonStatus
 import com.rknnovpn.panel.model.HealthResult
 
+private const val MAX_REASONABLE_RUNTIME_UPTIME_SECONDS = 366L * 24L * 60L * 60L
+
 internal fun BackendStatusV2.toDaemonStatus(
     healthOverride: BackendHealthSnapshot? = null,
 ): DaemonStatus {
@@ -47,7 +49,11 @@ internal fun BackendStatusV2.toDaemonStatus(
     return DaemonStatus(
         state = connectionState,
         activeNodeId = effectiveCanonical?.activeProfileId ?: desiredState.activeProfileId,
-        uptime = uptimeSeconds.takeIf { it > 0L } ?: appliedState.startedAt?.let(::elapsedSecondsSince) ?: 0L,
+        uptime = if (displayPhase == BackendPhase.STOPPED) {
+            0L
+        } else {
+            normalizedRuntimeUptime(uptimeSeconds, appliedState.startedAt)
+        },
         traffic = traffic,
         health = HealthResult(
             healthy = effectiveCanonical?.readiness?.ready ?: effectiveHealth.healthy,
@@ -88,6 +94,16 @@ internal fun BackendStatusV2.toDaemonStatus(
 
 private fun epochSeconds(raw: String): Long =
     runCatching { java.time.Instant.parse(raw).epochSecond }.getOrDefault(0L)
+
+private fun normalizedRuntimeUptime(rawSeconds: Long, startedAt: String?): Long {
+    rawSeconds
+        .takeIf { it in 1L..MAX_REASONABLE_RUNTIME_UPTIME_SECONDS }
+        ?.let { return it }
+    return startedAt
+        ?.let(::elapsedSecondsSince)
+        ?.takeIf { it in 1L..MAX_REASONABLE_RUNTIME_UPTIME_SECONDS }
+        ?: 0L
+}
 
 private fun elapsedSecondsSince(raw: String): Long =
     runCatching {

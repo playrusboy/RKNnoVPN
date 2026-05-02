@@ -209,8 +209,6 @@
     <string name="dns_ipv6_prefer_ipv4">Prefer IPv4</string>
     <string name="dns_ipv6_prefer_ipv6">Prefer IPv6</string>
     <string name="dns_ipv6_ipv4_only">IPv4 only</string>
-    <string name="dns_block_quic">Block QUIC DNS</string>
-    <string name="dns_block_quic_desc">Force classic DNS interception and HTTPS fallback for selected apps.</string>
     <string name="dns_fake_dns">FakeDNS</string>
     <string name="dns_fake_dns_desc">Advanced compatibility mode. Leave off unless a profile requires synthetic DNS answers.</string>
     <string name="dns_settings_required">DNS through proxy, direct DNS and bootstrap IP must not be empty</string>

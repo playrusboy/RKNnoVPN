@@ -52,6 +52,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,15 +62,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.core.content.FileProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.rknnovpn.panel.R
+import com.rknnovpn.panel.advisor.AlwaysDirectApps
 import com.rknnovpn.panel.model.DnsIpv6Mode
 import com.rknnovpn.panel.model.FallbackPolicy
+import com.rknnovpn.panel.ui.common.AppPackageChoice
 import com.rknnovpn.panel.ui.common.AppPackageListItem
 import com.rknnovpn.panel.ui.common.AppPackagePickerDialog
 import java.io.File
@@ -87,6 +93,7 @@ fun SettingsScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val vpnDetectionUrl = stringResource(R.string.vpn_detection_url)
     val bypassRussiaDisablePhrase = stringResource(R.string.bypass_russia_disable_phrase)
     var showAlwaysDirectAppPicker by remember { mutableStateOf(false) }
@@ -98,6 +105,22 @@ fun SettingsScreen(
     }
     val alwaysDirectExcludedPackages = remember(state.alwaysDirectExcludedPackagesText) {
         parsePackageSelection(state.alwaysDirectExcludedPackagesText)
+    }
+    val alwaysDirectPackageSet = remember(alwaysDirectPackages) { alwaysDirectPackages.toSet() }
+    val alwaysDirectExcludedPackageSet = remember(alwaysDirectExcludedPackages) {
+        alwaysDirectExcludedPackages.toSet()
+    }
+
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshProfile()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     LaunchedEffect(state.shareLogsEventId) {
@@ -226,14 +249,12 @@ fun SettingsScreen(
             directDnsUrl = state.directDnsUrl,
             bootstrapDnsIp = state.bootstrapDnsIp,
             ipv6Mode = state.dnsIpv6Mode,
-            blockQuic = state.blockQuicDns,
             fakeDns = state.fakeDns,
             onPresetChange = viewModel::setDnsPreset,
             onRemoteDnsChange = viewModel::setRemoteDnsUrl,
             onDirectDnsChange = viewModel::setDirectDnsUrl,
             onBootstrapChange = viewModel::setBootstrapDnsIp,
             onIpv6ModeChange = viewModel::setDnsIpv6Mode,
-            onBlockQuicChange = viewModel::setBlockQuicDns,
             onFakeDnsChange = viewModel::setFakeDns,
             onApply = viewModel::applyDnsSettings,
         )
@@ -613,6 +634,13 @@ fun SettingsScreen(
         AppPackagePickerDialog(
             title = stringResource(R.string.choose_app),
             warningText = stringResource(R.string.always_direct_picker_warning),
+            choiceFilter = { choice ->
+                !choice.isEffectiveAlwaysDirectChoice(
+                    directPackages = alwaysDirectPackageSet,
+                    excludedPackages = alwaysDirectExcludedPackageSet,
+                    alwaysDirectSystemApps = state.alwaysDirectSystemApps,
+                )
+            },
             onDismiss = { showAlwaysDirectAppPicker = false },
             onSelect = viewModel::addAlwaysDirectPackage,
         )
@@ -622,6 +650,14 @@ fun SettingsScreen(
         AppPackagePickerDialog(
             title = stringResource(R.string.choose_app),
             warningText = stringResource(R.string.always_direct_excluded_picker_warning),
+            choiceFilter = { choice ->
+                choice.packageName !in alwaysDirectExcludedPackageSet &&
+                    choice.isEffectiveAlwaysDirectChoice(
+                        directPackages = alwaysDirectPackageSet,
+                        excludedPackages = alwaysDirectExcludedPackageSet,
+                        alwaysDirectSystemApps = state.alwaysDirectSystemApps,
+                    )
+            },
             onDismiss = { showAlwaysDirectExcludedAppPicker = false },
             onSelect = viewModel::addAlwaysDirectExcludedPackage,
         )
@@ -727,6 +763,22 @@ private fun parsePackageSelection(raw: String): List<String> =
         .map(String::trim)
         .filter(String::isNotBlank)
         .distinct()
+
+private fun AppPackageChoice.isEffectiveAlwaysDirectChoice(
+    directPackages: Set<String>,
+    excludedPackages: Set<String>,
+    alwaysDirectSystemApps: Boolean,
+): Boolean =
+    when {
+        packageName in excludedPackages -> false
+        packageName in directPackages -> true
+        alwaysDirectSystemApps && isSystemApp -> true
+        else -> AlwaysDirectApps.matches(
+            packageName,
+            directPackages,
+            excludedPackages,
+        )
+    }
 
 @Composable
 private fun SectionHeader(
@@ -953,14 +1005,12 @@ private fun DnsSettingsCard(
     directDnsUrl: String,
     bootstrapDnsIp: String,
     ipv6Mode: DnsIpv6Mode,
-    blockQuic: Boolean,
     fakeDns: Boolean,
     onPresetChange: (DnsPreset) -> Unit,
     onRemoteDnsChange: (String) -> Unit,
     onDirectDnsChange: (String) -> Unit,
     onBootstrapChange: (String) -> Unit,
     onIpv6ModeChange: (DnsIpv6Mode) -> Unit,
-    onBlockQuicChange: (Boolean) -> Unit,
     onFakeDnsChange: (Boolean) -> Unit,
     onApply: () -> Unit,
 ) {
@@ -1007,18 +1057,6 @@ private fun DnsSettingsCard(
         DnsIpv6ModePicker(
             currentMode = ipv6Mode,
             onModeChange = onIpv6ModeChange,
-        )
-
-        ListItem(
-            headlineContent = { Text(stringResource(R.string.dns_block_quic)) },
-            supportingContent = { Text(stringResource(R.string.dns_block_quic_desc)) },
-            trailingContent = {
-                Switch(
-                    checked = blockQuic,
-                    onCheckedChange = onBlockQuicChange,
-                )
-            },
-            colors = transparentListItemColors(),
         )
 
         ListItem(

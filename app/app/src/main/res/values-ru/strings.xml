@@ -5,7 +5,7 @@
     <!-- Navigation -->
     <string name="nav_dashboard">Главная</string>
     <string name="nav_nodes">Серверы</string>
-    <string name="nav_apps">Приложения</string>
+    <string name="nav_apps">Прилож.</string>
     <string name="nav_settings">Настройки</string>
 
     <!-- Connection states -->
@@ -209,8 +209,6 @@
     <string name="dns_ipv6_prefer_ipv4">Предпочитать IPv4</string>
     <string name="dns_ipv6_prefer_ipv6">Предпочитать IPv6</string>
     <string name="dns_ipv6_ipv4_only">Только IPv4</string>
-    <string name="dns_block_quic">Блокировать QUIC DNS</string>
-    <string name="dns_block_quic_desc">Принудительно оставлять classic DNS-перехват и HTTPS fallback для выбранных приложений.</string>
     <string name="dns_fake_dns">FakeDNS</string>
     <string name="dns_fake_dns_desc">Расширенный режим совместимости. Оставьте выключенным, если профиль не требует синтетических DNS-ответов.</string>
     <string name="dns_settings_required">DNS через прокси, прямой DNS и bootstrap IP не должны быть пустыми</string>

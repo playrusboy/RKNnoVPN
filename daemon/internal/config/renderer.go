@@ -572,6 +572,10 @@ func buildProxyOutbound(profile *NodeProfile) (map[string]interface{}, error) {
 		if method == "" {
 			method = "2022-blake3-aes-128-gcm"
 		}
+		method = normalizeShadowsocksMethod(method)
+		if !isSupportedShadowsocksMethod(method) {
+			return nil, fmt.Errorf("renderer: shadowsocks method %q is not supported by sing-box", profile.SSMethod)
+		}
 		out["method"] = method
 		if profile.SSPlugin != "" {
 			out["plugin"] = profile.SSPlugin
@@ -687,6 +691,36 @@ func buildProxyOutbound(profile *NodeProfile) (map[string]interface{}, error) {
 	}
 
 	return out, nil
+}
+
+func normalizeShadowsocksMethod(method string) string {
+	return strings.ToLower(strings.TrimSpace(method))
+}
+
+func isSupportedShadowsocksMethod(method string) bool {
+	switch normalizeShadowsocksMethod(method) {
+	case "2022-blake3-aes-128-gcm",
+		"2022-blake3-aes-256-gcm",
+		"2022-blake3-chacha20-poly1305",
+		"none",
+		"aes-128-gcm",
+		"aes-192-gcm",
+		"aes-256-gcm",
+		"chacha20-ietf-poly1305",
+		"xchacha20-ietf-poly1305",
+		"aes-128-ctr",
+		"aes-192-ctr",
+		"aes-256-ctr",
+		"aes-128-cfb",
+		"aes-192-cfb",
+		"aes-256-cfb",
+		"rc4-md5",
+		"chacha20-ietf",
+		"xchacha20":
+		return true
+	default:
+		return false
+	}
 }
 
 func ProfilesFromConfigNodes(cfg *Config) []*NodeProfile {
@@ -1130,15 +1164,21 @@ func parseShadowsocksLink(link string) (method string, password string, host str
 		if !ok {
 			return "", "", "", 0, false
 		}
-		decoded := decodeShadowsocksUserInfo(userInfo)
-		if decoded == "" {
-			decoded, _ = url.QueryUnescape(userInfo)
+		if decoded := decodeShadowsocksUserInfo(userInfo); decoded != "" {
+			method, password, ok := splitMethodPassword(decoded)
+			if ok && isSupportedShadowsocksMethod(method) {
+				return normalizeShadowsocksMethod(method), password, host, port, true
+			}
 		}
+		decoded, _ := url.QueryUnescape(userInfo)
 		method, password, ok := splitMethodPassword(decoded)
 		if !ok {
 			return "", "", "", 0, false
 		}
-		return method, password, host, port, true
+		if !isSupportedShadowsocksMethod(method) {
+			return "", "", "", 0, false
+		}
+		return normalizeShadowsocksMethod(method), password, host, port, true
 	}
 
 	decoded := decodeShadowsocksUserInfo(strings.SplitN(body, "?", 2)[0])
@@ -1153,11 +1193,14 @@ func parseShadowsocksLink(link string) (method string, password string, host str
 	if !ok {
 		return "", "", "", 0, false
 	}
+	if !isSupportedShadowsocksMethod(method) {
+		return "", "", "", 0, false
+	}
 	host, port, ok = parseHostPortValue(decoded[at+1:])
 	if !ok {
 		return "", "", "", 0, false
 	}
-	return method, password, host, port, true
+	return normalizeShadowsocksMethod(method), password, host, port, true
 }
 
 func parseUserInfoProxyLink(link string, scheme string) (secret string, host string, port int, ok bool) {

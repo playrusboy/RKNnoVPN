@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -103,6 +104,71 @@ func TestParseVLESSSubscriptionPreservesTransportSettings(t *testing.T) {
 				t.Fatalf("unexpected network: %#v", stream)
 			}
 			tc.check(t, stream)
+		})
+	}
+}
+
+func TestParseShadowsocksSubscriptionCredentials(t *testing.T) {
+	encodedUserInfo := base64.RawURLEncoding.EncodeToString([]byte("chacha20-ietf-poly1305:encoded-secret"))
+	legacyBody := base64.RawStdEncoding.EncodeToString([]byte("aes-192-gcm:legacy-secret@example.com:8388"))
+	for _, tc := range []struct {
+		name         string
+		link         string
+		wantMethod   string
+		wantPassword string
+		wantPlugin   string
+		wantOpts     string
+	}{
+		{
+			name:         "sip002-base64-userinfo",
+			link:         "ss://" + encodedUserInfo + "@example.com:8388#encoded",
+			wantMethod:   "chacha20-ietf-poly1305",
+			wantPassword: "encoded-secret",
+		},
+		{
+			name:         "sip002-plain-userinfo",
+			link:         "ss://aes-128-gcm:plain-secret@example.com:8388#plain",
+			wantMethod:   "aes-128-gcm",
+			wantPassword: "plain-secret",
+		},
+		{
+			name:         "query-method-password-userinfo",
+			link:         "ss://query-secret@example.com:8388?method=aes-256-gcm#query",
+			wantMethod:   "aes-256-gcm",
+			wantPassword: "query-secret",
+		},
+		{
+			name:         "sip002-plugin",
+			link:         "ss://" + encodedUserInfo + "@example.com:8388/?plugin=v2ray-plugin%3Bserver#plugin",
+			wantMethod:   "chacha20-ietf-poly1305",
+			wantPassword: "encoded-secret",
+			wantPlugin:   "v2ray-plugin",
+			wantOpts:     "server",
+		},
+		{
+			name:         "legacy-whole-link-base64",
+			link:         "ss://" + strings.TrimRight(legacyBody, "=") + "#legacy",
+			wantMethod:   "aes-192-gcm",
+			wantPassword: "legacy-secret",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node, err := ParseLink(tc.link, 123)
+			if err != nil {
+				t.Fatalf("parse link: %v", err)
+			}
+			var outbound map[string]any
+			if err := json.Unmarshal(node.Outbound, &outbound); err != nil {
+				t.Fatalf("unmarshal outbound: %v", err)
+			}
+			settings := outbound["settings"].(map[string]any)
+			server := settings["servers"].([]any)[0].(map[string]any)
+			if server["method"] != tc.wantMethod || server["password"] != tc.wantPassword {
+				t.Fatalf("unexpected shadowsocks credentials: %#v", server)
+			}
+			if tc.wantPlugin != "" && (server["plugin"] != tc.wantPlugin || server["plugin_opts"] != tc.wantOpts) {
+				t.Fatalf("unexpected shadowsocks plugin settings: %#v", server)
+			}
 		})
 	}
 }

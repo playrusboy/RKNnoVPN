@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -120,6 +121,72 @@ func TestRunOnceCanPromoteDNSProbeToHardReadiness(t *testing.T) {
 	result := monitor.RunOnce()
 	if result.Overall {
 		t.Fatalf("DNS failure must fail hard readiness when explicitly configured: %#v", result)
+	}
+}
+
+func TestStopReturnsWhenHealthCheckIsBlocked(t *testing.T) {
+	cfg := config.DefaultConfig()
+	manager := core.NewCoreManager(cfg, t.TempDir(), log.New(os.Stderr, "", 0))
+	manager.SetState(core.StateRunning)
+	monitor := NewHealthMonitor(
+		manager,
+		time.Millisecond,
+		1,
+		cfg.Proxy.TProxyPort,
+		cfg.Proxy.DNSPort,
+		cfg.Proxy.Mark,
+		cfg.Health.URL,
+		time.Second,
+		log.New(os.Stderr, "", 0),
+	)
+	monitor.stopWait = 20 * time.Millisecond
+	monitor.runProcessAliveCheck = func(pid int) CheckResult {
+		return CheckResult{Pass: true, Detail: "alive"}
+	}
+	monitor.runPortListeningCheck = func(port int) CheckResult {
+		return CheckResult{Pass: true, Detail: "listening"}
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	monitor.runIptablesCheck = func() CheckResult {
+		once.Do(func() { close(entered) })
+		<-release
+		return CheckResult{Pass: true, Detail: "iptables"}
+	}
+	monitor.runRoutingCheck = func() CheckResult {
+		return CheckResult{Pass: true, Detail: "routing"}
+	}
+	monitor.runDNSCheck = func() CheckResult {
+		return CheckResult{Pass: true, Detail: "dns"}
+	}
+
+	monitor.Start()
+	monitor.mu.Lock()
+	done := monitor.done
+	monitor.mu.Unlock()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("health check did not enter the blocking section")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		monitor.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("Stop should not wait indefinitely for an in-flight health check")
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("health loop should exit after the blocked check returns")
 	}
 }
 

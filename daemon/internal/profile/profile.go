@@ -61,7 +61,6 @@ type DNSConfig struct {
 	DirectDNS   string `json:"directDns"`
 	BootstrapIP string `json:"bootstrapIp"`
 	IPv6Mode    string `json:"ipv6Mode"`
-	BlockQUIC   bool   `json:"blockQuic"`
 	FakeDNS     bool   `json:"fakeDns"`
 }
 
@@ -500,6 +499,8 @@ func routingFromConfig(cfg *config.Config) RoutingConfig {
 	blockDomains, blockIps := splitRoutingRuleInputs(cfg.Routing.CustomBlock)
 	routing := RoutingConfig{
 		AppGroupRoutes:              map[string]string{},
+		AppProxyList:                append([]string(nil), cfg.Routing.InactiveAppProxyList...),
+		AppBypassList:               append([]string(nil), cfg.Routing.InactiveAppBypassList...),
 		DirectDomains:               directDomains,
 		ProxyDomains:                proxyDomains,
 		BlockDomains:                blockDomains,
@@ -540,6 +541,8 @@ func applyRoutingToConfig(cfg *config.Config, routing RoutingConfig) {
 	cfg.Routing.AlwaysDirectExcludedApps = append([]string(nil), routing.AlwaysDirectExcludedAppList...)
 	cfg.Routing.AlwaysDirectSystemApps = routing.AlwaysDirectSystemApps
 	cfg.Routing.BypassRussia = routing.BypassRussia
+	cfg.Routing.InactiveAppProxyList = append([]string(nil), routing.AppProxyList...)
+	cfg.Routing.InactiveAppBypassList = append([]string(nil), routing.AppBypassList...)
 	cfg.Apps.AppGroups = map[string]string{}
 	for key, value := range routing.AppGroupRoutes {
 		cfg.Apps.AppGroups[key] = value
@@ -606,7 +609,6 @@ func dnsFromConfig(cfg *config.Config) DNSConfig {
 		DirectDNS:   cfg.DNS.DirectDNS,
 		BootstrapIP: cfg.DNS.BootstrapIP,
 		IPv6Mode:    strings.ToUpper(cfg.IPv6.Mode),
-		BlockQUIC:   cfg.DNS.BlockQUICDNS,
 		FakeDNS:     cfg.DNS.FakeIP,
 	}
 }
@@ -615,7 +617,6 @@ func applyDNSToConfig(cfg *config.Config, dns DNSConfig) {
 	cfg.DNS.ProxyDNS = dns.RemoteDNS
 	cfg.DNS.DirectDNS = dns.DirectDNS
 	cfg.DNS.BootstrapIP = dns.BootstrapIP
-	cfg.DNS.BlockQUICDNS = dns.BlockQUIC
 	cfg.DNS.FakeIP = dns.FakeDNS
 	cfg.IPv6.Mode = strings.ToLower(dns.IPv6Mode)
 	if cfg.IPv6.Mode == "" {

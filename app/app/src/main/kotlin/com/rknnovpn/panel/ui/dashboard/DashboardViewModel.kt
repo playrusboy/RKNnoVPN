@@ -314,7 +314,7 @@ class DashboardViewModel @Inject constructor(
     private fun observeProfile() {
         viewModelScope.launch {
             profileRepository.profile.collect { profile ->
-                val status = latestStatus ?: return@collect
+                val status = latestStatus ?: DaemonStatus(state = _uiState.value.connectionState)
                 _uiState.update {
                     it.copy(
                         activeNodeName = formatActiveNodeName(status, profile),

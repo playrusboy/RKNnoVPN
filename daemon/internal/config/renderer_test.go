@@ -1397,6 +1397,63 @@ func TestRenderAutoSkipsInvalidPanelNode(t *testing.T) {
 	}
 }
 
+func TestRenderAutoSkipsUnsupportedShadowsocksMethod(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = ""
+	cfg.Node.UUID = ""
+	cfg.Profile.ActiveNodeID = "good-vless"
+	cfg.Profile.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"bad-ss",
+			"name":"Bad SS",
+			"protocol":"SHADOWSOCKS",
+			"server":"127.0.0.1",
+			"port":8388,
+			"outbound":{
+				"protocol":"shadowsocks",
+				"settings":{
+					"servers":[{"address":"127.0.0.1","port":8388,"method":"not-a-sing-box-method","password":"secret"}]
+				}
+			}
+		}`),
+		json.RawMessage(`{
+			"id":"good-vless",
+			"name":"Good VLESS",
+			"protocol":"VLESS",
+			"server":"one.example",
+			"port":443,
+			"outbound":{
+				"protocol":"vless",
+				"settings":{
+					"vnext":[{
+						"address":"one.example",
+						"port":443,
+						"users":[{"id":"00000000-0000-0000-0000-000000000001","encryption":"none"}]
+					}]
+				}
+			}
+		}`),
+	}
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	outbounds := rendered["outbounds"].([]any)
+	if len(outbounds) != 2 {
+		t.Fatalf("expected unsupported SS node to be skipped, got %#v", outbounds)
+	}
+	proxy := outbounds[0].(map[string]any)
+	if proxy["type"] != "vless" || proxy["tag"] != "proxy" {
+		t.Fatalf("expected valid VLESS proxy after skipping unsupported SS, got %#v", proxy)
+	}
+}
+
 func TestRenderActiveInvalidPanelNodeFails(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = ""
@@ -1438,6 +1495,50 @@ func TestRenderActiveInvalidPanelNodeFails(t *testing.T) {
 	_, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
 	if err == nil || !strings.Contains(err.Error(), "active node") {
 		t.Fatalf("expected active invalid node error, got %v", err)
+	}
+}
+
+func TestRenderActiveUnsupportedShadowsocksMethodFailsClearly(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = ""
+	cfg.Node.UUID = ""
+	cfg.Profile.ActiveNodeID = "bad-ss"
+	cfg.Profile.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"bad-ss",
+			"name":"Bad SS",
+			"protocol":"SHADOWSOCKS",
+			"server":"127.0.0.1",
+			"port":8388,
+			"outbound":{
+				"protocol":"shadowsocks",
+				"settings":{
+					"servers":[{"address":"127.0.0.1","port":8388,"method":"not-a-sing-box-method","password":"secret"}]
+				}
+			}
+		}`),
+		json.RawMessage(`{
+			"id":"good-vless",
+			"name":"Good VLESS",
+			"protocol":"VLESS",
+			"server":"one.example",
+			"port":443,
+			"outbound":{
+				"protocol":"vless",
+				"settings":{
+					"vnext":[{
+						"address":"one.example",
+						"port":443,
+						"users":[{"id":"00000000-0000-0000-0000-000000000001","encryption":"none"}]
+					}]
+				}
+			}
+		}`),
+	}
+
+	_, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err == nil || !strings.Contains(err.Error(), "shadowsocks method") {
+		t.Fatalf("expected unsupported shadowsocks method error, got %v", err)
 	}
 }
 

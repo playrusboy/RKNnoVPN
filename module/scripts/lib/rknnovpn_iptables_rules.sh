@@ -81,10 +81,6 @@ sharing_enabled() {
     [ "${SHARING_MODE:-off}" = "hotspot" ]
 }
 
-block_quic_enabled() {
-    [ "${BLOCK_QUIC:-0}" = "1" ]
-}
-
 sharing_ifaces() {
     if [ -n "${SHARING_IFACES:-}" ]; then
         printf '%s\n' ${SHARING_IFACES}
@@ -107,32 +103,8 @@ emit_sharing_prerouting_marks() {
                 ;;
         esac
         echo "-A ${ps_emit_chain} -i ${ps_iface} -p tcp -j MARK --set-mark ${FWMARK}"
-        if block_quic_enabled; then
-            echo "-A ${ps_emit_chain} -i ${ps_iface} -p udp --dport 443 -j DROP"
-        fi
         echo "-A ${ps_emit_chain} -i ${ps_iface} -p udp -j MARK --set-mark ${FWMARK}"
     done
-}
-
-emit_app_quic_drop() {
-    ps_emit_chain="$1"
-    ps_emit_mode="${APP_MODE:-all}"
-    ps_emit_uid=""
-    block_quic_enabled || return 0
-
-    case "${ps_emit_mode}" in
-        whitelist)
-            for ps_emit_uid in ${PROXY_UIDS}; do
-                case "${ps_emit_uid}" in
-                    ''|*[!0-9]*) continue ;;
-                esac
-                echo "-A ${ps_emit_chain} -p udp --dport 443 -m owner --uid-owner ${ps_emit_uid} -j DROP"
-            done
-            ;;
-        blacklist|all)
-            echo "-A ${ps_emit_chain} -p udp --dport 443 -j DROP"
-            ;;
-    esac
 }
 
 emit_chain_proxy_port_protection() {
@@ -262,7 +234,6 @@ $(for cidr in ${RESERVED_IPV4}; do
 done)
 
 $(if [ "${APP_MODE}" = "whitelist" ]; then
-    emit_app_quic_drop "${CHAIN_APP}"
     for uid in ${PROXY_UIDS}; do
         echo "-A ${CHAIN_APP} -m owner --uid-owner ${uid} -j MARK --set-mark ${FWMARK}"
     done
@@ -270,10 +241,8 @@ elif [ "${APP_MODE}" = "blacklist" ]; then
     for uid in ${DIRECT_UIDS}; do
         echo "-A ${CHAIN_APP} -m owner --uid-owner ${uid} -j RETURN"
     done
-    emit_app_quic_drop "${CHAIN_APP}"
     echo "-A ${CHAIN_APP} -j MARK --set-mark ${FWMARK}"
 elif [ "${APP_MODE}" = "all" ]; then
-    emit_app_quic_drop "${CHAIN_APP}"
     echo "-A ${CHAIN_APP} -j MARK --set-mark ${FWMARK}"
 fi)
 -A ${CHAIN_APP} -j RETURN
@@ -362,7 +331,6 @@ $(for cidr in ${RESERVED_IPV6}; do
 done)
 
 $(if [ "${APP_MODE}" = "whitelist" ]; then
-    emit_app_quic_drop "${CHAIN_APP}"
     for uid in ${PROXY_UIDS}; do
         echo "-A ${CHAIN_APP} -m owner --uid-owner ${uid} -j MARK --set-mark ${FWMARK}"
     done
@@ -370,10 +338,8 @@ elif [ "${APP_MODE}" = "blacklist" ]; then
     for uid in ${DIRECT_UIDS}; do
         echo "-A ${CHAIN_APP} -m owner --uid-owner ${uid} -j RETURN"
     done
-    emit_app_quic_drop "${CHAIN_APP}"
     echo "-A ${CHAIN_APP} -j MARK --set-mark ${FWMARK}"
 elif [ "${APP_MODE}" = "all" ]; then
-    emit_app_quic_drop "${CHAIN_APP}"
     echo "-A ${CHAIN_APP} -j MARK --set-mark ${FWMARK}"
 fi)
 -A ${CHAIN_APP} -j RETURN

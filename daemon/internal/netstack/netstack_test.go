@@ -112,7 +112,7 @@ func TestVerifyCleanupReportsRKNnoVPNRulesAndRoutes(t *testing.T) {
 	}, nil).WithExecCommand(func(name string, args ...string) (string, error) {
 		key := name + " " + strings.Join(args, " ")
 		switch key {
-		case "iptables -w 100 -t mangle -S":
+		case "iptables -w 10 -t mangle -S":
 			return "-N RKNNOVPN_OUT\n-A OUTPUT -j RKNNOVPN_OUT", nil
 		case "ip rule show":
 			return "100: from all fwmark 0x2023 lookup 2023", nil

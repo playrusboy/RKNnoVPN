@@ -153,6 +153,7 @@ fun AppPackageListItem(
 fun AppPackagePickerDialog(
     title: String,
     warningText: String? = null,
+    choiceFilter: (AppPackageChoice) -> Boolean = { true },
     onDismiss: () -> Unit,
     onSelect: (String) -> Unit,
 ) {
@@ -169,15 +170,19 @@ fun AppPackagePickerDialog(
     }
 
     val normalizedQuery = query.trim().lowercase()
-    val filteredApps = remember(apps, normalizedQuery) {
-        if (normalizedQuery.isEmpty()) {
-            apps
-        } else {
-            apps.filter {
-                it.label.lowercase().contains(normalizedQuery) ||
-                    it.packageName.lowercase().contains(normalizedQuery)
+    val filteredApps = remember(apps, normalizedQuery, choiceFilter) {
+        apps
+            .filter(choiceFilter)
+            .let { choices ->
+                if (normalizedQuery.isEmpty()) {
+                    choices
+                } else {
+                    choices.filter {
+                        it.label.lowercase().contains(normalizedQuery) ||
+                            it.packageName.lowercase().contains(normalizedQuery)
+                    }
+                }
             }
-        }
     }
 
     AlertDialog(

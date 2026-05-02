@@ -2,6 +2,7 @@ package com.rknnovpn.panel.ipc
 
 import com.rknnovpn.panel.model.BackendStatusV2
 import com.rknnovpn.panel.model.Node
+import com.rknnovpn.panel.model.ProfileConfig
 import com.rknnovpn.panel.model.Subscription
 import com.rknnovpn.panel.model.SubscriptionSource
 import kotlinx.serialization.Serializable
@@ -82,6 +83,7 @@ data class ConfigMutationInfo(
     val parseFailures: Int? = null,
     val rejected: Int? = null,
     val rejectedNodes: List<RejectedSubscriptionNode> = emptyList(),
+    val profile: ProfileConfig? = null,
 )
 
 @Serializable

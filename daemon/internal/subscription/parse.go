@@ -94,13 +94,17 @@ func subscriptionInfoFromHeaders(headers map[string]string) subscriptionInfo {
 }
 
 func ParseLink(raw string, nowMillis int64) (profiledoc.Node, error) {
-	parsed, err := neturl.Parse(strings.TrimSpace(raw))
+	raw = strings.TrimSpace(raw)
+	parsed, err := neturl.Parse(raw)
 	if err != nil {
 		return profiledoc.Node{}, err
 	}
 	proto := normalizeLinkProtocol(parsed.Scheme)
 	if proto == "" {
 		return profiledoc.Node{}, fmt.Errorf("unsupported scheme")
+	}
+	if proto == "shadowsocks" {
+		return parseShadowsocksNode(raw, parsed, nowMillis)
 	}
 	host := parsed.Hostname()
 	port, _ := strconv.Atoi(parsed.Port())
@@ -126,6 +130,79 @@ func ParseLink(raw string, nowMillis int64) (profiledoc.Node, error) {
 	return node, nil
 }
 
+func parseShadowsocksNode(raw string, parsed *neturl.URL, nowMillis int64) (profiledoc.Node, error) {
+	schemeSep := strings.Index(raw, "://")
+	if schemeSep < 0 {
+		return profiledoc.Node{}, fmt.Errorf("unsupported shadowsocks uri")
+	}
+	body := strings.SplitN(raw[schemeSep+3:], "#", 2)[0]
+
+	var method, password, host, plugin, pluginOpts string
+	var port int
+	if at := strings.LastIndex(body, "@"); at >= 0 {
+		userInfo := body[:at]
+		hostAndQuery := body[at+1:]
+		hostPort := strings.TrimSuffix(strings.SplitN(hostAndQuery, "?", 2)[0], "/")
+		var query neturl.Values
+		if queryIndex := strings.Index(hostAndQuery, "?"); queryIndex >= 0 {
+			query, _ = neturl.ParseQuery(hostAndQuery[queryIndex+1:])
+			plugin, pluginOpts = splitShadowsocksPlugin(query.Get("plugin"))
+		}
+		parsedHost, parsedPort, ok := parseShadowsocksHostPort(hostPort)
+		if !ok {
+			return profiledoc.Node{}, fmt.Errorf("missing host or port")
+		}
+		parsedMethod, parsedPassword, ok := parseShadowsocksUserInfo(userInfo)
+		if !ok {
+			parsedPassword, _ = neturl.QueryUnescape(userInfo)
+			parsedMethod = normalizeShadowsocksMethod(query.Get("method"))
+			if parsedMethod == "" {
+				parsedMethod = "aes-128-gcm"
+			}
+			if parsedPassword == "" {
+				return profiledoc.Node{}, fmt.Errorf("invalid shadowsocks credentials")
+			}
+		}
+		method, password, host, port = parsedMethod, parsedPassword, parsedHost, parsedPort
+	} else {
+		decoded := decodeShadowsocksUserInfo(strings.SplitN(body, "?", 2)[0])
+		if decoded == "" {
+			return profiledoc.Node{}, fmt.Errorf("invalid shadowsocks legacy credentials")
+		}
+		at := strings.LastIndex(decoded, "@")
+		if at < 0 {
+			return profiledoc.Node{}, fmt.Errorf("invalid shadowsocks legacy endpoint")
+		}
+		parsedMethod, parsedPassword, ok := splitShadowsocksMethodPassword(decoded[:at])
+		if !ok {
+			return profiledoc.Node{}, fmt.Errorf("invalid shadowsocks legacy credentials")
+		}
+		parsedHost, parsedPort, ok := parseShadowsocksHostPort(decoded[at+1:])
+		if !ok {
+			return profiledoc.Node{}, fmt.Errorf("missing host or port")
+		}
+		method, password, host, port = parsedMethod, parsedPassword, parsedHost, parsedPort
+	}
+
+	name, _ := neturl.QueryUnescape(parsed.Fragment)
+	if name == "" {
+		name = host
+	}
+	node := profiledoc.Node{
+		ID:        stableNodeID("shadowsocks", host, port, method+":"+password),
+		Name:      name,
+		Protocol:  "shadowsocks",
+		Server:    host,
+		Port:      port,
+		Link:      raw,
+		Group:     "Default",
+		CreatedAt: nowMillis,
+		Source:    profiledoc.NodeSource{Type: "MANUAL"},
+	}
+	node.Outbound = buildShadowsocksOutbound(host, port, method, password, plugin, pluginOpts)
+	return node, nil
+}
+
 func buildOutbound(node profiledoc.Node, parsed *neturl.URL) json.RawMessage {
 	settings := map[string]interface{}{}
 	userSecret := ""
@@ -146,24 +223,17 @@ func buildOutbound(node profiledoc.Node, parsed *neturl.URL) json.RawMessage {
 			"port":    node.Port,
 			"users":   []interface{}{user},
 		}}
-	case "trojan", "shadowsocks":
+	case "trojan":
 		server := map[string]interface{}{
 			"address":  node.Server,
 			"port":     node.Port,
 			"password": userSecret,
 		}
-		if node.Protocol == "shadowsocks" {
-			method := parsed.Query().Get("method")
-			if method == "" && strings.Contains(userSecret, ":") {
-				method, userSecret, _ = strings.Cut(userSecret, ":")
-				server["password"] = userSecret
-			}
-			if method == "" {
-				method = "aes-128-gcm"
-			}
-			server["method"] = method
-		}
 		settings["servers"] = []interface{}{server}
+	case "shadowsocks":
+		method, password := parseShadowsocksCredentials(parsed)
+		plugin, pluginOpts := splitShadowsocksPlugin(parsed.Query().Get("plugin"))
+		settings["servers"] = []interface{}{shadowsocksServerSettings(node.Server, node.Port, method, password, plugin, pluginOpts)}
 	case "socks":
 		settings["address"] = node.Server
 		settings["port"] = node.Port
@@ -184,6 +254,33 @@ func buildOutbound(node profiledoc.Node, parsed *neturl.URL) json.RawMessage {
 	}
 	raw, _ := json.Marshal(outbound)
 	return raw
+}
+
+func buildShadowsocksOutbound(host string, port int, method string, password string, plugin string, pluginOpts string) json.RawMessage {
+	outbound := map[string]interface{}{
+		"protocol": "shadowsocks",
+		"settings": map[string]interface{}{
+			"servers": []interface{}{shadowsocksServerSettings(host, port, method, password, plugin, pluginOpts)},
+		},
+	}
+	raw, _ := json.Marshal(outbound)
+	return raw
+}
+
+func shadowsocksServerSettings(host string, port int, method string, password string, plugin string, pluginOpts string) map[string]interface{} {
+	server := map[string]interface{}{
+		"address":  host,
+		"port":     port,
+		"method":   method,
+		"password": password,
+	}
+	if plugin != "" {
+		server["plugin"] = plugin
+	}
+	if pluginOpts != "" {
+		server["plugin_opts"] = pluginOpts
+	}
+	return server
 }
 
 func buildStreamSettings(query neturl.Values) map[string]interface{} {
@@ -306,6 +403,131 @@ func valueOrDefault(value string, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func parseShadowsocksCredentials(parsed *neturl.URL) (string, string) {
+	if parsed.User == nil {
+		return "aes-128-gcm", ""
+	}
+	userInfo := parsed.User.String()
+	if decoded := decodeShadowsocksUserInfo(userInfo); decoded != "" {
+		if method, password, ok := splitSupportedShadowsocksMethodPassword(decoded); ok {
+			return method, password
+		}
+	}
+	username := parsed.User.Username()
+	if password, ok := parsed.User.Password(); ok {
+		return normalizeShadowsocksMethod(username), password
+	}
+	if method, password, ok := splitShadowsocksMethodPassword(username); ok {
+		return method, password
+	}
+	if method := normalizeShadowsocksMethod(parsed.Query().Get("method")); method != "" {
+		return method, username
+	}
+	return "aes-128-gcm", username
+}
+
+func parseShadowsocksUserInfo(userInfo string) (string, string, bool) {
+	if decoded := decodeShadowsocksUserInfo(userInfo); decoded != "" {
+		if method, password, ok := splitSupportedShadowsocksMethodPassword(decoded); ok {
+			return method, password, true
+		}
+	}
+	decoded, _ := neturl.QueryUnescape(userInfo)
+	return splitShadowsocksMethodPassword(decoded)
+}
+
+func decodeShadowsocksUserInfo(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	for _, enc := range []*base64.Encoding{base64.RawURLEncoding, base64.URLEncoding, base64.RawStdEncoding, base64.StdEncoding} {
+		if decoded, err := enc.DecodeString(value); err == nil {
+			return string(decoded)
+		}
+	}
+	return ""
+}
+
+func splitSupportedShadowsocksMethodPassword(value string) (string, string, bool) {
+	method, password, ok := splitShadowsocksMethodPassword(value)
+	if !ok || !isSupportedShadowsocksMethod(method) {
+		return "", "", false
+	}
+	return method, password, true
+}
+
+func splitShadowsocksMethodPassword(value string) (string, string, bool) {
+	method, password, ok := strings.Cut(value, ":")
+	method = normalizeShadowsocksMethod(method)
+	if !ok || method == "" || password == "" {
+		return "", "", false
+	}
+	return method, password, true
+}
+
+func splitShadowsocksPlugin(raw string) (string, string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	plugin, opts, found := strings.Cut(raw, ";")
+	if !found {
+		return strings.TrimSpace(plugin), ""
+	}
+	return strings.TrimSpace(plugin), opts
+}
+
+func parseShadowsocksHostPort(value string) (string, int, bool) {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "[") {
+		closeBracket := strings.Index(value, "]")
+		if closeBracket < 0 {
+			return "", 0, false
+		}
+		host := value[1:closeBracket]
+		portValue := strings.TrimPrefix(value[closeBracket+1:], ":")
+		port, err := strconv.Atoi(portValue)
+		return host, port, host != "" && err == nil && port > 0 && port <= 65535
+	}
+	host, portRaw, ok := strings.Cut(value, ":")
+	if !ok {
+		return "", 0, false
+	}
+	port, err := strconv.Atoi(portRaw)
+	return host, port, host != "" && err == nil && port > 0 && port <= 65535
+}
+
+func normalizeShadowsocksMethod(method string) string {
+	return strings.ToLower(strings.TrimSpace(method))
+}
+
+func isSupportedShadowsocksMethod(method string) bool {
+	switch normalizeShadowsocksMethod(method) {
+	case "2022-blake3-aes-128-gcm",
+		"2022-blake3-aes-256-gcm",
+		"2022-blake3-chacha20-poly1305",
+		"none",
+		"aes-128-gcm",
+		"aes-192-gcm",
+		"aes-256-gcm",
+		"chacha20-ietf-poly1305",
+		"xchacha20-ietf-poly1305",
+		"aes-128-ctr",
+		"aes-192-ctr",
+		"aes-256-ctr",
+		"aes-128-cfb",
+		"aes-192-cfb",
+		"aes-256-cfb",
+		"rc4-md5",
+		"chacha20-ietf",
+		"xchacha20":
+		return true
+	default:
+		return false
+	}
 }
 
 func firstQuery(query neturl.Values, keys ...string) string {

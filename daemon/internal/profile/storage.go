@@ -37,8 +37,8 @@ func Load(path string) (Document, bool, error) {
 		}
 		return Document{}, false, fmt.Errorf("profile: read %s: %w", path, err)
 	}
-	var doc Document
-	if err := json.Unmarshal(data, &doc); err != nil {
+	doc, err := DecodeStrictDocument(data)
+	if err != nil {
 		return Document{}, false, fmt.Errorf("profile: parse %s: %w", path, err)
 	}
 	normalized, _, err := Normalize(doc)

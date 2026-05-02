@@ -73,8 +73,7 @@ data class AppPickerUiState(
                 }
             }
             return list.sortedWith(
-                compareByDescending<AppInfo> { it.isProxied }
-                    .thenBy { it.label.lowercase() }
+                compareBy<AppInfo> { it.label.lowercase() }
                     .thenBy { it.packageName }
             )
         }
@@ -128,8 +127,20 @@ class AppPickerViewModel @Inject constructor(
         _uiState.update { it.copy(searchQuery = query) }
     }
 
+    fun clearSearchQuery() {
+        _uiState.update { state ->
+            if (state.searchQuery.isBlank()) state else state.copy(searchQuery = "")
+        }
+    }
+
     fun toggleShowSystemApps() {
         _uiState.update { it.copy(showSystemApps = !it.showSystemApps) }
+    }
+
+    fun refreshProfile() {
+        viewModelScope.launch {
+            profileRepository.refresh()
+        }
     }
 
     fun toggleApp(packageName: String) {
@@ -584,8 +595,8 @@ private fun isAlwaysDirectApp(
     selection: RoutingSelection,
 ): Boolean =
     when {
-        packageName in selection.alwaysDirectPackages -> true
         packageName in selection.alwaysDirectExcludedPackages -> false
+        packageName in selection.alwaysDirectPackages -> true
         selection.alwaysDirectSystemApps && isSystemApp -> true
         else -> AlwaysDirectApps.matches(
             packageName,

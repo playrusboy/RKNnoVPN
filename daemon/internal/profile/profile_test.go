@@ -127,7 +127,71 @@ func TestProfileRulesModePreservesForcedProxyApps(t *testing.T) {
 	}
 }
 
+func TestProfileRoutingPreservesInactiveAppSelectionsAcrossModeSwitch(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Routing.Mode = "whitelist"
+	cfg.Apps.Mode = "whitelist"
+	cfg.Apps.Packages = []string{"org.telegram.messenger", "com.discord"}
+
+	doc := FromConfig(cfg)
+	doc.Routing.Mode = "PROXY_ALL"
+	next, _, err := ApplyToConfig(cfg, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Routing.Mode != "all" || next.Apps.Mode != "all" {
+		t.Fatalf("routing mode was not switched to all: routing=%q apps=%q", next.Routing.Mode, next.Apps.Mode)
+	}
+	if len(next.Apps.Packages) != 0 {
+		t.Fatalf("global mode must not keep active app packages: %#v", next.Apps.Packages)
+	}
+	if !containsString(next.Routing.InactiveAppProxyList, "org.telegram.messenger") ||
+		!containsString(next.Routing.InactiveAppProxyList, "com.discord") {
+		t.Fatalf("inactive proxy app selection was not preserved: %#v", next.Routing.InactiveAppProxyList)
+	}
+
+	roundTrip := FromConfig(next)
+	if !containsString(roundTrip.Routing.AppProxyList, "org.telegram.messenger") ||
+		!containsString(roundTrip.Routing.AppProxyList, "com.discord") {
+		t.Fatalf("profile projection dropped inactive proxy apps: %#v", roundTrip.Routing.AppProxyList)
+	}
+
+	roundTrip.Routing.Mode = "PER_APP"
+	restored, _, err := ApplyToConfig(next, roundTrip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Routing.Mode != "whitelist" || restored.Apps.Mode != "whitelist" {
+		t.Fatalf("routing mode was not restored to whitelist: routing=%q apps=%q", restored.Routing.Mode, restored.Apps.Mode)
+	}
+	if !containsString(restored.Apps.Packages, "org.telegram.messenger") ||
+		!containsString(restored.Apps.Packages, "com.discord") {
+		t.Fatalf("proxy app selection was not restored: %#v", restored.Apps.Packages)
+	}
+}
+
 func TestDecodeStrictDocumentRejectsUnknownProfileFields(t *testing.T) {
+	raw := []byte(`{
+		"profileSchemaVersion": 2,
+		"id": "main",
+		"name": "Primary",
+		"nodes": [],
+		"runtime": {},
+		"routing": {"mode":"PER_APP"},
+		"dns": {"remoteDns":"https://1.1.1.1/dns-query","directDns":"https://dns.google/dns-query","bootstrapIp":"1.1.1.1","ipv6Mode":"MIRROR","fakeDns":false},
+		"health": {"enabled":true,"intervalSec":30,"threshold":3,"checkUrl":"https://www.gstatic.com/generate_204","timeoutSec":5,"dnsIsHardReadiness":false},
+		"sharing": {"enabled":false},
+		"tun": {"enabled":false,"mtu":9000,"ipv4Address":"172.19.0.1/30","ipv6":false,"autoRoute":true,"strictRoute":true},
+		"inbounds": {"socksPort":0,"httpPort":0,"allowLan":false},
+		"unexpected": true
+	}`)
+
+	if _, err := DecodeStrictDocument(raw); err == nil {
+		t.Fatalf("unknown profile field should be rejected")
+	}
+}
+
+func TestDecodeStrictDocumentRejectsRemovedBlockQuicField(t *testing.T) {
 	raw := []byte(`{
 		"profileSchemaVersion": 2,
 		"id": "main",
@@ -139,12 +203,11 @@ func TestDecodeStrictDocumentRejectsUnknownProfileFields(t *testing.T) {
 		"health": {"enabled":true,"intervalSec":30,"threshold":3,"checkUrl":"https://www.gstatic.com/generate_204","timeoutSec":5,"dnsIsHardReadiness":false},
 		"sharing": {"enabled":false},
 		"tun": {"enabled":false,"mtu":9000,"ipv4Address":"172.19.0.1/30","ipv6":false,"autoRoute":true,"strictRoute":true},
-		"inbounds": {"socksPort":0,"httpPort":0,"allowLan":false},
-		"unexpected": true
+		"inbounds": {"socksPort":0,"httpPort":0,"allowLan":false}
 	}`)
 
-	if _, err := DecodeStrictDocument(raw); err == nil {
-		t.Fatalf("unknown profile field should be rejected")
+	if _, err := DecodeStrictDocument(raw); err == nil || !strings.Contains(err.Error(), "blockQuic") {
+		t.Fatalf("removed blockQuic field should be rejected, got %v", err)
 	}
 }
 
@@ -176,7 +239,7 @@ func TestDecodeStrictDocumentRejectsUnknownNodeFieldsButAllowsOutboundAndExtra(t
 		}],
 		"runtime": {},
 		"routing": {"mode":"PER_APP"},
-		"dns": {"remoteDns":"https://1.1.1.1/dns-query","directDns":"https://dns.google/dns-query","bootstrapIp":"1.1.1.1","ipv6Mode":"MIRROR","blockQuic":true,"fakeDns":false},
+		"dns": {"remoteDns":"https://1.1.1.1/dns-query","directDns":"https://dns.google/dns-query","bootstrapIp":"1.1.1.1","ipv6Mode":"MIRROR","fakeDns":false},
 		"health": {"enabled":true,"intervalSec":30,"threshold":3,"checkUrl":"https://www.gstatic.com/generate_204","timeoutSec":5,"dnsIsHardReadiness":false},
 		"sharing": {"enabled":false},
 		"tun": {"enabled":false,"mtu":9000,"ipv4Address":"172.19.0.1/30","ipv6":false,"autoRoute":true,"strictRoute":true},

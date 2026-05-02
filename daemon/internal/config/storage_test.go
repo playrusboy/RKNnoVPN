@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -153,7 +154,7 @@ func TestLoadRejectsLegacyNodeArray(t *testing.T) {
 		"runtime_v2": {"backend_kind":"ROOT_TPROXY","fallback_policy":"OFFER_RESET"},
 		"routing": {"mode":"whitelist","bypass_lan":true,"bypass_china":false,"bypass_russia":false,"block_ads":false,"custom_direct":[],"custom_proxy":[],"custom_block":[]},
 		"apps": {"mode":"whitelist","list":[],"app_groups":{}},
-		"dns": {"hijack_per_uid":true,"proxy_dns":"https://1.1.1.1/dns-query","direct_dns":"https://dns.google/dns-query","bootstrap_ip":"1.1.1.1","block_quic_dns":true,"fake_ip":false},
+		"dns": {"hijack_per_uid":true,"proxy_dns":"https://1.1.1.1/dns-query","direct_dns":"https://dns.google/dns-query","bootstrap_ip":"1.1.1.1","fake_ip":false},
 		"ipv6": {"mode":"mirror"},
 		"sharing": {"enabled":false},
 		"health": {"enabled":true,"interval_sec":30,"threshold":3,"check_url":"https://www.gstatic.com/generate_204","timeout_sec":5,"dns_is_hard_readiness":false},
@@ -166,5 +167,32 @@ func TestLoadRejectsLegacyNodeArray(t *testing.T) {
 
 	if _, err := Load(path); err == nil {
 		t.Fatalf("legacy node array must not be normalized")
+	}
+}
+
+func TestLoadRejectsRemovedBlockQuicDNSField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	raw := []byte(`{
+		"schema_version": 5,
+		"proxy": {"mode":"tproxy","tproxy_port":10853,"dns_port":10856,"gid":23333,"mark":8227,"api_port":0},
+		"transport": {"protocol":"reality","tls_server":"","fingerprint":"chrome","extra":{}},
+		"node": {"address":"","port":443,"protocol":"vless","uuid":"","flow":""},
+		"runtime_v2": {"backend_kind":"ROOT_TPROXY","fallback_policy":"OFFER_RESET"},
+		"routing": {"mode":"whitelist","bypass_lan":true,"bypass_china":false,"bypass_russia":false,"block_ads":false,"custom_direct":[],"custom_proxy":[],"custom_block":[]},
+		"apps": {"mode":"whitelist","list":[],"app_groups":{}},
+		"dns": {"hijack_per_uid":true,"proxy_dns":"https://1.1.1.1/dns-query","direct_dns":"https://dns.google/dns-query","bootstrap_ip":"1.1.1.1","block_quic_dns":true,"fake_ip":false},
+		"ipv6": {"mode":"mirror"},
+		"sharing": {"enabled":false},
+		"health": {"enabled":true,"interval_sec":30,"threshold":3,"check_url":"https://www.gstatic.com/generate_204","timeout_sec":5,"dns_is_hard_readiness":false},
+		"rescue": {"enabled":true,"max_attempts":3,"cooldown_sec":60},
+		"autostart": false
+	}`)
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "block_quic_dns") {
+		t.Fatalf("removed block_quic_dns field should be rejected, got %v", err)
 	}
 }

@@ -125,7 +125,7 @@ object AlwaysDirectApps {
         "com.yourvpndead",
     )
 
-    private val excludedPackages = setOf(
+    private val builtInExcludedPackages = setOf(
         "com.supercell.clashroyale",
     )
 
@@ -211,8 +211,9 @@ object AlwaysDirectApps {
         manualPackages: Set<String> = emptySet(),
         excludedPackages: Set<String> = emptySet(),
     ): Boolean {
-        if (packageName in manualPackages) return true
         if (packageName in excludedPackages) return false
+        if (packageName in builtInExcludedPackages) return false
+        if (packageName in manualPackages) return true
         if (packageName in exactPackages) return true
         if (prefixes.any(packageName::startsWith)) return true
         val lower = packageName.lowercase()

@@ -6,6 +6,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 
 @Composable
 fun BottomNavBar(
@@ -25,7 +26,13 @@ fun BottomNavBar(
                         contentDescription = stringResource(destination.labelRes),
                     )
                 },
-                label = { Text(stringResource(destination.labelRes)) },
+                label = {
+                    Text(
+                        text = stringResource(destination.labelRes),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
             )
         }
     }

@@ -1,6 +1,7 @@
 package com.rknnovpn.panel.ipc
 
 import com.rknnovpn.panel.model.BackendStatusV2
+import com.rknnovpn.panel.model.ProfileConfig
 import com.rknnovpn.panel.model.Subscription
 import com.rknnovpn.panel.model.SubscriptionSource
 import kotlinx.serialization.builtins.ListSerializer
@@ -49,6 +50,9 @@ internal fun Json.parseConfigMutationInfo(element: JsonElement): ConfigMutationI
         rejectedNodes = obj["rejectedNodes"]?.jsonArray?.let {
             decodeFromJsonElement(ListSerializer(RejectedSubscriptionNode.serializer()), it)
         }.orEmpty(),
+        profile = obj["profile"]?.let {
+            decodeFromJsonElement(ProfileConfig.serializer(), it)
+        },
     )
 }
 

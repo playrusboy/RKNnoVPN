@@ -32,6 +32,27 @@ object LinkParser {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    private val SUPPORTED_SHADOWSOCKS_METHODS = setOf(
+        "2022-blake3-aes-128-gcm",
+        "2022-blake3-aes-256-gcm",
+        "2022-blake3-chacha20-poly1305",
+        "none",
+        "aes-128-gcm",
+        "aes-192-gcm",
+        "aes-256-gcm",
+        "chacha20-ietf-poly1305",
+        "xchacha20-ietf-poly1305",
+        "aes-128-ctr",
+        "aes-192-ctr",
+        "aes-256-ctr",
+        "aes-128-cfb",
+        "aes-192-cfb",
+        "aes-256-cfb",
+        "rc4-md5",
+        "chacha20-ietf",
+        "xchacha20",
+    )
+
     // Schemes we recognise in free-text / clipboard detection.
     private val KNOWN_SCHEMES = listOf(
         "vless://", "vmess://", "trojan://", "ss://", "vpn://",
@@ -317,25 +338,22 @@ object LinkParser {
         val atIdx = noFragment.lastIndexOf('@')
         if (atIdx != -1) {
             val userInfoEncoded = noFragment.substring(0, atIdx)
-            val hostPort = noFragment.substring(atIdx + 1).substringBefore('?')
+            val hostAndQuery = noFragment.substring(atIdx + 1)
+            val hostPort = hostAndQuery.substringBefore('?').removeSuffix("/")
+            val params = hostAndQuery.substringAfter('?', "").takeIf { it.isNotBlank() }?.let(::parseQuery).orEmpty()
+            val (plugin, pluginOpts) = splitSsPlugin(params["plugin"])
             val decoded = tryBase64Decode(userInfoEncoded)
             if (decoded != null) {
-                val colonIdx = decoded.indexOf(':')
-                if (colonIdx != -1) {
-                    val method = decoded.substring(0, colonIdx)
-                    val password = decoded.substring(colonIdx + 1)
+                splitSupportedSsUserInfo(decoded)?.let { (method, password) ->
                     val (host, port) = parseHostPort(hostPort) ?: return null
-                    return buildSsNode(uri, host, port, method, password, fragment)
+                    return buildSsNode(uri, host, port, method, password, fragment, plugin, pluginOpts)
                 }
             }
             // SIP002 plain (method:password not base64-encoded but URL-encoded).
             val plainDecoded = urlDecode(userInfoEncoded)
-            val colonIdx = plainDecoded.indexOf(':')
-            if (colonIdx != -1) {
-                val method = plainDecoded.substring(0, colonIdx)
-                val password = plainDecoded.substring(colonIdx + 1)
+            splitSupportedSsUserInfo(plainDecoded)?.let { (method, password) ->
                 val (host, port) = parseHostPort(hostPort) ?: return null
-                return buildSsNode(uri, host, port, method, password, fragment)
+                return buildSsNode(uri, host, port, method, password, fragment, plugin, pluginOpts)
             }
         }
 
@@ -346,12 +364,25 @@ object LinkParser {
         if (legacyAtIdx == -1) return null
         val methodPassword = decoded.substring(0, legacyAtIdx)
         val hostPort = decoded.substring(legacyAtIdx + 1)
-        val colonIdx = methodPassword.indexOf(':')
-        if (colonIdx == -1) return null
-        val method = methodPassword.substring(0, colonIdx)
-        val password = methodPassword.substring(colonIdx + 1)
+        val (method, password) = splitSupportedSsUserInfo(methodPassword) ?: return null
         val (host, port) = parseHostPort(hostPort) ?: return null
         return buildSsNode(uri, host, port, method, password, fragment)
+    }
+
+    private fun splitSupportedSsUserInfo(userInfo: String): Pair<String, String>? {
+        val colonIdx = userInfo.indexOf(':')
+        if (colonIdx <= 0 || colonIdx == userInfo.lastIndex) return null
+        val method = userInfo.substring(0, colonIdx).trim().lowercase()
+        if (method !in SUPPORTED_SHADOWSOCKS_METHODS) return null
+        return method to userInfo.substring(colonIdx + 1)
+    }
+
+    private fun splitSsPlugin(raw: String?): Pair<String, String> {
+        val plugin = raw?.trim().orEmpty()
+        if (plugin.isEmpty()) return "" to ""
+        val split = plugin.indexOf(';')
+        if (split == -1) return plugin to ""
+        return plugin.substring(0, split).trim() to plugin.substring(split + 1)
     }
 
     private fun buildSsNode(
@@ -360,7 +391,9 @@ object LinkParser {
         port: Int,
         method: String,
         password: String,
-        name: String
+        name: String,
+        plugin: String = "",
+        pluginOpts: String = "",
     ): Node {
         val outbound = buildJsonObject {
             put("protocol", "shadowsocks")
@@ -371,6 +404,12 @@ object LinkParser {
                         put("port", port)
                         put("method", method)
                         put("password", password)
+                        if (plugin.isNotBlank()) {
+                            put("plugin", plugin)
+                        }
+                        if (pluginOpts.isNotBlank()) {
+                            put("plugin_opts", pluginOpts)
+                        }
                     }
                 }
             }

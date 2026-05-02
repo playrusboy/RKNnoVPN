@@ -9,7 +9,7 @@ fi
 FWMARK="${FWMARK:-0x2023}"
 ROUTE_TABLE="${ROUTE_TABLE:-2023}"
 ROUTE_TABLE_V6="${ROUTE_TABLE_V6:-2024}"
-IPT_WAIT="${IPT_WAIT:--w 100}"
+IPT_WAIT="${IPT_WAIT:--w 10}"
 
 rknnovpn_netstack_log() {
     if command -v rknnovpn_log_info >/dev/null 2>&1; then

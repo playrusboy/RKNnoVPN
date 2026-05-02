@@ -51,6 +51,7 @@ func BuildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 		"API_PORT":           strconv.Itoa(apiPort),
 		"SOCKS_PORT":         strconv.Itoa(profileInbounds.SocksPort),
 		"HTTP_PORT":          strconv.Itoa(profileInbounds.HTTPPort),
+		"XRAY_SIDECAR_PORT":  strconv.Itoa(config.XraySidecarSocksPort),
 		"CHAIN_PROXY_PORTS":  chainProxyPorts,
 		"CHAIN_PROXY_UIDS":   chainProxyUIDs,
 		"CHAIN_PROXY_RULES":  chainProxyRules,
@@ -83,11 +84,12 @@ func ipv6FailClosedEnv(mode string) string {
 }
 
 type ConfigReloadInput struct {
-	Config      *config.Config
-	Context     string
-	SavedLabel  string
-	Generation  int64
-	FullRestart bool
+	Config               *config.Config
+	Context              string
+	SavedLabel           string
+	Generation           int64
+	FullRestart          bool
+	NetstackReapplyAfter bool
 }
 
 type ConfigReloadDeps struct {
@@ -167,7 +169,26 @@ func ReloadAfterConfigChange(input ConfigReloadInput, deps ConfigReloadDeps) err
 		detail = deps.LastRuntimeReport().Status
 	}
 	recordStage("hot-swap", "ok", "", detail, false)
-	recordStage("netstack-reapply", "skipped", "", "runtime env unchanged", false)
+	if input.NetstackReapplyAfter {
+		if deps.ReapplyRuntimeRules == nil {
+			err := fmt.Errorf("netstack reapply hook is not configured")
+			err = failStage("netstack-reapply", "RULES_NOT_APPLIED", err, false)
+			return fmt.Errorf("%s netstack reapply failed; %s: %w", context, savedLabel, err)
+		}
+		report, err := deps.ReapplyRuntimeRules(input.Config)
+		if err != nil {
+			resetReport := reloadResetReport(deps, input.Generation)
+			recordStage("reset-after-netstack-reapply-failure", resetReport.Status, "", resetReportDetail(resetReport), resetReport.Status != "ok")
+			err = failStage("netstack-reapply", runtimeerr.Code(err, "RULES_NOT_APPLIED"), err, true)
+			return runtimeerr.WithResetReport(
+				fmt.Errorf("%s netstack reapply failed; %s: %w", context, savedLabel, err),
+				resetReport,
+			)
+		}
+		recordStage("netstack-reapply", "ok", "", fmt.Sprintf("steps=%d", len(report.Steps)), false)
+	} else {
+		recordStage("netstack-reapply", "skipped", "", "runtime env unchanged", false)
+	}
 	if deps.ResetRescueState != nil {
 		deps.ResetRescueState()
 	}
@@ -244,38 +265,66 @@ func ReapplyRuntimeRules(cfg *config.Config, dataDir string, env map[string]stri
 	return report, nil
 }
 
-func ReloadNeedsFullRestart(oldEnv map[string]string, newEnv map[string]string) bool {
-	if oldEnv == nil || newEnv == nil {
-		return true
-	}
-	for _, key := range reloadRestartEnvKeys {
-		if oldEnv[key] != newEnv[key] {
-			return true
-		}
-	}
-	return false
+type ReloadPlan struct {
+	FullRestart          bool
+	NetstackReapplyAfter bool
+	ChangedKeys          []string
 }
 
-var reloadRestartEnvKeys = []string{
+func PlanReload(oldEnv map[string]string, newEnv map[string]string) ReloadPlan {
+	plan := ReloadPlan{}
+	if oldEnv == nil || newEnv == nil {
+		plan.FullRestart = true
+		return plan
+	}
+	for _, key := range reloadFullRestartEnvKeys {
+		if oldEnv[key] != newEnv[key] {
+			plan.FullRestart = true
+			plan.ChangedKeys = append(plan.ChangedKeys, key)
+		}
+	}
+	if plan.FullRestart {
+		return plan
+	}
+	for _, key := range reloadNetstackReapplyEnvKeys {
+		if oldEnv[key] != newEnv[key] {
+			plan.NetstackReapplyAfter = true
+			plan.ChangedKeys = append(plan.ChangedKeys, key)
+		}
+	}
+	return plan
+}
+
+func ReloadNeedsFullRestart(oldEnv map[string]string, newEnv map[string]string) bool {
+	return PlanReload(oldEnv, newEnv).FullRestart
+}
+
+var reloadFullRestartEnvKeys = []string{
 	"CORE_GID",
 	"TPROXY_PORT",
 	"DNS_PORT",
 	"API_PORT",
 	"SOCKS_PORT",
 	"HTTP_PORT",
-	"CHAIN_PROXY_PORTS",
-	"CHAIN_PROXY_UIDS",
-	"CHAIN_PROXY_RULES",
 	"FWMARK",
 	"ROUTE_TABLE",
 	"ROUTE_TABLE_V6",
+	"PROXY_MODE",
+}
+
+var reloadNetstackReapplyEnvKeys = []string{
+	"XRAY_SIDECAR_PORT",
+	"CHAIN_PROXY_PORTS",
+	"CHAIN_PROXY_UIDS",
+	"CHAIN_PROXY_RULES",
 	"APP_MODE",
 	"PROXY_UIDS",
 	"DIRECT_UIDS",
 	"BYPASS_UIDS",
 	"DNS_SCOPE",
 	"DNS_MODE",
-	"PROXY_MODE",
+	"IPV6_MODE",
+	"IPV6_FAIL_CLOSED",
 	"SHARING_MODE",
 	"SHARING_IFACES",
 }

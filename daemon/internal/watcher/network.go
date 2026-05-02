@@ -35,6 +35,7 @@ type NetworkWatcher struct {
 
 	stopCh   chan struct{}
 	done     chan struct{}
+	stopWait time.Duration
 	cmd      *exec.Cmd
 	logger   *log.Logger
 	onChange func() error
@@ -53,6 +54,7 @@ func NewNetworkWatcher(dataDir string, env map[string]string, onChange func() er
 		env:      env,
 		onChange: onChange,
 		logger:   logger,
+		stopWait: 5 * time.Second,
 	}
 }
 
@@ -152,7 +154,12 @@ func (w *NetworkWatcher) Start() error {
 func (w *NetworkWatcher) Stop() {
 	w.mu.Lock()
 	ch := w.stopCh
+	done := w.done
+	cmd := w.cmd
+	stopWait := w.stopWait
 	w.stopCh = nil
+	w.done = nil
+	w.cmd = nil
 	w.mu.Unlock()
 
 	if ch == nil {
@@ -162,13 +169,28 @@ func (w *NetworkWatcher) Stop() {
 
 	// Kill inotifyd — this also closes its stdout, which unblocks the
 	// scanner goroutine.
-	if w.cmd != nil && w.cmd.Process != nil {
-		_ = w.cmd.Process.Kill()
-		_ = w.cmd.Wait()
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Kill()
+		go func() {
+			_ = cmd.Wait()
+		}()
 	}
 
-	<-w.done
-	w.logger.Println("stopped")
+	if done == nil {
+		w.logger.Println("stopped")
+		return
+	}
+	if stopWait <= 0 {
+		<-done
+		w.logger.Println("stopped")
+		return
+	}
+	select {
+	case <-done:
+		w.logger.Println("stopped")
+	case <-time.After(stopWait):
+		w.logger.Printf("stop wait timed out after %s; continuing shutdown", stopWait)
+	}
 }
 
 // handleNetworkChange reports the event to the daemon-owned callback so

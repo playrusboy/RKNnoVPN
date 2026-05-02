@@ -45,7 +45,7 @@ PROXY_UIDS="${PROXY_UIDS:-}"
 DIRECT_UIDS="${DIRECT_UIDS:-}"
 BYPASS_UIDS="${BYPASS_UIDS:-}"
 RKNNOVPN_DIR="${RKNNOVPN_DIR:-/data/adb/modules/rknnovpn}"
-IPT_WAIT="${IPT_WAIT:--w 100}"
+IPT_WAIT="${IPT_WAIT:--w 10}"
 
 # Chain names — keep in sync with the rest of RKNnoVPN.
 NAT4_CHAIN="RKNNOVPN_DNS_NAT"

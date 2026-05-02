@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,14 +156,17 @@ type profileNodeValidationConfig struct {
 
 // RoutingConfig controls traffic routing rules.
 type RoutingConfig struct {
-	Mode                     string   `json:"mode"` // "all", "whitelist", "blacklist", "rules", "direct"
-	BypassLAN                bool     `json:"bypass_lan"`
-	BypassChina              bool     `json:"bypass_china"` // matches config.json routing.bypass_china
-	BypassRussia             bool     `json:"bypass_russia"`
-	BlockAds                 bool     `json:"block_ads"`
-	CustomDirect             []string `json:"custom_direct"` // domains/IPs to route directly
-	CustomProxy              []string `json:"custom_proxy"`  // domains/IPs to force through proxy
-	CustomBlock              []string `json:"custom_block"`  // domains/IPs to block
+	Mode         string   `json:"mode"` // "all", "whitelist", "blacklist", "rules", "direct"
+	BypassLAN    bool     `json:"bypass_lan"`
+	BypassChina  bool     `json:"bypass_china"` // matches config.json routing.bypass_china
+	BypassRussia bool     `json:"bypass_russia"`
+	BlockAds     bool     `json:"block_ads"`
+	CustomDirect []string `json:"custom_direct"` // domains/IPs to route directly
+	CustomProxy  []string `json:"custom_proxy"`  // domains/IPs to force through proxy
+	CustomBlock  []string `json:"custom_block"`  // domains/IPs to block
+	// Preserved selections for modes that are not currently active.
+	InactiveAppProxyList     []string `json:"inactive_app_proxy_list,omitempty"`
+	InactiveAppBypassList    []string `json:"inactive_app_bypass_list,omitempty"`
 	AlwaysDirectApps         []string `json:"always_direct_apps,omitempty"`
 	AlwaysDirectExcludedApps []string `json:"always_direct_excluded_apps,omitempty"`
 	AlwaysDirectSystemApps   bool     `json:"always_direct_system_apps"`
@@ -181,7 +185,6 @@ type DNSConfig struct {
 	ProxyDNS     string `json:"proxy_dns"`      // DoH URL routed via proxy (matches config.json dns.proxy_dns)
 	DirectDNS    string `json:"direct_dns"`     // DoH URL for direct domains (matches config.json dns.direct_dns)
 	BootstrapIP  string `json:"bootstrap_ip"`   // IP-literal for bootstrapping DoH
-	BlockQUICDNS bool   `json:"block_quic_dns"` // block QUIC DNS (matches config.json dns.block_quic_dns)
 	FakeIP       bool   `json:"fake_ip"`        // use fake-ip strategy
 }
 
@@ -303,7 +306,6 @@ func DefaultConfig() *Config {
 			ProxyDNS:     "https://1.1.1.1/dns-query",
 			DirectDNS:    "https://dns.google/dns-query",
 			BootstrapIP:  "1.1.1.1",
-			BlockQUICDNS: true,
 			FakeIP:       false,
 		},
 		IPv6: IPv6Config{
@@ -403,8 +405,14 @@ func Load(path string) (*Config, error) {
 
 	cfg := DefaultConfig()
 
-	if err := json.Unmarshal(data, cfg); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
+	}
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, fmt.Errorf("config: parse %s: config document must contain a single JSON object", path)
 	}
 
 	if err := cfg.Validate(); err != nil {

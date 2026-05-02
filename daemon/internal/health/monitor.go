@@ -54,6 +54,7 @@ type HealthMonitor struct {
 	lastResult *HealthResult
 	stopCh     chan struct{}
 	done       chan struct{}
+	stopWait   time.Duration
 	logger     *log.Logger
 
 	mu sync.Mutex
@@ -94,6 +95,7 @@ func NewHealthMonitor(
 		routeMark:  routeMark,
 		dnsHosts:   normalizeDNSProbeHosts(checkURL, nil),
 		dnsTimeout: normalizedDNSTimeout(timeout),
+		stopWait:   5 * time.Second,
 		logger:     logger,
 	}
 	h.runProcessAliveCheck = h.checkProcessAlive
@@ -164,26 +166,44 @@ func (h *HealthMonitor) Start() {
 	}
 
 	h.failures = 0
-	h.stopCh = make(chan struct{})
-	h.done = make(chan struct{})
+	stopCh := make(chan struct{})
+	done := make(chan struct{})
+	h.stopCh = stopCh
+	h.done = done
 
-	go h.loop()
+	go h.loop(stopCh, done)
 	h.logger.Printf("started (interval=%s, threshold=%d)", h.interval, h.threshold)
 }
 
-// Stop halts the background check loop and blocks until it exits.
+// Stop halts the background check loop and waits briefly for it to exit.
 func (h *HealthMonitor) Stop() {
 	h.mu.Lock()
 	ch := h.stopCh
+	done := h.done
+	stopWait := h.stopWait
 	h.stopCh = nil
+	h.done = nil
 	h.mu.Unlock()
 
 	if ch == nil {
 		return
 	}
 	close(ch)
-	<-h.done
-	h.logger.Println("stopped")
+	if done == nil {
+		h.logger.Println("stopped")
+		return
+	}
+	if stopWait <= 0 {
+		<-done
+		h.logger.Println("stopped")
+		return
+	}
+	select {
+	case <-done:
+		h.logger.Println("stopped")
+	case <-time.After(stopWait):
+		h.logger.Printf("stop wait timed out after %s; continuing shutdown", stopWait)
+	}
 }
 
 // LastResult returns the most recent HealthResult (may be nil).
@@ -262,15 +282,15 @@ func (h *HealthMonitor) RunOnce() *HealthResult {
 // background loop
 // --------------------------------------------------------------------------
 
-func (h *HealthMonitor) loop() {
-	defer close(h.done)
+func (h *HealthMonitor) loop(stopCh <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
 
 	ticker := time.NewTicker(h.interval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-h.stopCh:
+		case <-stopCh:
 			return
 		case <-ticker.C:
 			h.tick()
@@ -361,7 +381,7 @@ func (h *HealthMonitor) checkPortListening(port int) CheckResult {
 // checkIptablesIntact verifies the RKNNOVPN_PRE chain is still hooked in
 // the mangle PREROUTING chain.
 func (h *HealthMonitor) checkIptablesIntact() CheckResult {
-	cmd := exec.Command("iptables", "-w", "100", "-t", "mangle", "-C", "PREROUTING", "-j", "RKNNOVPN_PRE")
+	cmd := exec.Command("iptables", "-w", "5", "-t", "mangle", "-C", "PREROUTING", "-j", "RKNNOVPN_PRE")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		detail := "цепочка RKNNOVPN_PRE не подключена к PREROUTING"

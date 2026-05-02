@@ -393,9 +393,7 @@ has_runtime_profile() {
 }
 
 if [ "$APP_REPAIR" != "1" ] && ! has_runtime_profile; then
-    log_info "No configured proxy nodes/keys; daemon launch skipped until the app imports a server"
-    release_service_lock
-    exit 0
+    log_info "No configured proxy nodes/keys; launching daemon for app IPC while proxy autostart stays disabled"
 fi
 
 detect_arch_dirs() {

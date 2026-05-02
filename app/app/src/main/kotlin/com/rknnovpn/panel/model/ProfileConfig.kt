@@ -106,8 +106,6 @@ data class DnsConfig(
     val bootstrapIp: String = "1.1.1.1",
     /** DNS/IP preference for answer selection and AAAA handling. */
     val ipv6Mode: DnsIpv6Mode = DnsIpv6Mode.MIRROR,
-    /** Whether to block QUIC to force HTTP/2 fallback. */
-    val blockQuic: Boolean = false,
     /** Fake-DNS / DNS-hijack enabled. */
     val fakeDns: Boolean = false
 )

@@ -46,7 +46,6 @@
     "proxy_dns": "https://1.1.1.1/dns-query",
     "direct_dns": "https://dns.google/dns-query",
     "bootstrap_ip": "1.1.1.1",
-    "block_quic_dns": true,
     "fake_ip": false
   },
   "ipv6": {

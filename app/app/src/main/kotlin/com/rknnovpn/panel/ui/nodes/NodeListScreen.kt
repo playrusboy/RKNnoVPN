@@ -74,8 +74,13 @@ import com.rknnovpn.panel.R
 import com.rknnovpn.panel.`import`.ClipboardWatcher
 import com.rknnovpn.panel.model.Node
 import com.rknnovpn.panel.model.NodeSourceType
+import com.rknnovpn.panel.model.Protocol
 import com.rknnovpn.panel.ui.common.AppPackagePickerDialog
 import com.rknnovpn.panel.ui.common.AppPackageSelector
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -570,7 +575,7 @@ private fun NodeCard(
                 node.testStatus != okStatus &&
                 node.testStatus != tcpOkStatus
 
-            // Name + protocol + server
+            // Name + transport stack + server
             Column(modifier = Modifier.weight(1f)) {
                 val testSummary = listOfNotNull(
                     node.latencyMs?.takeIf { it >= 0 }?.let { stringResource(R.string.node_test_tcp_ms, it) },
@@ -580,6 +585,7 @@ private fun NodeCard(
                     },
                     node.testStatus?.takeIf { it != okStatus && it != tcpOkStatus },
                 ).joinToString(" | ")
+                val sourceText = node.sourceLabel()
                 Text(
                     text = node.name,
                     style = MaterialTheme.typography.bodyLarge,
@@ -588,31 +594,45 @@ private fun NodeCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = "${node.protocol.name} | ${node.server}:${node.port}",
+                    text = node.transportSignature(),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                val sourceText = node.sourceLabel()
-                if (sourceText.isNotBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = sourceText,
+                        text = "${node.server}:${node.port}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (sourceText.isNotBlank()) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = sourceText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (node.stale) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (testSummary.isNotBlank()) {
+                    Text(
+                        text = testSummary,
                         style = MaterialTheme.typography.labelSmall,
                         color = if (node.stale) {
                             MaterialTheme.colorScheme.error
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (testSummary.isNotBlank()) {
-                    Text(
-                        text = testSummary,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -693,6 +713,62 @@ private fun Node.sourceLabel(): String = when {
     stale -> stringResource(R.string.node_source_subscription_stale)
     source.type == NodeSourceType.SUBSCRIPTION -> stringResource(R.string.node_source_subscription)
     else -> ""
+}
+
+private fun Node.transportSignature(): String =
+    listOf(
+        protocol.displayName(),
+        outbound.transportDisplayName(),
+        outbound.securityDisplayName(),
+    )
+        .filter(String::isNotBlank)
+        .joinToString(" | ")
+
+private fun Protocol.displayName(): String = when (this) {
+    Protocol.VLESS -> "Vless"
+    Protocol.VMESS -> "Vmess"
+    Protocol.TROJAN -> "Trojan"
+    Protocol.SHADOWSOCKS -> "Shadowsocks"
+    Protocol.SOCKS -> "Socks"
+    Protocol.HYSTERIA2 -> "Hysteria2"
+    Protocol.TUIC -> "Tuic"
+    Protocol.WIREGUARD -> "WireGuard"
+}
+
+private fun JsonObject.transportDisplayName(): String =
+    streamSettings()
+        ?.string("network")
+        ?.ifBlank { null }
+        ?.let(::formatTransportName)
+        ?: ""
+
+private fun JsonObject.securityDisplayName(): String =
+    streamSettings()
+        ?.string("security")
+        ?.ifBlank { null }
+        ?.takeUnless { it.equals("none", ignoreCase = true) }
+        ?.replaceFirstChar { it.uppercase() }
+        ?: ""
+
+private fun JsonObject.streamSettings(): JsonObject? = obj("streamSettings")
+
+private fun JsonObject.obj(key: String): JsonObject? =
+    runCatching { this[key]?.jsonObject }.getOrNull()
+
+private fun JsonObject.string(key: String): String =
+    runCatching { this[key]?.jsonPrimitive?.contentOrNull }.getOrNull().orEmpty()
+
+private fun formatTransportName(raw: String): String = when (raw.lowercase()) {
+    "ws" -> "WebSocket(WS)"
+    "grpc" -> "gRPC"
+    "http", "h2" -> "HTTP/2"
+    "httpupgrade" -> "HTTPUpgrade"
+    "xhttp" -> "XHTTP"
+    "splithttp" -> "SplitHTTP"
+    "tcp" -> "TCP"
+    "kcp" -> "mKCP"
+    "quic" -> "QUIC"
+    else -> raw.replaceFirstChar { it.uppercase() }
 }
 
 @Composable

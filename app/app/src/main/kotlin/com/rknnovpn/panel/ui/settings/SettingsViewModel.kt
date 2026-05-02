@@ -93,7 +93,6 @@ data class SettingsUiState(
     val directDnsUrl: String = DnsPreset.CLOUDFLARE.directUrl,
     val bootstrapDnsIp: String = DnsPreset.CLOUDFLARE.bootstrapIp,
     val dnsIpv6Mode: DnsIpv6Mode = DnsIpv6Mode.MIRROR,
-    val blockQuicDns: Boolean = true,
     val fakeDns: Boolean = false,
     val urlTestUrl: String = "https://www.gstatic.com/generate_204",
     val alwaysDirectPackagesText: String = "",
@@ -243,22 +242,6 @@ class SettingsViewModel @Inject constructor(
                 Log.w(TAG, "Failed to save DNS IPv6 mode: $err")
                 profileRepository.refresh()
                 _uiState.update { it.copy(dnsIpv6Mode = previous, errorMessage = err) }
-            }
-        }
-    }
-
-    fun setBlockQuicDns(enabled: Boolean) {
-        val previous = _uiState.value.blockQuicDns
-        _uiState.update { it.copy(blockQuicDns = enabled, errorMessage = null) }
-        viewModelScope.launch {
-            val ok = profileRepository.updateConfig { config ->
-                config.copy(dns = config.dns.copy(blockQuic = enabled))
-            }
-            if (!ok) {
-                val err = profileRepository.error.value
-                Log.w(TAG, "Failed to save DNS QUIC policy: $err")
-                profileRepository.refresh()
-                _uiState.update { it.copy(blockQuicDns = previous, errorMessage = err) }
             }
         }
     }
@@ -468,8 +451,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun applyAlwaysDirectPackages() {
-        val packages = parsePackageList(_uiState.value.alwaysDirectPackagesText)
         val excluded = parsePackageList(_uiState.value.alwaysDirectExcludedPackagesText)
+        val packages = parsePackageList(_uiState.value.alwaysDirectPackagesText)
+            .filterNot { it in excluded }
         viewModelScope.launch {
             val ok = profileRepository.updateConfig { config ->
                 val restoredDirectPackages = config.routing.alwaysDirectExcludedAppList
@@ -681,6 +665,12 @@ class SettingsViewModel @Inject constructor(
 
     fun clearSharedLogs() {
         _uiState.update { it.copy(shareLogsText = null) }
+    }
+
+    fun refreshProfile() {
+        viewModelScope.launch {
+            profileRepository.refresh()
+        }
     }
 
     // ---- Update actions ----
@@ -930,7 +920,6 @@ class SettingsViewModel @Inject constructor(
                 directDnsUrl = config.dns.directDns,
                 bootstrapDnsIp = config.dns.bootstrapIp,
                 dnsIpv6Mode = config.dns.ipv6Mode,
-                blockQuicDns = config.dns.blockQuic,
                 fakeDns = config.dns.fakeDns,
                 urlTestUrl = config.health.checkUrl,
                 alwaysDirectPackagesText = config.routing.alwaysDirectAppList.joinToString("\n"),
@@ -955,7 +944,6 @@ class SettingsViewModel @Inject constructor(
                         directDns = state.directDnsUrl.trim(),
                         bootstrapIp = state.bootstrapDnsIp.trim(),
                         ipv6Mode = state.dnsIpv6Mode,
-                        blockQuic = state.blockQuicDns,
                         fakeDns = state.fakeDns,
                     )
                 )

@@ -179,8 +179,7 @@ class ProfileRepository @Inject constructor(
             }
             when (val result = client.profileSetActiveNode(nodeId)) {
                 is DaemonClientResult.Ok -> {
-                    publishRuntimeStatus(result.data)
-                    refreshUnlockedWithStatus("setActiveNode")
+                    applyMutationSuccess("setActiveNode", result.data)
                 }
                 else -> {
                     val msg = describeFailure(result)
@@ -286,8 +285,7 @@ class ProfileRepository @Inject constructor(
             }
             when (val result = client.profileApply(config, reload = true)) {
                 is DaemonClientResult.Ok -> {
-                    publishRuntimeStatus(result.data)
-                    refreshUnlockedWithStatus("setProfile")
+                    applyMutationSuccess("setProfile", result.data)
                 }
                 else -> {
                     val msg = describeFailure(result)
@@ -333,8 +331,7 @@ class ProfileRepository @Inject constructor(
             val updated = transform(current)
             when (val result = client.profileApply(updated)) {
                 is DaemonClientResult.Ok -> {
-                    publishRuntimeStatus(result.data)
-                    refreshUnlockedWithStatus(tag)
+                    applyMutationSuccess(tag, result.data)
                 }
                 else -> {
                     val msg = describeFailure(result)
@@ -371,8 +368,7 @@ class ProfileRepository @Inject constructor(
             val updated = transform(current)
             when (val result = client.profileApply(updated)) {
                 is DaemonClientResult.Ok -> {
-                    publishRuntimeStatus(result.data)
-                    refreshUnlockedWithStatus(tag)
+                    applyMutationSuccess(tag, result.data)
                 }
                 else -> {
                     val msg = describeFailure(result)
@@ -497,8 +493,7 @@ class ProfileRepository @Inject constructor(
         }
         return when (val result = client.profileImportNodes(parsedNodes, reload = false)) {
             is DaemonClientResult.Ok -> {
-                publishRuntimeStatus(result.data)
-                refreshUnlockedWithStatus("importNodes")
+                applyMutationSuccess("importNodes", result.data)
                 parsedNodes
             }
             else -> {
@@ -563,8 +558,7 @@ class ProfileRepository @Inject constructor(
     ): List<Node> {
         return when (val result = client.subscriptionRefresh(preview.url)) {
             is DaemonClientResult.Ok -> {
-                publishRuntimeStatus(result.data)
-                refreshUnlockedWithStatus("subscriptionRefresh")
+                applyMutationSuccess("subscriptionRefresh", result.data)
                 _notice.value = messages.formatSubscriptionRefresh(
                     importedNodes = result.data.imported ?: preview.nodes.size,
                     parseFailures = result.data.parseFailures ?: preview.parseFailures,
@@ -587,6 +581,15 @@ class ProfileRepository @Inject constructor(
 
     private fun <T> describeFailure(result: DaemonClientResult<T>): String =
         messages.formatDaemonFailure(result)
+
+    private suspend fun applyMutationSuccess(tag: String, info: ConfigMutationInfo): Boolean {
+        publishRuntimeStatus(info)
+        info.profile?.let { profile ->
+            _profile.value = profile
+            return true
+        }
+        return refreshUnlockedWithStatus(tag)
+    }
 
     private fun publishRuntimeStatus(info: ConfigMutationInfo) {
         info.runtimeStatus?.let(poller::publishBackendStatus)
