@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.3.6
+
+- Hardened the APK-daemon bridge so compatibility bootstrap uses one-shot `daemonctl` until a valid compatibility fingerprint is cached.
+- Added bridge transport markers and retry fallback for short read-only calls when bridge parsing fails.
+- Kept malformed bridge responses classified as transport/parse failures instead of false APK-module incompatibility.
+- Added a release APK privacy guard that inspects the built APK manifest for forbidden transitive permissions.
+- Synchronized release metadata to `v2.3.6`.
+
 ## v2.3.5
 
 - Fixed APK startup compatibility checks by keeping `compat.check` on the stable one-shot daemonctl path instead of the experimental bridge path.
