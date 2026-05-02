@@ -17,45 +17,63 @@ import (
 
 const singboxProxySelectorTag = "proxy"
 
-func activeNodeSelectorSwitchTarget(oldCfg *config.Config, newCfg *config.Config, reloadPlan rootruntime.ReloadPlan) string {
+type selectorSwitchDecision struct {
+	Target string
+	Reason string
+}
+
+func activeNodeSelectorSwitchTarget(oldCfg *config.Config, newCfg *config.Config, reloadPlan rootruntime.ReloadPlan) selectorSwitchDecision {
 	if oldCfg == nil || newCfg == nil {
-		return ""
+		return selectorSwitchDecision{Reason: "config-missing"}
 	}
-	if reloadPlan.FullRestart || reloadPlan.NetstackReapplyAfter || len(reloadPlan.ChangedKeys) > 0 {
-		return ""
+	if reloadPlan.FullRestart {
+		return selectorSwitchDecision{Reason: "full-restart-required"}
+	}
+	if reloadPlan.NetstackReapplyAfter {
+		return selectorSwitchDecision{Reason: "netstack-reapply-required"}
+	}
+	if len(reloadPlan.ChangedKeys) > 0 {
+		return selectorSwitchDecision{Reason: "script-env-changed:" + strings.Join(reloadPlan.ChangedKeys, ",")}
 	}
 	if newCfg.Proxy.APIPort <= 0 || strings.TrimSpace(newCfg.Proxy.APISecret) == "" {
-		return ""
+		return selectorSwitchDecision{Reason: "clash-api-disabled"}
 	}
 	oldActive := strings.TrimSpace(oldCfg.Profile.ActiveNodeID)
 	newActive := strings.TrimSpace(newCfg.Profile.ActiveNodeID)
 	if oldActive == newActive {
-		return ""
+		return selectorSwitchDecision{Reason: "active-node-unchanged"}
 	}
 	if !sameConfigExceptActiveNodeProjection(oldCfg, newCfg) {
-		return ""
+		return selectorSwitchDecision{Reason: "non-active-node-config-changed"}
 	}
 	profiles := config.ProfilesFromConfigNodes(newCfg)
 	if len(profiles) <= 1 {
-		return ""
+		return selectorSwitchDecision{Reason: "single-outbound"}
 	}
 	oldProfile := activeProfileByID(oldCfg, oldActive)
 	newProfile := activeProfileByID(newCfg, newActive)
-	if config.RequiresXraySidecar(oldProfile) || config.RequiresXraySidecar(newProfile) {
-		return ""
+	if config.RequiresXraySidecar(oldProfile) {
+		return selectorSwitchDecision{Reason: "old-active-node-requires-xray-sidecar"}
+	}
+	if config.RequiresXraySidecar(newProfile) {
+		return selectorSwitchDecision{Reason: "new-active-node-requires-xray-sidecar"}
 	}
 	if newActive == "" {
 		for _, profile := range profiles {
 			if config.RequiresXraySidecar(profile) {
-				return ""
+				return selectorSwitchDecision{Reason: "auto-set-contains-xray-sidecar"}
 			}
 		}
-		return "auto"
+		return selectorSwitchDecision{Target: "auto"}
 	}
 	if newProfile != nil {
-		return strings.TrimSpace(newProfile.Tag)
+		tag := strings.TrimSpace(newProfile.Tag)
+		if tag == "" {
+			return selectorSwitchDecision{Reason: "active-node-tag-empty"}
+		}
+		return selectorSwitchDecision{Target: tag}
 	}
-	return ""
+	return selectorSwitchDecision{Reason: "active-node-not-found"}
 }
 
 func activeProfileByID(cfg *config.Config, id string) *config.NodeProfile {

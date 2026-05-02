@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -97,6 +98,43 @@ func TestParseArgsUnknownOption(t *testing.T) {
 	}
 }
 
+func TestPrintUsageWritesOnlyToProvidedWriter(t *testing.T) {
+	var stderr bytes.Buffer
+
+	printUsageTo(&stderr)
+
+	if !bytes.Contains(stderr.Bytes(), []byte("daemonctl - RKNnoVPN daemon control CLI")) {
+		t.Fatalf("expected usage text in provided writer, got %q", stderr.String())
+	}
+}
+
+func TestPrintHelperEnvelopeIsSingleJsonFrame(t *testing.T) {
+	var stdout bytes.Buffer
+	oldStdout := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = writer
+	defer func() {
+		os.Stdout = oldStdout
+	}()
+
+	printHelperEnvelope(map[string]string{"status": "active"})
+	writer.Close()
+	if _, err := stdout.ReadFrom(reader); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := bytes.Split(bytes.TrimSpace(stdout.Bytes()), []byte{'\n'})
+	if len(lines) != 1 {
+		t.Fatalf("expected one JSON frame, got %d: %q", len(lines), stdout.String())
+	}
+	if !bytes.Contains(lines[0], []byte(`"ok":true`)) {
+		t.Fatalf("expected compact helper envelope, got %q", stdout.String())
+	}
+}
+
 func TestWriteResponseRawPreservesErrorEnvelopeOnStdout(t *testing.T) {
 	line := []byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"bad params","data":{"ok":false,"error":{"code":"INVALID_PARAMS","message":"bad params"}}}}`)
 	var stdout bytes.Buffer
@@ -111,6 +149,23 @@ func TestWriteResponseRawPreservesErrorEnvelopeOnStdout(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("expected raw error response to keep stderr empty, got %q", stderr.String())
+	}
+}
+
+func TestWriteResponsePrettyErrorDoesNotUseStdout(t *testing.T) {
+	line := []byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"bad params","data":{"ok":false,"error":{"code":"INVALID_PARAMS","message":"bad params"}}}}`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := writeResponse(line, false, &stdout, &stderr)
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d", exitCode)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected pretty error response to keep stdout empty, got %q", stdout.String())
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("bad params")) {
+		t.Fatalf("expected error response on stderr, got %q", stderr.String())
 	}
 }
 
@@ -131,6 +186,23 @@ func TestWriteResponsePrettyPrintsResultEnvelope(t *testing.T) {
 	}
 }
 
+func TestWriteResponseWithoutResultStillPrintsJson(t *testing.T) {
+	line := []byte(`{"jsonrpc":"2.0","id":1}`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := writeResponse(line, false, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d", exitCode)
+	}
+	if got := stdout.String(); got != "null\n" {
+		t.Fatalf("expected JSON null stdout, got %q", got)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected stderr to be empty, got %q", stderr.String())
+	}
+}
+
 func TestRunBridgeProxiesMultipleFrames(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "daemon.sock")
 	listener, err := net.Listen("unix", socketPath)
@@ -142,27 +214,26 @@ func TestRunBridgeProxiesMultipleFrames(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		reader := bufio.NewReader(conn)
 		for i := 0; i < 2; i++ {
-			conn, err := listener.Accept()
+			line, err := reader.ReadBytes('\n')
 			if err != nil {
+				t.Errorf("read request: %v", err)
 				return
 			}
-			func() {
-				defer conn.Close()
-				line, err := bufio.NewReader(conn).ReadBytes('\n')
-				if err != nil {
-					t.Errorf("read request: %v", err)
-					return
-				}
-				var req struct {
-					ID int `json:"id"`
-				}
-				if err := json.Unmarshal(bytes.TrimSpace(line), &req); err != nil {
-					t.Errorf("decode request: %v", err)
-					return
-				}
-				_, _ = conn.Write([]byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{"ok":true,"result":{"id":%d}}}`+"\n", req.ID, req.ID)))
-			}()
+			var req struct {
+				ID int `json:"id"`
+			}
+			if err := json.Unmarshal(bytes.TrimSpace(line), &req); err != nil {
+				t.Errorf("decode request: %v", err)
+				return
+			}
+			_, _ = conn.Write([]byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{"ok":true,"result":{"id":%d}}}`+"\n", req.ID, req.ID)))
 		}
 	}()
 

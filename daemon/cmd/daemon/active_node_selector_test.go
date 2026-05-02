@@ -18,9 +18,9 @@ func TestActiveNodeSelectorSwitchTargetAllowsOnlyActiveNodeProjectionChange(t *t
 	oldCfg.Transport.Protocol = "tcp"
 	newCfg.Transport.Protocol = "grpc"
 
-	tag := activeNodeSelectorSwitchTarget(oldCfg, newCfg, rootruntime.ReloadPlan{})
-	if tag != "node-node-b" {
-		t.Fatalf("selector switch tag = %q, want node-node-b", tag)
+	decision := activeNodeSelectorSwitchTarget(oldCfg, newCfg, rootruntime.ReloadPlan{})
+	if decision.Target != "node-node-b" {
+		t.Fatalf("selector switch tag = %q, want node-node-b", decision.Target)
 	}
 }
 
@@ -29,8 +29,9 @@ func TestActiveNodeSelectorSwitchTargetRejectsNonActiveNodeChange(t *testing.T) 
 	newCfg := selectorTestConfig("node-b")
 	newCfg.Proxy.DNSPort++
 
-	if tag := activeNodeSelectorSwitchTarget(oldCfg, newCfg, rootruntime.ReloadPlan{}); tag != "" {
-		t.Fatalf("selector switch target should reject DNS port change, got %q", tag)
+	decision := activeNodeSelectorSwitchTarget(oldCfg, newCfg, rootruntime.ReloadPlan{})
+	if decision.Target != "" || decision.Reason != "non-active-node-config-changed" {
+		t.Fatalf("selector switch target should reject DNS port change, got %#v", decision)
 	}
 }
 
@@ -40,8 +41,9 @@ func TestActiveNodeSelectorSwitchTargetRejectsXraySidecarNodes(t *testing.T) {
 	newCfg := selectorTestConfig("node-xhttp")
 	newCfg.Profile.Nodes = append(newCfg.Profile.Nodes, selectorTestXHTTPNode())
 
-	if tag := activeNodeSelectorSwitchTarget(oldCfg, newCfg, rootruntime.ReloadPlan{}); tag != "" {
-		t.Fatalf("selector switch target should reject xray sidecar node, got %q", tag)
+	decision := activeNodeSelectorSwitchTarget(oldCfg, newCfg, rootruntime.ReloadPlan{})
+	if decision.Target != "" || decision.Reason != "new-active-node-requires-xray-sidecar" {
+		t.Fatalf("selector switch target should reject xray sidecar node, got %#v", decision)
 	}
 }
 
@@ -49,9 +51,9 @@ func TestActiveNodeSelectorSwitchTargetAllowsClearingToAuto(t *testing.T) {
 	oldCfg := selectorTestConfig("node-a")
 	newCfg := selectorTestConfig("")
 
-	tag := activeNodeSelectorSwitchTarget(oldCfg, newCfg, rootruntime.ReloadPlan{})
-	if tag != "auto" {
-		t.Fatalf("selector switch tag = %q, want auto", tag)
+	decision := activeNodeSelectorSwitchTarget(oldCfg, newCfg, rootruntime.ReloadPlan{})
+	if decision.Target != "auto" {
+		t.Fatalf("selector switch tag = %q, want auto", decision.Target)
 	}
 }
 

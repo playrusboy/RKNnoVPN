@@ -187,12 +187,17 @@ fun UpdateSection(
                             }
                         }
                         UpdateStatus.MODULE_TOO_OLD -> {
-                            // Daemon doesn't support updates -- offer GitHub link.
+                            // Daemon-backed update flow is unavailable -- offer GitHub link.
                             // ACTION_VIEW opens the default browser; no INTERNET
                             // permission needed by the APK itself.
                             Column {
+                                val manualUpdateHint = if (state.errorMessage.isBlank()) {
+                                    stringResource(R.string.update_module_too_old_hint)
+                                } else {
+                                    state.errorMessage
+                                }
                                 Text(
-                                    text = stringResource(R.string.update_module_too_old_hint),
+                                    text = manualUpdateHint,
                                     style = MaterialTheme.typography.bodySmall,
                                     modifier = Modifier.padding(bottom = 8.dp),
                                 )

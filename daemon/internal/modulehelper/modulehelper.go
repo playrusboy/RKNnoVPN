@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -36,15 +37,16 @@ const (
 )
 
 type State struct {
-	Status        string `json:"status"`
-	ModuleDir     string `json:"moduleDir"`
-	ProfilePath   string `json:"profilePath,omitempty"`
-	ProfileNodes  int    `json:"profileNodes,omitempty"`
-	DaemonPID     int    `json:"daemonPid,omitempty"`
-	DaemonAlive   bool   `json:"daemonAlive"`
-	SocketPresent bool   `json:"socketPresent"`
-	RepairStatus  string `json:"repairStatus,omitempty"`
-	Message       string `json:"message,omitempty"`
+	Status          string `json:"status"`
+	ModuleDir       string `json:"moduleDir"`
+	ProfilePath     string `json:"profilePath,omitempty"`
+	ProfileNodes    int    `json:"profileNodes,omitempty"`
+	DaemonPID       int    `json:"daemonPid,omitempty"`
+	DaemonAlive     bool   `json:"daemonAlive"`
+	SocketPresent   bool   `json:"socketPresent"`
+	SocketAccepting bool   `json:"socketAccepting"`
+	RepairStatus    string `json:"repairStatus,omitempty"`
+	Message         string `json:"message,omitempty"`
 }
 
 type RepairResult struct {
@@ -113,6 +115,9 @@ func CurrentState(moduleDir string) State {
 	}
 
 	state.SocketPresent = exists(paths.DaemonSocket())
+	if state.SocketPresent {
+		state.SocketAccepting = socketAccepting(paths.DaemonSocket(), 500*time.Millisecond)
+	}
 	if pid := readPID(paths.DaemonPIDFile()); pid > 0 {
 		state.DaemonPID = pid
 		state.DaemonAlive = processMatchesPath(pid, filepath.Join(paths.BinDir(), "daemon"))
@@ -131,6 +136,15 @@ func CurrentState(moduleDir string) State {
 	}
 	state.ProfileNodes = len(doc.Nodes)
 	return state
+}
+
+func socketAccepting(socketPath string, timeout time.Duration) bool {
+	conn, err := net.DialTimeout("unix", socketPath, timeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func StartRepair(moduleDir string) RepairResult {

@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,6 +44,13 @@ func (h ConfigHandlers) ConfigList(params *json.RawMessage) (interface{}, *ipc.R
 }
 
 func (h ConfigHandlers) ConfigImport(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	return h.ConfigImportContext(context.Background(), params)
+}
+
+func (h ConfigHandlers) ConfigImportContext(ctx context.Context, params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	if rpcErr := rpcErrorFromContext(ctx); rpcErr != nil {
+		return nil, rpcErr
+	}
 	current, rpcErr := h.currentConfig()
 	if rpcErr != nil {
 		return nil, rpcErr
@@ -55,6 +63,9 @@ func (h ConfigHandlers) ConfigImport(params *json.RawMessage) (interface{}, *ipc
 			code = ipc.CodeConfigError
 		}
 		return nil, &ipc.RPCError{Code: code, Message: err.Error()}
+	}
+	if rpcErr := rpcErrorFromContext(ctx); rpcErr != nil {
+		return nil, rpcErr
 	}
 
 	mutation, err := h.persistConfigMutation(newCfg, true, "config-import")

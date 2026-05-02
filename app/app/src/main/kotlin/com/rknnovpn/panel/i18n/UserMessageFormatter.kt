@@ -54,7 +54,7 @@ class UserMessageFormatter @Inject constructor(
         is DaemonClientResult.Timeout -> get(R.string.error_request_timed_out_with_method, result.method)
         is DaemonClientResult.DaemonNotFound -> get(R.string.error_daemon_not_installed)
         is DaemonClientResult.DaemonUnavailable -> formatDaemonUnavailable(result.reason)
-        is DaemonClientResult.ParseError -> get(R.string.error_invalid_daemon_response)
+        is DaemonClientResult.ParseError -> get(R.string.error_daemon_schema_incompatible)
         is DaemonClientResult.Failure -> formatControlPlaneFailure(
             result.throwable.message,
             R.string.error_unexpected_with_reason,
@@ -189,6 +189,11 @@ class UserMessageFormatter @Inject constructor(
             "failed" -> get(R.string.operation_saved_runtime_not_applied)
             else -> null
         } ?: return null
+        val hotswap = if (info.requiresHotSwap) {
+            get(R.string.operation_requires_hotswap, info.runtimeApplyReason.ifBlank { info.runtimeApplyMode.ifBlank { "hot-swap" } })
+        } else {
+            ""
+        }
         val rollback = runCatching {
             info.operation
                 ?.jsonObject
@@ -202,7 +207,7 @@ class UserMessageFormatter @Inject constructor(
             "cleanup_incomplete", "unknown" -> get(R.string.operation_cleanup_incomplete)
             else -> ""
         }
-        return listOf(base, suffix).filter { it.isNotBlank() }.joinToString(" ")
+        return listOf(base, hotswap, suffix).filter { it.isNotBlank() }.joinToString(" ")
     }
 
     fun formatSubscriptionPreview(

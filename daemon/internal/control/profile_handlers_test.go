@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -66,6 +67,31 @@ func TestProfileSetActiveNodeNoopStillRejectsStaleActiveNode(t *testing.T) {
 	}
 }
 
+func TestProfileSetActiveNodeContextCancelledSkipsPersistMutation(t *testing.T) {
+	cfg := profileHandlerTestConfig("node-a", false)
+	persistCalled := false
+	handler := ProfileHandlers{
+		CurrentConfig: func() *config.Config {
+			return cfg
+		},
+		PersistConfigMutation: func(*config.Config, bool, string) (applytx.ConfigTransactionResult, error) {
+			persistCalled = true
+			return applytx.ConfigTransactionResult{}, nil
+		},
+		RuntimeStatus: profileHandlerTestRuntimeStatus,
+	}
+	raw := json.RawMessage(`{"nodeId":"node-b"}`)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, rpcErr := handler.ProfileSetActiveNodeContext(ctx, &raw); rpcErr == nil {
+		t.Fatal("expected cancelled context error")
+	}
+	if persistCalled {
+		t.Fatal("cancelled active-node mutation should not persist profile changes")
+	}
+}
+
 func TestProfilePatchClearActiveNodeNoopSkipsPersistMutation(t *testing.T) {
 	cfg := profileHandlerTestConfig("", false)
 	persistCalled := false
@@ -97,12 +123,14 @@ func TestProfilePatchClearActiveNodeNoopSkipsPersistMutation(t *testing.T) {
 func TestSubscriptionCommitPreviewUsesPreviewCache(t *testing.T) {
 	cfg := config.DefaultConfig()
 	fetchCalls := 0
+	reloadValues := []bool{}
 	handler := ProfileHandlers{
 		CurrentConfig: func() *config.Config {
 			return cfg
 		},
 		PersistConfigMutation: func(next *config.Config, reload bool, action string) (applytx.ConfigTransactionResult, error) {
 			cfg = next
+			reloadValues = append(reloadValues, reload)
 			return applytx.ConfigTransactionResult{
 				Action:            action,
 				ConfigSaved:       true,
@@ -142,6 +170,49 @@ func TestSubscriptionCommitPreviewUsesPreviewCache(t *testing.T) {
 	}
 	if len(profiledoc.FromConfig(cfg).Nodes) != 1 {
 		t.Fatalf("refresh did not persist preview nodes: %#v", profiledoc.FromConfig(cfg).Nodes)
+	}
+	if len(reloadValues) != 1 || !reloadValues[0] {
+		t.Fatalf("new subscription with auto active node should reload by default, got %#v", reloadValues)
+	}
+}
+
+func TestSubscriptionRefreshSkipsReloadWhenExplicitActiveNodeRuntimeProjectionIsUnchanged(t *testing.T) {
+	cfg := profileHandlerTestConfig("node-a", false)
+	doc := profiledoc.FromConfig(cfg)
+	doc.Nodes[0].Server = "example.com"
+	doc.Nodes[0].Port = 443
+	doc.Nodes[0].Source = profiledoc.NodeSource{Type: "SUBSCRIPTION", URL: "https://example.com/sub", ProviderKey: "sub"}
+	doc.Subscriptions = []profiledoc.Subscription{{ProviderKey: "sub", URL: "https://example.com/sub"}}
+	var warnings []profiledoc.Warning
+	var err error
+	cfg, warnings, err = profiledoc.ApplyToConfig(cfg, doc)
+	if err != nil {
+		t.Fatalf("test profile apply failed: %v warnings=%#v", err, warnings)
+	}
+	reloadValues := []bool{}
+	handler := ProfileHandlers{
+		CurrentConfig: func() *config.Config {
+			return cfg
+		},
+		PersistConfigMutation: func(next *config.Config, reload bool, action string) (applytx.ConfigTransactionResult, error) {
+			cfg = next
+			reloadValues = append(reloadValues, reload)
+			return applytx.ConfigTransactionResult{Action: action, ConfigSaved: true, RuntimeWasRunning: true, RuntimeOperation: runtimev2.OperationProfileApply}, nil
+		},
+		RuntimeStatus: profileHandlerTestRuntimeStatus,
+	}
+	next := profiledoc.FromConfig(cfg)
+	next.Nodes[0].Source.LastSeenAt++
+
+	if _, rpcErr := handler.applySubscriptionRefresh(subscription.RefreshResult{
+		Profile:      next,
+		Subscription: next.Subscriptions[0],
+		Nodes:        next.Nodes,
+	}, "subscription.refresh", subscriptionRefreshReloadDefault(profiledoc.FromConfig(cfg), next)); rpcErr != nil {
+		t.Fatalf("refresh failed: %#v", rpcErr)
+	}
+	if len(reloadValues) != 1 || reloadValues[0] {
+		t.Fatalf("unchanged active subscription refresh should not reload, got %#v", reloadValues)
 	}
 }
 

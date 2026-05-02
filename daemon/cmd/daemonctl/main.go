@@ -23,16 +23,16 @@ func main() {
 	opts, cmd, paramArgs, err := parseArgs(os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n\n", err)
-		printUsage()
+		printUsageTo(os.Stderr)
 		os.Exit(1)
 	}
 	if cmd == "" {
-		printUsage()
+		printUsageTo(os.Stderr)
 		os.Exit(1)
 	}
 
 	if cmd == "help" || cmd == "--help" || cmd == "-h" {
-		printUsage()
+		printUsageTo(os.Stdout)
 		os.Exit(0)
 	}
 
@@ -47,7 +47,7 @@ func main() {
 
 	if _, ok := supportedCommandSet()[cmd]; !ok {
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n\n", cmd)
-		printUsage()
+		printUsageTo(os.Stderr)
 		os.Exit(1)
 	}
 
@@ -121,6 +121,14 @@ func runBridge(stdin io.Reader, stdout io.Writer, stderr io.Writer, socketPath s
 	writer := bufio.NewWriter(stdout)
 	defer writer.Flush()
 
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: cannot connect to daemon at %s: %v\n", socketPath, err)
+		return 1
+	}
+	defer conn.Close()
+	daemonReader := bufio.NewReader(conn)
+
 	for {
 		frame, err := readFrame(reader)
 		if err != nil {
@@ -133,7 +141,7 @@ func runBridge(stdin io.Reader, stdout io.Writer, stderr io.Writer, socketPath s
 		if len(frame) == 0 {
 			continue
 		}
-		response, err := proxyFrame(socketPath, frame)
+		response, err := proxyFrameConn(conn, daemonReader, frame)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: bridge proxy failed: %v\n", err)
 			return 1
@@ -158,6 +166,21 @@ func proxyFrame(socketPath string, frame []byte) ([]byte, error) {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
 	response, err := readFrame(bufio.NewReader(conn))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if len(response) == 0 {
+		return nil, fmt.Errorf("daemon closed connection without response")
+	}
+	return response, nil
+}
+
+func proxyFrameConn(conn net.Conn, reader *bufio.Reader, frame []byte) ([]byte, error) {
+	request := append(append([]byte{}, frame...), '\n')
+	if _, err := conn.Write(request); err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	response, err := readFrame(reader)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
@@ -195,7 +218,7 @@ func writeResponse(line []byte, rawOutput bool, stdout io.Writer, stderr io.Writ
 	if resp.Error != nil {
 		if !rawOutput {
 			fmt.Fprintf(stderr, "error [%d]: %s\n", resp.Error.Code, resp.Error.Message)
-			prettyPrint(stdout, line)
+			prettyPrint(stderr, line)
 		}
 		return 1
 	}
@@ -207,7 +230,7 @@ func writeResponse(line []byte, rawOutput bool, stdout io.Writer, stderr io.Writ
 	if resp.Result != nil {
 		prettyPrint(stdout, *resp.Result)
 	} else {
-		fmt.Fprintln(stdout, "ok")
+		fmt.Fprintln(stdout, "null")
 	}
 	return 0
 }
@@ -266,12 +289,12 @@ func prettyPrint(w io.Writer, data json.RawMessage) {
 	fmt.Fprintln(w, string(pretty))
 }
 
-func printUsage() {
-	fmt.Println("daemonctl - RKNnoVPN daemon control CLI")
-	fmt.Println()
-	fmt.Println("Usage: daemonctl [--raw|--compact] <command> [json_params]")
-	fmt.Println()
-	fmt.Println("Commands:")
+func printUsageTo(w io.Writer) {
+	fmt.Fprintln(w, "daemonctl - RKNnoVPN daemon control CLI")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Usage: daemonctl [--raw|--compact] <command> [json_params]")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Commands:")
 
 	// Calculate max command name length for alignment.
 	maxLen := 0
@@ -288,20 +311,20 @@ func printUsage() {
 
 	for _, cmd := range orderedCommands() {
 		desc := commandDescription(cmd)
-		fmt.Printf("  %-*s  %s\n", maxLen, cmd, desc)
+		fmt.Fprintf(w, "  %-*s  %s\n", maxLen, cmd, desc)
 	}
 	for _, cmd := range orderedModuleHelperCommands() {
 		desc := commandDescription(cmd)
-		fmt.Printf("  %-*s  %s\n", maxLen, cmd, desc)
+		fmt.Fprintf(w, "  %-*s  %s\n", maxLen, cmd, desc)
 	}
 
-	fmt.Println()
-	fmt.Println("Environment:")
-	fmt.Printf("  RKNNOVPN_SOCKET  daemon socket path (default: %s)\n", modulecontract.NewPaths("").DaemonSocket())
-	fmt.Println("  RKNNOVPN_DAEMONCTL_RAW  print the daemon JSON-RPC response without pretty-printing")
-	fmt.Println()
-	fmt.Println("Examples:")
-	printExamples()
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Environment:")
+	fmt.Fprintf(w, "  RKNNOVPN_SOCKET  daemon socket path (default: %s)\n", modulecontract.NewPaths("").DaemonSocket())
+	fmt.Fprintln(w, "  RKNNOVPN_DAEMONCTL_RAW  print the daemon JSON-RPC response without pretty-printing")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Examples:")
+	printExamplesTo(w)
 }
 
 func supportedCommandSet() map[string]bool {
@@ -398,25 +421,25 @@ func runModuleHelperCommand(cmd string) {
 }
 
 func printHelperEnvelope(result interface{}) {
-	data, err := json.MarshalIndent(map[string]interface{}{
+	data, err := json.Marshal(map[string]interface{}{
 		"ok":     true,
 		"result": result,
-	}, "", "  ")
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: marshal helper result: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println(string(data))
+	printRaw(os.Stdout, data)
 }
 
-func printExamples() {
+func printExamplesTo(w io.Writer) {
 	contracts := methodContractMap()
 	for _, method := range orderedCommands() {
 		contract, ok := contracts[method]
 		if !ok {
 			continue
 		}
-		fmt.Println("  " + commandExample(contract))
+		fmt.Fprintln(w, "  "+commandExample(contract))
 	}
 }
 

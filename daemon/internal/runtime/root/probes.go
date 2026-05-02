@@ -12,7 +12,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
-const maxNodeProbeWorkers = 6
+const maxNodeProbeWorkers = 3
 
 type URLProbeMetrics struct {
 	LatencyMS     int64

@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.3.7
+
+- Made active-node switching report whether it completed through the fast selector path or needs HotSwap, including the daemon-side rejection reason.
+- Made the APK-daemon bridge and daemon Unix socket truly multi-frame persistent for short IPC calls.
+- Reduced avoidable runtime reloads for subscription refreshes and UI-only node metadata edits.
+- Hardened HotSwap failure handling with rollback to the previous runtime before safety cleanup.
+- Added runtime stage timing, faster active-operation polling, cancellation-aware mutations, and lower node-test concurrency.
+- Improved in-app update/repair handling for daemon socket and schema mismatch states.
+- Synchronized release metadata to `v2.3.7`.
+
 ## v2.3.6
 
 - Hardened the APK-daemon bridge so compatibility bootstrap uses one-shot `daemonctl` until a valid compatibility fingerprint is cached.

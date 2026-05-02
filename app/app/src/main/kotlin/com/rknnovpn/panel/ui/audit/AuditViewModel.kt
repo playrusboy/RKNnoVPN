@@ -184,7 +184,7 @@ class AuditViewModel @Inject constructor(
                         throw IllegalStateException(string(R.string.error_daemon_not_running))
                     }
                     is DaemonClientResult.ParseError -> {
-                        throw IllegalStateException(string(R.string.audit_error_invalid_response))
+                        throw IllegalStateException(string(R.string.error_daemon_schema_incompatible))
                     }
                     is DaemonClientResult.Failure -> {
                         throw IllegalStateException(

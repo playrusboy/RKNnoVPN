@@ -1,6 +1,11 @@
 package control
 
-import "testing"
+import (
+	"testing"
+
+	applytx "github.com/youtubediscord/RKNnoVPN/daemon/internal/apply"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
+)
 
 func TestConfigMutationOperationDocumentsTransactionStages(t *testing.T) {
 	op := configMutationOperation("config-import", "accepted", true, true, false, "accepted", -1, "", "", nil)
@@ -31,6 +36,31 @@ func TestProfileOperationMapsResetReportRollback(t *testing.T) {
 	}
 	if result["resetReport"] == nil {
 		t.Fatalf("reset report should remain visible: %#v", result)
+	}
+}
+
+func TestProfileSuccessSurfacesHotSwapReason(t *testing.T) {
+	status := runtimev2.Status{}
+	result := ProfileSuccessWithRuntimeApply(
+		"profile.setActiveNode",
+		true,
+		true,
+		status,
+		status,
+		nil,
+		1,
+		applytx.ConfigTransactionResult{
+			RuntimeApplyMode:   "hot-swap",
+			RuntimeApplyReason: "new-active-node-requires-xray-sidecar",
+			RequiresHotSwap:    true,
+		},
+	)
+	if result["requiresHotSwap"] != true || result["runtimeApplyReason"] != "new-active-node-requires-xray-sidecar" {
+		t.Fatalf("hotswap reason missing from result: %#v", result)
+	}
+	operation := result["operation"].(map[string]interface{})
+	if operation["requiresHotSwap"] != true || operation["runtimeApplyMode"] != "hot-swap" {
+		t.Fatalf("hotswap reason missing from operation: %#v", operation)
 	}
 }
 

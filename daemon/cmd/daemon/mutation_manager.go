@@ -18,7 +18,7 @@ func (d *daemon) persistConfigMutationForAction(nextCfg *config.Config, reload b
 		rootruntime.BuildScriptEnv(currentCfg, d.dataDir),
 		rootruntime.BuildScriptEnv(nextCfg, d.dataDir),
 	)
-	selectorSwitchTag := activeNodeSelectorSwitchTarget(currentCfg, nextCfg, reloadPlan)
+	selectorSwitch := activeNodeSelectorSwitchTarget(currentCfg, nextCfg, reloadPlan)
 	return applytx.ConfigTransaction{
 		Action:     action,
 		EnsureIdle: d.failIfRuntimeOperationActive,
@@ -29,7 +29,7 @@ func (d *daemon) persistConfigMutationForAction(nextCfg *config.Config, reload b
 			return nil
 		},
 		CheckRuntimeProjection: func(nextCfg *config.Config) error {
-			if selectorSwitchTag != "" {
+			if selectorSwitch.Target != "" {
 				return nil
 			}
 			profile := nextCfg.ResolveProfile()
@@ -45,8 +45,8 @@ func (d *daemon) persistConfigMutationForAction(nextCfg *config.Config, reload b
 			return profiledoc.Save(d.profilePath, profiledoc.FromConfig(nextCfg))
 		},
 		RuntimeRunning: d.isRuntimeRunningOrDegraded,
-		ApplyConfig: func(nextCfg *config.Config, reload bool, operation runtimev2.OperationKind) error {
-			return d.applyConfigWithOperation(nextCfg, reload, operation)
+		ApplyConfigWithResult: func(nextCfg *config.Config, reload bool, operation runtimev2.OperationKind) (applytx.ConfigApplyResult, error) {
+			return d.applyConfigWithOperationResult(nextCfg, reload, operation)
 		},
 	}.Run(nextCfg, reload)
 }

@@ -13,16 +13,23 @@ import com.rknnovpn.panel.model.Node
 import com.rknnovpn.panel.model.NodeProbeResultV2
 import com.rknnovpn.panel.model.ProfileConfig
 import com.rknnovpn.panel.model.RoutingConfig
+import com.rknnovpn.panel.model.RuntimeOperationResult
+import com.rknnovpn.panel.model.RuntimeOperationStatus
+import kotlinx.coroutines.delay
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import java.util.UUID
@@ -45,15 +52,22 @@ class DaemonClient @Inject constructor(
         const val MIN_CONTROL_PROTOCOL_VERSION = 5
         const val MIN_SCHEMA_VERSION = 5
         val REQUIRED_METHODS: Set<String> = GeneratedDaemonContract.APK_REQUIRED_METHODS
+        private val INVALID_RESPONSE_RECOVERY_METHODS = setOf(
+            "backend.status",
+            "profile.get",
+            "version",
+            "compat.check",
+            "ipc.contract",
+        )
         private val BRIDGE_PARSE_RETRY_METHODS = setOf(
-            "app.resolveUid",
             "backend.status",
             "compat.check",
-            "config-list",
             "ipc.contract",
             "profile.get",
             "version",
         )
+        private const val INVALID_RESPONSE_REPAIR_COOLDOWN_MS = 30_000L
+        private const val INVALID_RESPONSE_STABLE_FAILURE_THRESHOLD = 3
     }
 
     private val json = Json {
@@ -71,6 +85,12 @@ class DaemonClient @Inject constructor(
 
     @Volatile
     private var compatibilityCache: CompatibilityCache? = null
+    @Volatile
+    private var lastInvalidResponseRepairAtMs: Long = 0L
+    @Volatile
+    private var lastInvalidResponseFingerprint: String = ""
+    @Volatile
+    private var lastInvalidResponseFingerprintCount: Int = 0
 
     fun toDaemonStatus(status: BackendStatusV2): DaemonStatus = status.toDaemonStatus()
 
@@ -291,22 +311,34 @@ class DaemonClient @Inject constructor(
         }
     }
 
-    suspend fun subscriptionRefresh(url: String): DaemonClientResult<ConfigMutationInfo> {
+    suspend fun subscriptionRefresh(
+        url: String,
+        reload: Boolean? = null,
+    ): DaemonClientResult<ConfigMutationInfo> {
         requireCompatible("subscription.refresh", allowModuleRepair = true)?.let { return it.asFailure() }
-        val params = buildJsonObject { put("url", url) }
+        val params = buildJsonObject {
+            put("url", url)
+            reload?.let { put("reload", it) }
+        }
         return callConfigMutation("subscription.refresh", params)
     }
 
-    suspend fun subscriptionCommitPreview(previewId: String): DaemonClientResult<ConfigMutationInfo> {
+    suspend fun subscriptionCommitPreview(
+        previewId: String,
+        reload: Boolean? = null,
+    ): DaemonClientResult<ConfigMutationInfo> {
         requireCompatible("subscription.commitPreview", allowModuleRepair = true)?.let { return it.asFailure() }
-        val params = buildJsonObject { put("previewId", previewId) }
+        val params = buildJsonObject {
+            put("previewId", previewId)
+            reload?.let { put("reload", it) }
+        }
         return callConfigMutation("subscription.commitPreview", params)
     }
 
     suspend fun nodeTest(
         nodeIds: List<String> = emptyList(),
         url: String = "",
-        timeoutMs: Int = 5_000,
+        timeoutMs: Int = 3_000,
         mode: String = "fast",
     ): DaemonClientResult<NodeTestInfo> {
         when (val result = diagnosticsTestNodes(nodeIds, url, timeoutMs, mode)) {
@@ -336,53 +368,67 @@ class DaemonClient @Inject constructor(
             }
         }
         val timeoutMs = if (includeHealthRefresh) 30_000L else 5_000L
-        return call(
+        val status = call(
             "backend.status",
             params = params,
             timeoutMs = timeoutMs,
         ) {
             json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
         }
+
+        if (status is DaemonClientResult.ParseError) {
+            compatibilityCache = null
+            val compat = compatibilityCheck(
+                requiredMethods = REQUIRED_METHODS,
+                allowModuleRepair = true,
+            )
+            if (compat is DaemonClientResult.Ok) {
+                val issue = ipcCompatibilityIssue(
+                    info = compat.data.version,
+                    contract = compat.data.contract,
+                    apkVersion = BuildConfig.VERSION_NAME,
+                    requiredMethods = REQUIRED_METHODS + "compat.check",
+                    minControlProtocolVersion = MIN_CONTROL_PROTOCOL_VERSION,
+                    minSchemaVersion = MIN_SCHEMA_VERSION,
+                )
+                return DaemonClientResult.DaemonError(
+                    DaemonClientErrorCodes.COMPATIBILITY,
+                    issue ?: "Daemon status schema is incompatible with this APK",
+                )
+            }
+        }
+
+        return status
     }
 
     suspend fun backendStart(): DaemonClientResult<BackendStatusV2> {
         requireCompatible("backend.start", "backend.status", allowModuleRepair = true)?.let { return it.asFailure() }
-        return call("backend.start", timeoutMs = ACCEPT_TIMEOUT_MS, allowModuleRepair = true) {
-            json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
-        }
+        return callBackendStatusMutation("backend.start", timeoutMs = ACCEPT_TIMEOUT_MS, allowModuleRepair = true)
     }
 
     suspend fun backendStop(): DaemonClientResult<BackendStatusV2> {
         requireCompatible("backend.stop", "backend.status")?.let { return it.asFailure() }
-        return call("backend.stop", timeoutMs = ACCEPT_TIMEOUT_MS) {
-            json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
-        }
+        return callBackendStatusMutation("backend.stop", timeoutMs = ACCEPT_TIMEOUT_MS)
     }
 
     suspend fun backendRestart(): DaemonClientResult<BackendStatusV2> {
         requireCompatible("backend.restart", "backend.status", allowModuleRepair = true)?.let { return it.asFailure() }
-        return call("backend.restart", timeoutMs = ACCEPT_TIMEOUT_MS, allowModuleRepair = true) {
-            json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
-        }
+        return callBackendStatusMutation("backend.restart", timeoutMs = ACCEPT_TIMEOUT_MS, allowModuleRepair = true)
     }
 
     suspend fun backendReset(): DaemonClientResult<BackendStatusV2> {
         requireCompatible("backend.reset", "backend.status", allowModuleRepair = true)?.let { return it.asFailure() }
-        return call("backend.reset", timeoutMs = ACCEPT_TIMEOUT_MS, allowModuleRepair = true) {
-            json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
-        }
+        return callBackendStatusMutation("backend.reset", timeoutMs = ACCEPT_TIMEOUT_MS, allowModuleRepair = true)
     }
 
     suspend fun backendApplyDesiredState(desiredState: DesiredStateV2): DaemonClientResult<BackendStatusV2> {
         requireCompatible("backend.applyDesiredState", "backend.status", allowModuleRepair = true)?.let { return it.asFailure() }
-        return call(
+        return callBackendStatusMutation(
             method = "backend.applyDesiredState",
             params = json.encodeToJsonElement(DesiredStateV2.serializer(), desiredState).jsonObject,
             timeoutMs = 15_000L,
             allowModuleRepair = true,
-        ) {
-            json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
-        }
+        )
     }
 
     suspend fun diagnosticsHealth(): DaemonClientResult<BackendHealthSnapshot> {
@@ -395,7 +441,7 @@ class DaemonClient @Inject constructor(
     suspend fun diagnosticsTestNodes(
         nodeIds: List<String> = emptyList(),
         url: String = "",
-        timeoutMs: Int = 5_000,
+        timeoutMs: Int = 3_000,
         mode: String = "fast",
     ): DaemonClientResult<List<NodeProbeResultV2>> {
         requireCompatible("diagnostics.testNodes")?.let { return it.asFailure() }
@@ -488,11 +534,17 @@ class DaemonClient @Inject constructor(
 
     suspend fun updateDownload(): DaemonClientResult<UpdateDownloadInfo> {
         requireCompatible("update-download")?.let { return it.asFailure() }
-        return call(
+        val result = call(
             "update-download",
             timeoutMs = 600_000L,
+            allowBridge = false,
             transform = ::parseUpdateDownloadInfo,
         )
+        return if (result is DaemonClientResult.ParseError) {
+            reconcileMutatingParseError("update-download", result)
+        } else {
+            result
+        }
     }
 
     suspend fun updateInstall(
@@ -509,8 +561,13 @@ class DaemonClient @Inject constructor(
                 put("apk_path", apkPath)
             }
         }
-        return call("update-install", params, timeoutMs = ACCEPT_TIMEOUT_MS) {
+        val result = call("update-install", params, timeoutMs = ACCEPT_TIMEOUT_MS, allowBridge = false) {
             json.parseUpdateInstallInfo(it)
+        }
+        return if (result is DaemonClientResult.ParseError) {
+            reconcileMutatingParseError("update-install", result)
+        } else {
+            result
         }
     }
 
@@ -589,13 +646,202 @@ class DaemonClient @Inject constructor(
                 allowBridge = false,
             )
             invalidateCompatibilityCacheOnTransportChange(retry)
-            return retry.toDaemonClientResult(transform)
+            val retryConverted = retry.toDaemonClientResult(transform)
+            if (retryConverted !is DaemonClientResult.ParseError) {
+                return retryConverted
+            }
+            return recoverFromInvalidResponse(
+                method = method,
+                params = params,
+                timeoutMs = timeoutMs,
+                allowModuleRepair = allowModuleRepair,
+                transform = transform,
+                previous = retryConverted,
+            )
+        }
+
+        if (converted is DaemonClientResult.ParseError) {
+            return recoverFromInvalidResponse(
+                method = method,
+                params = params,
+                timeoutMs = timeoutMs,
+                allowModuleRepair = allowModuleRepair,
+                transform = transform,
+                previous = converted,
+            )
         }
         return converted
     }
 
+    private suspend fun <T> recoverFromInvalidResponse(
+        method: String,
+        params: JsonObject,
+        timeoutMs: Long,
+        allowModuleRepair: Boolean,
+        transform: (JsonElement) -> T,
+        previous: DaemonClientResult.ParseError,
+    ): DaemonClientResult<T> {
+        if (method !in INVALID_RESPONSE_RECOVERY_METHODS) {
+            return previous
+        }
+
+        executor.disableBridge("invalid response for $method")
+
+        val oneShot = executor.execute(
+            method = method,
+            params = params,
+            timeoutMs = timeoutMs.coerceAtLeast(5_000L),
+            allowModuleRepair = allowModuleRepair,
+            allowBridge = false,
+        )
+        invalidateCompatibilityCacheOnTransportChange(oneShot)
+
+        val oneShotConverted = oneShot.toDaemonClientResult(transform)
+        if (oneShotConverted !is DaemonClientResult.ParseError) {
+            clearInvalidResponseFingerprint(method)
+            return oneShotConverted
+        }
+
+        val oneShotFingerprintCount = recordInvalidResponseFingerprint(method, oneShotConverted.raw)
+        if (oneShotFingerprintCount >= INVALID_RESPONSE_STABLE_FAILURE_THRESHOLD) {
+            return stableInvalidResponseError(method, oneShotConverted.raw)
+        }
+
+        val now = System.currentTimeMillis()
+        if (now - lastInvalidResponseRepairAtMs < INVALID_RESPONSE_REPAIR_COOLDOWN_MS) {
+            return DaemonClientResult.DaemonError(
+                DaemonClientErrorCodes.COMPATIBILITY,
+                "Daemon returned an incompatible response for $method. " +
+                    "Repair cooldown is active; raw=${oneShotConverted.raw.take(300)}",
+            )
+        }
+        lastInvalidResponseRepairAtMs = now
+
+        val state = moduleState()
+        if (state !is DaemonctlResult.Success) {
+            return DaemonClientResult.DaemonError(
+                DaemonClientErrorCodes.COMPATIBILITY,
+                "Daemon response is invalid and module state could not be checked before repair: $state",
+            )
+        }
+        moduleStateBlockingError(state)?.let { return it }
+
+        val repair = moduleRepair()
+        if (repair !is DaemonctlResult.Success) {
+            return DaemonClientResult.DaemonError(
+                DaemonClientErrorCodes.COMPATIBILITY,
+                "Daemon response is invalid and module repair did not start: $repair",
+            )
+        }
+
+        delay(1_500L)
+
+        compatibilityCache = null
+        val afterRepair = executor.execute(
+            method = method,
+            params = params,
+            timeoutMs = timeoutMs.coerceAtLeast(5_000L),
+            allowModuleRepair = true,
+            allowBridge = false,
+        )
+        invalidateCompatibilityCacheOnTransportChange(afterRepair)
+
+        val afterRepairConverted = afterRepair.toDaemonClientResult(transform)
+        if (afterRepairConverted !is DaemonClientResult.ParseError) {
+            clearInvalidResponseFingerprint(method)
+            return afterRepairConverted
+        }
+
+        val afterRepairFingerprintCount = recordInvalidResponseFingerprint(method, afterRepairConverted.raw)
+        if (afterRepairFingerprintCount >= INVALID_RESPONSE_STABLE_FAILURE_THRESHOLD) {
+            return stableInvalidResponseError(method, afterRepairConverted.raw)
+        }
+
+        return DaemonClientResult.DaemonError(
+            DaemonClientErrorCodes.COMPATIBILITY,
+            "APK и модуль/daemon несовместимы: daemon вернул JSON, но APK не смог разобрать схему. " +
+                "Нужна переустановка модуля/APK одной версии или reboot после staged update.",
+            JsonPrimitive(afterRepairConverted.raw.take(1000)),
+        )
+    }
+
+    private fun moduleStateBlockingError(
+        state: DaemonctlResult.Success,
+    ): DaemonClientResult.DaemonError? {
+        val obj = runCatching { state.data.jsonObject }.getOrNull()
+            ?: return DaemonClientResult.DaemonError(
+                DaemonClientErrorCodes.COMPATIBILITY,
+                "Daemon response is invalid and module.state did not return a JSON object before repair.",
+                state.data,
+            )
+        val status = obj["status"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val message = obj["message"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val repairStatus = obj["repairStatus"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val socketPresent = obj["socketPresent"]?.jsonPrimitive?.booleanOrNull ?: false
+        val socketAccepting = obj["socketAccepting"]?.jsonPrimitive?.booleanOrNull ?: false
+        return when {
+            status == "pending_update" || status == "pending_remove" ->
+                DaemonClientResult.DaemonError(
+                    DaemonClientErrorCodes.COMPATIBILITY,
+                    message.ifBlank { "Module state is $status; reboot is required before IPC recovery." },
+                    state.data,
+                )
+            status == "disabled" || status == "missing" || status == "service_missing" ||
+                status == "daemonctl_missing" || status == "daemon_missing" ->
+                DaemonClientResult.DaemonError(
+                    DaemonClientErrorCodes.COMPATIBILITY,
+                    message.ifBlank { "Module state is $status; reinstall or enable the module before IPC recovery." },
+                    state.data,
+                )
+            repairStatus == "repair_running" ->
+                DaemonClientResult.DaemonError(
+                    DaemonClientErrorCodes.COMPATIBILITY,
+                    "Module repair is already running; waiting before retrying invalid-response recovery.",
+                    state.data,
+                )
+            status == "active" && socketPresent && !socketAccepting ->
+                null
+            else -> null
+        }
+    }
+
+    private fun invalidResponseFingerprint(method: String, raw: String): String =
+        method + ":" + raw.take(512).hashCode().toString()
+
+    private fun recordInvalidResponseFingerprint(method: String, raw: String): Int {
+        val fingerprint = invalidResponseFingerprint(method, raw)
+        return if (fingerprint == lastInvalidResponseFingerprint) {
+            val count = lastInvalidResponseFingerprintCount + 1
+            lastInvalidResponseFingerprintCount = count
+            count
+        } else {
+            lastInvalidResponseFingerprint = fingerprint
+            lastInvalidResponseFingerprintCount = 1
+            1
+        }
+    }
+
+    private fun clearInvalidResponseFingerprint(method: String) {
+        if (lastInvalidResponseFingerprint.startsWith("$method:")) {
+            lastInvalidResponseFingerprint = ""
+            lastInvalidResponseFingerprintCount = 0
+        }
+    }
+
+    private fun stableInvalidResponseError(
+        method: String,
+        raw: String,
+    ): DaemonClientResult.DaemonError =
+        DaemonClientResult.DaemonError(
+            DaemonClientErrorCodes.COMPATIBILITY,
+            "APK и модуль/daemon стабильно несовместимы для $method: daemon возвращает JSON, " +
+                "который APK не может разобрать даже после recovery. Нужна переустановка APK/модуля одной версии " +
+                "или reboot после staged update.",
+            JsonPrimitive(raw.take(1000)),
+        )
+
     private fun nodeProbeCallTimeoutMs(selectedNodeCount: Int, perProbeTimeoutMs: Int, mode: String): Long {
-        val workers = 6
+        val workers = 3
         val batches = if (selectedNodeCount > 0) {
             ((selectedNodeCount + workers - 1) / workers).coerceAtLeast(1)
         } else {
@@ -607,13 +853,90 @@ class DaemonClient @Inject constructor(
         return (perNodeWorstCase * batches + 5_000L).coerceIn(15_000L, 60_000L)
     }
 
+    private suspend fun callBackendStatusMutation(
+        method: String,
+        params: JsonObject = emptyJsonObject(),
+        timeoutMs: Long,
+        allowModuleRepair: Boolean = false,
+    ): DaemonClientResult<BackendStatusV2> {
+        val result = call(
+            method = method,
+            params = params,
+            timeoutMs = timeoutMs,
+            allowModuleRepair = allowModuleRepair,
+            allowBridge = false,
+        ) {
+            json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
+        }
+        return if (result is DaemonClientResult.ParseError) {
+            reconcileBackendStatusMutation(method, result)
+        } else {
+            result
+        }
+    }
+
+    private suspend fun reconcileBackendStatusMutation(
+        method: String,
+        parseError: DaemonClientResult.ParseError,
+    ): DaemonClientResult<BackendStatusV2> {
+        executor.disableBridge("invalid mutation response for $method")
+        val status = backendStatus(includeCompatibility = true)
+        return when (status) {
+            is DaemonClientResult.Ok -> {
+                val expectedKind = GeneratedDaemonContract.OPERATION_TYPES[method]
+                val activeOperation = status.data.activeOperation
+                if (expectedKind != null && activeOperation?.kind == expectedKind) {
+                    return status
+                }
+                val lastOperation = status.data.lastOperation
+                if (expectedKind != null && lastOperation?.kind == expectedKind) {
+                    return if (lastOperation.succeeded) {
+                        status
+                    } else {
+                        DaemonClientResult.DaemonError(
+                            DaemonClientErrorCodes.RUNTIME_BUSY,
+                            lastOperation.errorMessage.ifBlank {
+                                "Mutation response was invalid; backend.status reports the operation failed."
+                            },
+                            lastOperation.toJsonElement(),
+                        )
+                    }
+                }
+                DaemonClientResult.DaemonError(
+                    DaemonClientErrorCodes.COMPATIBILITY,
+                    "Mutation response for $method was invalid. backend.status did not confirm an active or completed " +
+                        "operation for ${expectedKind ?: "this method"}; the original mutation was not retried.",
+                    JsonPrimitive(parseError.raw.take(1000)),
+                )
+            }
+            is DaemonClientResult.DaemonError -> status.asFailure()
+            is DaemonClientResult.RootDenied -> status.asFailure()
+            is DaemonClientResult.Timeout -> status.asFailure()
+            is DaemonClientResult.DaemonNotFound -> status.asFailure()
+            is DaemonClientResult.DaemonUnavailable -> status.asFailure()
+            is DaemonClientResult.ParseError -> DaemonClientResult.DaemonError(
+                DaemonClientErrorCodes.COMPATIBILITY,
+                "Mutation response for $method was invalid, and backend.status was also invalid after recovery. " +
+                    "The original mutation was not retried.",
+                JsonPrimitive(status.raw.take(1000)),
+            )
+            is DaemonClientResult.Failure -> status.asFailure()
+        }
+    }
+
     private suspend fun callConfigMutation(
         method: String,
         params: JsonObject,
     ): DaemonClientResult<ConfigMutationInfo> {
-        val result = executor.execute(method, params, timeoutMs = 60_000L, allowModuleRepair = true)
+        val result = executor.execute(
+            method,
+            params,
+            timeoutMs = 60_000L,
+            allowModuleRepair = true,
+            allowBridge = false,
+        )
         invalidateCompatibilityCacheOnTransportChange(result)
-        return result.toDaemonClientResultEnvelope { element ->
+        val converted = result.toDaemonClientResultEnvelope { element ->
             val info = json.parseConfigMutationInfo(element)
             if (!info.ok) {
                 DaemonClientResult.DaemonError(
@@ -625,7 +948,171 @@ class DaemonClient @Inject constructor(
                 DaemonClientResult.Ok(info)
             }
         }
+        if (converted is DaemonClientResult.ParseError) {
+            return reconcileMutationInvalidResponse(method, converted)
+        }
+        return converted
     }
+
+    private suspend fun reconcileMutationInvalidResponse(
+        method: String,
+        parseError: DaemonClientResult.ParseError,
+    ): DaemonClientResult<ConfigMutationInfo> {
+        executor.disableBridge("invalid mutation response for $method")
+        val status = backendStatus(includeCompatibility = true)
+        return when (status) {
+            is DaemonClientResult.Ok -> reconcileMutationStatus(method, status.data, parseError)
+            is DaemonClientResult.DaemonError -> status.asFailure()
+            is DaemonClientResult.RootDenied -> status.asFailure()
+            is DaemonClientResult.Timeout -> status.asFailure()
+            is DaemonClientResult.DaemonNotFound -> status.asFailure()
+            is DaemonClientResult.DaemonUnavailable -> status.asFailure()
+            is DaemonClientResult.ParseError -> DaemonClientResult.DaemonError(
+                DaemonClientErrorCodes.COMPATIBILITY,
+                "Mutation response for $method was invalid, and backend.status was also invalid after recovery. " +
+                    "The original mutation was not retried.",
+                JsonPrimitive(status.raw.take(1000)),
+            )
+            is DaemonClientResult.Failure -> status.asFailure()
+        }
+    }
+
+    private fun reconcileMutationStatus(
+        method: String,
+        status: BackendStatusV2,
+        parseError: DaemonClientResult.ParseError,
+    ): DaemonClientResult<ConfigMutationInfo> {
+        val expectedKind = GeneratedDaemonContract.OPERATION_TYPES[method]
+        val activeOperation = status.activeOperation
+        if (expectedKind != null && activeOperation?.kind == expectedKind) {
+            return DaemonClientResult.Ok(
+                ConfigMutationInfo(
+                    ok = true,
+                    status = "accepted",
+                    runtimeApplied = false,
+                    message = "Mutation response was invalid; backend.status shows the operation is active.",
+                    operation = activeOperation.toJsonElement(),
+                    runtimeStatus = status,
+                )
+            )
+        }
+
+        val lastOperation = status.lastOperation
+        if (expectedKind != null && lastOperation?.kind == expectedKind) {
+            return if (lastOperation.succeeded) {
+                DaemonClientResult.Ok(
+                    ConfigMutationInfo(
+                        ok = true,
+                        status = "applied",
+                        runtimeApplied = true,
+                        message = "Mutation response was invalid; backend.status confirms the operation completed.",
+                        operation = lastOperation.toJsonElement(),
+                        runtimeStatus = status,
+                    )
+                )
+            } else {
+                DaemonClientResult.DaemonError(
+                    DaemonClientErrorCodes.CONFIG_ERROR,
+                    lastOperation.errorMessage.ifBlank {
+                        "Mutation response was invalid; backend.status reports the operation failed."
+                    },
+                    lastOperation.toJsonElement(),
+                )
+            }
+        }
+
+        return DaemonClientResult.DaemonError(
+            DaemonClientErrorCodes.CONFIG_ERROR,
+            "Mutation response for $method was invalid. backend.status did not confirm an active or completed " +
+                "operation for ${expectedKind ?: "this method"}; the original mutation was not retried.",
+            JsonPrimitive(parseError.raw.take(1000)),
+        )
+    }
+
+    private suspend fun reconcileMutatingParseError(
+        method: String,
+        parseError: DaemonClientResult.ParseError,
+    ): DaemonClientResult<Nothing> {
+        executor.disableBridge("invalid mutation response for $method")
+        val status = backendStatus(includeCompatibility = true)
+        return when (status) {
+            is DaemonClientResult.Ok -> {
+                val expectedKind = GeneratedDaemonContract.OPERATION_TYPES[method]
+                val activeOperation = status.data.activeOperation
+                if (expectedKind != null && activeOperation?.kind == expectedKind) {
+                    return DaemonClientResult.DaemonError(
+                        DaemonClientErrorCodes.RUNTIME_BUSY,
+                        "Mutation response for $method was invalid; backend.status shows operation $expectedKind is active. " +
+                            "The original mutation was not retried.",
+                        activeOperation.toJsonElement(),
+                    )
+                }
+                val lastOperation = status.data.lastOperation
+                if (expectedKind != null && lastOperation?.kind == expectedKind) {
+                    return if (lastOperation.succeeded) {
+                        DaemonClientResult.DaemonError(
+                            DaemonClientErrorCodes.COMPATIBILITY,
+                            "Mutation response for $method was invalid; backend.status says operation $expectedKind completed. " +
+                                "Refresh status before retrying; the original mutation was not retried.",
+                            lastOperation.toJsonElement(),
+                        )
+                    } else {
+                        DaemonClientResult.DaemonError(
+                            DaemonClientErrorCodes.RUNTIME_BUSY,
+                            lastOperation.errorMessage.ifBlank {
+                                "Mutation response was invalid; backend.status reports the operation failed."
+                            },
+                            lastOperation.toJsonElement(),
+                        )
+                    }
+                }
+                DaemonClientResult.DaemonError(
+                    DaemonClientErrorCodes.COMPATIBILITY,
+                    "Mutation response for $method was invalid. backend.status did not confirm an active or completed " +
+                        "operation for ${expectedKind ?: "this method"}; the original mutation was not retried.",
+                    JsonPrimitive(parseError.raw.take(1000)),
+                )
+            }
+            is DaemonClientResult.DaemonError -> status.asFailure()
+            is DaemonClientResult.RootDenied -> status.asFailure()
+            is DaemonClientResult.Timeout -> status.asFailure()
+            is DaemonClientResult.DaemonNotFound -> status.asFailure()
+            is DaemonClientResult.DaemonUnavailable -> status.asFailure()
+            is DaemonClientResult.ParseError -> DaemonClientResult.DaemonError(
+                DaemonClientErrorCodes.COMPATIBILITY,
+                "Mutation response for $method was invalid, and backend.status was also invalid after recovery. " +
+                    "The original mutation was not retried.",
+                JsonPrimitive(status.raw.take(1000)),
+            )
+            is DaemonClientResult.Failure -> status.asFailure()
+        }
+    }
+
+    private fun RuntimeOperationStatus.toJsonElement(): JsonElement =
+        buildJsonObject {
+            put("operationId", operationId)
+            put("kind", kind)
+            put("generation", generation)
+            put("phase", phase.name)
+            put("step", step)
+            put("stepStatus", stepStatus)
+            put("stepCode", stepCode)
+            put("stepDetail", stepDetail)
+            put("runtimeMs", runtimeMs)
+            put("watchdogAfterMs", watchdogAfterMs)
+            put("stuck", stuck)
+        }
+
+    private fun RuntimeOperationResult.toJsonElement(): JsonElement =
+        buildJsonObject {
+            put("operationId", operationId)
+            put("kind", kind)
+            put("generation", generation)
+            put("phase", phase.name)
+            put("succeeded", succeeded)
+            put("errorCode", errorCode)
+            put("errorMessage", errorMessage)
+        }
 
     private fun invalidateCompatibilityCacheOnTransportChange(result: DaemonctlResult) {
         if (result is DaemonctlResult.DaemonUnavailable ||
@@ -659,10 +1146,14 @@ class DaemonClient @Inject constructor(
                 importNodesBatchParams(batchId, totalBatches, batch),
                 timeoutMs = 60_000L,
                 allowModuleRepair = true,
+                allowBridge = false,
             ) {
                 Unit
             }
             if (result !is DaemonClientResult.Ok) {
+                if (result is DaemonClientResult.ParseError) {
+                    return reconcileMutatingParseError("profile.importNodesBatch", result)
+                }
                 return result.asFailure()
             }
         }

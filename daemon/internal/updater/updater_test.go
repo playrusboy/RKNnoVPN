@@ -147,6 +147,36 @@ func TestRunDownloadTransactionHonorsCancelledContext(t *testing.T) {
 	}
 }
 
+func TestRunInstallTransactionHonorsCancelledContextBeforeRuntimeStop(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	stopCalled := false
+
+	err := RunInstallTransaction(InstallTransaction{
+		Context: ctx,
+		DataDir: t.TempDir(),
+		Artifacts: InstallArtifacts{
+			UpdateDir:    t.TempDir(),
+			ModulePath:   "module.zip",
+			ApkPath:      "panel.apk",
+			ModuleExists: true,
+			ApkExists:    true,
+		},
+		Hooks: InstallHooks{
+			StopRuntimeForModuleInstall: func() error {
+				stopCalled = true
+				return nil
+			},
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+	if stopCalled {
+		t.Fatal("cancelled install should not stop runtime")
+	}
+}
+
 func TestDownloadFileRejectsOversizedContentLength(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "4")

@@ -72,12 +72,22 @@ func (h UpdateHandlers) UpdateDownloadContext(ctx context.Context, params *json.
 }
 
 func (h UpdateHandlers) UpdateInstall(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	return h.UpdateInstallContext(context.Background(), params)
+}
+
+func (h UpdateHandlers) UpdateInstallContext(ctx context.Context, params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	if rpcErr := rpcErrorFromContext(ctx); rpcErr != nil {
+		return nil, rpcErr
+	}
 	artifacts, err := updater.ResolveVerifiedInstallArtifacts(h.DataDir, params)
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInvalidParams,
 			Message: err.Error(),
 		}
+	}
+	if rpcErr := rpcErrorFromContext(ctx); rpcErr != nil {
+		return nil, rpcErr
 	}
 	if h.RunUpdateInstallOperation == nil {
 		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "update install operation runner is not configured"}
@@ -89,6 +99,7 @@ func (h UpdateHandlers) UpdateInstall(params *json.RawMessage) (interface{}, *ip
 	}
 	status, err := h.RunUpdateInstallOperation(func(generation int64) error {
 		return updater.RunInstallTransaction(updater.InstallTransaction{
+			Context:           ctx,
 			DataDir:           h.DataDir,
 			Generation:        generation,
 			Artifacts:         artifacts,

@@ -105,13 +105,24 @@ func TestDecodeSetActiveNodeParamsRequiresNodeID(t *testing.T) {
 }
 
 func TestDecodeSubscriptionURLParams(t *testing.T) {
+	raw := json.RawMessage(`{"url":"https://example.com/sub","reload":false}`)
+	request, err := DecodeSubscriptionURLParams(&raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.URL != "https://example.com/sub" || !request.HasReload || request.Reload {
+		t.Fatalf("unexpected subscription request: %#v", request)
+	}
+}
+
+func TestDecodeSubscriptionURLParamsAllowsDefaultReloadPolicy(t *testing.T) {
 	raw := json.RawMessage(`{"url":"https://example.com/sub"}`)
 	request, err := DecodeSubscriptionURLParams(&raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.URL != "https://example.com/sub" {
-		t.Fatalf("unexpected subscription request: %#v", request)
+	if request.HasReload {
+		t.Fatalf("unexpected explicit reload: %#v", request)
 	}
 }
 
@@ -119,6 +130,17 @@ func TestDecodeCommitSubscriptionPreviewParamsRequiresPreviewID(t *testing.T) {
 	raw := json.RawMessage(`{"previewId":"   "}`)
 	if _, err := DecodeCommitSubscriptionPreviewParams(&raw); err == nil || !strings.Contains(err.Error(), "previewId is required") {
 		t.Fatalf("expected previewId error, got %v", err)
+	}
+}
+
+func TestDecodeCommitSubscriptionPreviewParamsAcceptsReload(t *testing.T) {
+	raw := json.RawMessage(`{"previewId":"preview-1","reload":false}`)
+	request, err := DecodeCommitSubscriptionPreviewParams(&raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.PreviewID != "preview-1" || !request.HasReload || request.Reload {
+		t.Fatalf("unexpected commit preview request: %#v", request)
 	}
 }
 

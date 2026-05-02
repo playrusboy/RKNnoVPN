@@ -32,6 +32,9 @@ internal fun Json.parseConfigMutationInfo(element: JsonElement): ConfigMutationI
             obj["runtime_apply"]?.jsonPrimitive?.contentOrNull
                 ?: obj["runtimeApply"]?.jsonPrimitive?.contentOrNull
             ).orEmpty(),
+        runtimeApplyMode = obj["runtimeApplyMode"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+        runtimeApplyReason = obj["runtimeApplyReason"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+        requiresHotSwap = obj["requiresHotSwap"]?.jsonPrimitive?.booleanOrNull ?: false,
         code = obj["code"]?.jsonPrimitive?.contentOrNull.orEmpty(),
         message = obj["message"]?.jsonPrimitive?.contentOrNull.orEmpty(),
         operation = obj["operation"],

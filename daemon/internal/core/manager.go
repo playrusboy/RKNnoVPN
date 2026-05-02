@@ -4,6 +4,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -36,14 +37,15 @@ const (
 // RuntimeError carries a stable startup/runtime code across package
 // boundaries so the control plane can show the failing stage.
 type RuntimeError struct {
-	Layer           string
-	Code            string
-	Hard            bool
-	UserMessage     string
-	Debug           string
-	RollbackApplied bool
-	StageReport     RuntimeStageReport
-	Err             error
+	Layer            string
+	Code             string
+	Hard             bool
+	UserMessage      string
+	Debug            string
+	RollbackApplied  bool
+	RuntimePreserved bool
+	StageReport      RuntimeStageReport
+	Err              error
 }
 
 func (e *RuntimeError) Error() string {
@@ -91,6 +93,13 @@ func (e *RuntimeError) RuntimeRollbackApplied() bool {
 	return e.RollbackApplied
 }
 
+func (e *RuntimeError) RuntimeStillRunning() bool {
+	if e == nil {
+		return false
+	}
+	return e.RuntimePreserved
+}
+
 func (e *RuntimeError) RuntimeStageReport() interface{} {
 	if e == nil {
 		return nil
@@ -112,6 +121,17 @@ func runtimeErrorWithReport(layer string, code string, err error, rollbackApplie
 		StageReport:     report,
 		Err:             err,
 	}
+}
+
+func runtimePreservedErrorWithReport(layer string, code string, err error, report RuntimeStageReport) error {
+	if err == nil {
+		return nil
+	}
+	runtimeErr := runtimeErrorWithReport(layer, code, err, true, report)
+	if typed, ok := runtimeErr.(*RuntimeError); ok {
+		typed.RuntimePreserved = true
+	}
+	return runtimeErr
 }
 
 func runtimeUserMessage(code string) string {
@@ -163,13 +183,23 @@ func (r *RuntimeStageReport) AddStage(name string, status string, code string, d
 	if status == "" {
 		status = "ok"
 	}
+	now := time.Now()
+	startedAt := r.StartedAt
+	if len(r.Stages) > 0 {
+		startedAt = r.Stages[len(r.Stages)-1].At
+	}
+	durationMS := int64(0)
+	if !startedAt.IsZero() && !now.Before(startedAt) {
+		durationMS = now.Sub(startedAt).Milliseconds()
+	}
 	stage := RuntimeStage{
 		Name:            name,
 		Status:          status,
 		Code:            code,
 		Detail:          detail,
 		RollbackApplied: rollbackApplied,
-		At:              time.Now(),
+		At:              now,
+		DurationMS:      durationMS,
 	}
 	r.Stages = append(r.Stages, stage)
 	if status == "failed" {
@@ -178,6 +208,9 @@ func (r *RuntimeStageReport) AddStage(name string, status string, code string, d
 		r.LastCode = code
 		r.RollbackApplied = rollbackApplied
 		r.FinishedAt = stage.At
+		if !r.StartedAt.IsZero() && !r.FinishedAt.Before(r.StartedAt) {
+			r.DurationMS = r.FinishedAt.Sub(r.StartedAt).Milliseconds()
+		}
 	}
 }
 
@@ -187,6 +220,9 @@ func (r *RuntimeStageReport) FinishOK() {
 	}
 	r.Status = "ok"
 	r.FinishedAt = time.Now()
+	if !r.StartedAt.IsZero() && !r.FinishedAt.Before(r.StartedAt) {
+		r.DurationMS = r.FinishedAt.Sub(r.StartedAt).Milliseconds()
+	}
 }
 
 func (r RuntimeStageReport) Empty() bool {
@@ -233,6 +269,7 @@ type RuntimeStageReport struct {
 	RollbackApplied bool           `json:"rollbackApplied,omitempty"`
 	StartedAt       time.Time      `json:"startedAt,omitempty"`
 	FinishedAt      time.Time      `json:"finishedAt,omitempty"`
+	DurationMS      int64          `json:"durationMs,omitempty"`
 }
 
 type RuntimeStage struct {
@@ -242,6 +279,7 @@ type RuntimeStage struct {
 	Detail          string    `json:"detail,omitempty"`
 	RollbackApplied bool      `json:"rollbackApplied,omitempty"`
 	At              time.Time `json:"at,omitempty"`
+	DurationMS      int64     `json:"durationMs,omitempty"`
 }
 
 type listenerWaitSpec struct {
@@ -276,6 +314,8 @@ type CoreManager struct {
 	logger      *log.Logger
 
 	activeProfile     string
+	runningConfig     *config.Config
+	runningProfile    *config.NodeProfile
 	startedAt         time.Time
 	lastStartReport   RuntimeStageReport
 	lastRuntimeReport RuntimeStageReport
@@ -319,6 +359,49 @@ func (m *CoreManager) MarkSelectorActive(profile *config.NodeProfile) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.activeProfile = profile.Protocol + "://" + profile.Address
+	m.runningConfig = cloneConfigForRuntime(m.config)
+	m.runningProfile = cloneProfileForRuntime(profile)
+}
+
+func cloneConfigForRuntime(cfg *config.Config) *config.Config {
+	if cfg == nil {
+		return nil
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return cfg
+	}
+	var clone config.Config
+	if err := json.Unmarshal(data, &clone); err != nil {
+		return cfg
+	}
+	return &clone
+}
+
+func cloneProfileForRuntime(profile *config.NodeProfile) *config.NodeProfile {
+	if profile == nil {
+		return nil
+	}
+	copy := *profile
+	if profile.ServerPorts != nil {
+		copy.ServerPorts = append([]string(nil), profile.ServerPorts...)
+	}
+	if profile.WGLocalAddress != nil {
+		copy.WGLocalAddress = append([]string(nil), profile.WGLocalAddress...)
+	}
+	if profile.WGReserved != nil {
+		copy.WGReserved = append([]int(nil), profile.WGReserved...)
+	}
+	if profile.Extra != nil {
+		copy.Extra = make(map[string]string, len(profile.Extra))
+		for key, value := range profile.Extra {
+			copy.Extra[key] = value
+		}
+	}
+	if profile.RawOutbound != nil {
+		copy.RawOutbound = append([]byte(nil), profile.RawOutbound...)
+	}
+	return &copy
 }
 
 // State returns the current lifecycle state (safe for concurrent access).
@@ -349,6 +432,8 @@ func (m *CoreManager) ResetState() {
 	m.xrayExitCh = nil
 	m.xrayPID = 0
 	m.activeProfile = ""
+	m.runningConfig = nil
+	m.runningProfile = nil
 	m.startedAt = time.Time{}
 	m.state = StateStopped
 	paths := modulecontract.NewPaths(m.dataDir)
@@ -495,6 +580,8 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 		m.exitCh = nil
 		m.pid = 0
 		m.activeProfile = ""
+		m.runningConfig = nil
+		m.runningProfile = nil
 		m.startedAt = time.Time{}
 		m.state = StateStopped
 		_ = os.Remove(pidPath)
@@ -548,6 +635,8 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 
 	// 7. Mark running.
 	m.activeProfile = profile.Protocol + "://" + profile.Address
+	m.runningConfig = cloneConfigForRuntime(m.config)
+	m.runningProfile = cloneProfileForRuntime(profile)
 	m.startedAt = time.Now()
 	m.state = StateRunning
 	m.markActive()
@@ -627,6 +716,8 @@ func (m *CoreManager) stopWithMode(forceCleanup bool) error {
 	m.xrayExitCh = nil
 	m.xrayPID = 0
 	m.activeProfile = ""
+	m.runningConfig = nil
+	m.runningProfile = nil
 	m.startedAt = time.Time{}
 	m.state = StateStopped
 	m.logger.Println("core stopped")
@@ -665,6 +756,8 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	}
 
 	m.logger.Printf("hot-swap to profile %q", profile.Protocol)
+	rollbackConfig := cloneConfigForRuntime(m.runningConfig)
+	rollbackProfile := cloneProfileForRuntime(m.runningProfile)
 
 	// 1. Render and validate the new config beside the active one. The active
 	// config stays intact until the new core has proved its listeners.
@@ -695,7 +788,16 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	recordStage("config-check", "ok", "", newConfigPath, false)
 
 	pidPath := paths.SingBoxPIDFile()
-	cleanupAndDegrade := func() {
+	cleanupAndDegrade := func(cause error) (bool, error) {
+		if rollbackConfig != nil && rollbackProfile != nil {
+			if err := m.restorePreviousRuntimeAfterHotSwapFailure(rollbackConfig, rollbackProfile, configPath, paths, recordStage); err == nil {
+				return true, nil
+			} else if cause != nil {
+				cause = fmt.Errorf("%w; rollback failed: %v", cause, err)
+			} else {
+				cause = fmt.Errorf("rollback failed: %w", err)
+			}
+		}
 		_ = m.netstack().Cleanup().Err()
 		if m.process != nil {
 			_ = m.process.Signal(syscall.SIGKILL)
@@ -708,16 +810,19 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 		m.exitCh = nil
 		m.pid = 0
 		m.activeProfile = ""
+		m.runningConfig = nil
+		m.runningProfile = nil
 		m.startedAt = time.Time{}
 		m.state = StateDegraded
 		_ = os.Remove(pidPath)
 		_ = m.stopXraySidecar()
 		_ = os.Remove(paths.ActiveFile())
+		return false, cause
 	}
 
 	// 2. Stop sing-box (SIGTERM only, no iptables teardown).
 	if m.process != nil {
-		if err := m.killProcess(); err != nil {
+		if err := m.killProcessWithTimeout(1200 * time.Millisecond); err != nil {
 			return failStage("stop-old-core", "hot-swap kill old", "CORE_STOP_FAILED", err, false)
 		}
 		m.process = nil
@@ -731,13 +836,19 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 
 	if needsXray {
 		if err := m.stopXraySidecar(); err != nil {
-			cleanupAndDegrade()
-			return failStage("stop-old-xray-sidecar", "hot-swap stop old xray sidecar", "XRAY_SIDECAR_STOP_FAILED", err, true)
+			preserved, finalErr := cleanupAndDegrade(err)
+			if preserved {
+				return runtimePreservedErrorWithReport("hot-swap stop old xray sidecar", "XRAY_SIDECAR_STOP_FAILED", err, stageReport)
+			}
+			return failStage("stop-old-xray-sidecar", "hot-swap stop old xray sidecar", "XRAY_SIDECAR_STOP_FAILED", finalErr, true)
 		}
 		process, exitCh, pid, logPath, err := m.spawnXraySidecar(xrayConfigPath)
 		if err != nil {
-			cleanupAndDegrade()
-			return failStage("spawn-xray-sidecar", "hot-swap spawn xray sidecar", "XRAY_SIDECAR_SPAWN_FAILED", err, true)
+			preserved, finalErr := cleanupAndDegrade(err)
+			if preserved {
+				return runtimePreservedErrorWithReport("hot-swap spawn xray sidecar", "XRAY_SIDECAR_SPAWN_FAILED", err, stageReport)
+			}
+			return failStage("spawn-xray-sidecar", "hot-swap spawn xray sidecar", "XRAY_SIDECAR_SPAWN_FAILED", finalErr, true)
 		}
 		m.xrayProcess = process
 		m.xrayExitCh = exitCh
@@ -745,13 +856,19 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 		_ = writeSingBoxPIDFile(paths.XrayPIDFile(), pid)
 		recordStage("spawn-xray-sidecar", "ok", "", fmt.Sprintf("pid=%d", pid), false)
 		if err := m.waitForPortOrExit(config.XraySidecarSocksPort, 10*time.Second, exitCh, logPath); err != nil {
-			cleanupAndDegrade()
-			return failStage("wait-xray-sidecar", "hot-swap wait xray sidecar socks port", "XRAY_SIDECAR_PORT_DOWN", err, true)
+			preserved, finalErr := cleanupAndDegrade(err)
+			if preserved {
+				return runtimePreservedErrorWithReport("hot-swap wait xray sidecar socks port", "XRAY_SIDECAR_PORT_DOWN", err, stageReport)
+			}
+			return failStage("wait-xray-sidecar", "hot-swap wait xray sidecar socks port", "XRAY_SIDECAR_PORT_DOWN", finalErr, true)
 		}
 		recordStage("wait-xray-sidecar", "ok", "", fmt.Sprintf("port=%d", config.XraySidecarSocksPort), false)
 	} else if err := m.stopXraySidecar(); err != nil {
-		cleanupAndDegrade()
-		return failStage("stop-old-xray-sidecar", "hot-swap stop old xray sidecar", "XRAY_SIDECAR_STOP_FAILED", err, true)
+		preserved, finalErr := cleanupAndDegrade(err)
+		if preserved {
+			return runtimePreservedErrorWithReport("hot-swap stop old xray sidecar", "XRAY_SIDECAR_STOP_FAILED", err, stageReport)
+		}
+		return failStage("stop-old-xray-sidecar", "hot-swap stop old xray sidecar", "XRAY_SIDECAR_STOP_FAILED", finalErr, true)
 	}
 
 	// 3. Spawn new sing-box with the fresh config.
@@ -765,8 +882,11 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 			layer = "hot-swap open sing-box log"
 			code = "CORE_LOG_OPEN_FAILED"
 		}
-		cleanupAndDegrade()
-		return failStage(stage, layer, code, err, true)
+		preserved, finalErr := cleanupAndDegrade(err)
+		if preserved {
+			return runtimePreservedErrorWithReport(layer, code, err, stageReport)
+		}
+		return failStage(stage, layer, code, finalErr, true)
 	}
 	m.process = process
 	m.pid = pid
@@ -776,18 +896,27 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 
 	// 4. Wait for runtime listeners.
 	if spec, err := m.waitRuntimeListeners(exitCh, logPath, recordStage); err != nil {
-		cleanupAndDegrade()
-		return failStage(spec.Stage, "hot-swap "+spec.Layer, spec.Code, fmt.Errorf("%s port %d not ready: %w", spec.Label, spec.Port, err), true)
+		waitErr := fmt.Errorf("%s port %d not ready: %w", spec.Label, spec.Port, err)
+		preserved, finalErr := cleanupAndDegrade(waitErr)
+		if preserved {
+			return runtimePreservedErrorWithReport("hot-swap "+spec.Layer, spec.Code, waitErr, stageReport)
+		}
+		return failStage(spec.Stage, "hot-swap "+spec.Layer, spec.Code, finalErr, true)
 	}
 
 	if err := os.Rename(newConfigPath, configPath); err != nil {
-		cleanupAndDegrade()
-		return failStage("commit-config", "hot-swap commit config", "CONFIG_RENDER_FAILED", err, true)
+		preserved, finalErr := cleanupAndDegrade(err)
+		if preserved {
+			return runtimePreservedErrorWithReport("hot-swap commit config", "CONFIG_RENDER_FAILED", err, stageReport)
+		}
+		return failStage("commit-config", "hot-swap commit config", "CONFIG_RENDER_FAILED", finalErr, true)
 	}
 	recordStage("commit-config", "ok", "", configPath, false)
 
 	// 5. iptables left untouched — they still point at the same tproxy port.
 	m.activeProfile = profile.Protocol + "://" + profile.Address
+	m.runningConfig = cloneConfigForRuntime(m.config)
+	m.runningProfile = cloneProfileForRuntime(profile)
 	m.startedAt = time.Now()
 	m.state = StateRunning
 	m.markActive()
@@ -796,6 +925,72 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	recordStage("commit-state", "ok", "", m.activeProfile, false)
 	stageReport.FinishOK()
 	m.lastRuntimeReport = stageReport
+	return nil
+}
+
+func (m *CoreManager) restorePreviousRuntimeAfterHotSwapFailure(
+	rollbackConfig *config.Config,
+	rollbackProfile *config.NodeProfile,
+	configPath string,
+	paths modulecontract.Paths,
+	recordStage func(string, string, string, string, bool),
+) error {
+	if m.process != nil {
+		_ = m.process.Signal(syscall.SIGKILL)
+		select {
+		case <-m.exitCh:
+		case <-time.After(2 * time.Second):
+		}
+	}
+	_ = m.stopXraySidecar()
+	m.process = nil
+	m.exitCh = nil
+	m.pid = 0
+
+	m.config = rollbackConfig
+	xrayConfigPath := filepath.Join(paths.RenderedConfigDir(), "xray-xhttp.json")
+	needsXray, err := m.prepareXraySidecar(rollbackProfile, xrayConfigPath)
+	if err != nil {
+		return fmt.Errorf("render rollback xray config: %w", err)
+	}
+	if needsXray {
+		process, exitCh, pid, logPath, err := m.spawnXraySidecar(xrayConfigPath)
+		if err != nil {
+			return fmt.Errorf("spawn rollback xray sidecar: %w", err)
+		}
+		m.xrayProcess = process
+		m.xrayExitCh = exitCh
+		m.xrayPID = pid
+		_ = writeSingBoxPIDFile(paths.XrayPIDFile(), pid)
+		if err := m.waitForPortOrExit(config.XraySidecarSocksPort, 10*time.Second, exitCh, logPath); err != nil {
+			_ = m.stopXraySidecar()
+			return fmt.Errorf("wait rollback xray sidecar: %w", err)
+		}
+	} else {
+		_ = os.Remove(paths.XrayPIDFile())
+	}
+
+	process, exitCh, pid, logPath, err := m.spawnSingBox(configPath)
+	if err != nil {
+		_ = m.stopXraySidecar()
+		return fmt.Errorf("spawn rollback sing-box: %w", err)
+	}
+	m.process = process
+	m.pid = pid
+	m.exitCh = exitCh
+	_ = writeSingBoxPIDFile(paths.SingBoxPIDFile(), pid)
+	if spec, err := m.waitRuntimeListeners(exitCh, logPath, recordStage); err != nil {
+		_ = m.killProcessWithTimeout(1200 * time.Millisecond)
+		_ = m.stopXraySidecar()
+		return fmt.Errorf("wait rollback %s port %d: %w", spec.Label, spec.Port, err)
+	}
+	m.activeProfile = rollbackProfile.Protocol + "://" + rollbackProfile.Address
+	m.runningConfig = cloneConfigForRuntime(rollbackConfig)
+	m.runningProfile = cloneProfileForRuntime(rollbackProfile)
+	m.startedAt = time.Now()
+	m.state = StateRunning
+	m.markActive()
+	recordStage("rollback-old-runtime", "ok", "", m.activeProfile, true)
 	return nil
 }
 
@@ -1062,8 +1257,15 @@ func (m *CoreManager) LastRuntimeReport() RuntimeStageReport {
 
 // killProcess sends SIGTERM, waits up to 5 s, then SIGKILL.
 func (m *CoreManager) killProcess() error {
+	return m.killProcessWithTimeout(5 * time.Second)
+}
+
+func (m *CoreManager) killProcessWithTimeout(grace time.Duration) error {
 	if m.process == nil {
 		return nil
+	}
+	if grace <= 0 {
+		grace = 5 * time.Second
 	}
 
 	proc := m.process
@@ -1098,7 +1300,7 @@ func (m *CoreManager) killProcess() error {
 			m.logger.Printf("pid %d exited after SIGTERM", pid)
 		}
 		return nil
-	case <-time.After(5 * time.Second):
+	case <-time.After(grace):
 	}
 
 	// Still alive — escalate.

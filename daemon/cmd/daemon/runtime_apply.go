@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"strings"
 
@@ -13,14 +14,22 @@ import (
 )
 
 func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, operation runtimev2.OperationKind) error {
+	_, err := d.applyConfigWithOperationResult(newCfg, reload, operation)
+	return err
+}
+
+func (d *daemon) applyConfigWithOperationResult(newCfg *config.Config, reload bool, operation runtimev2.OperationKind) (applytx.ConfigApplyResult, error) {
 	currentCfg := d.currentConfig()
 	reloadPlan := rootruntime.PlanReload(
 		rootruntime.BuildScriptEnv(currentCfg, d.dataDir),
 		rootruntime.BuildScriptEnv(newCfg, d.dataDir),
 	)
-	selectorSwitchTag := ""
+	selectorSwitch := selectorSwitchDecision{}
 	if operation == runtimev2.OperationProfileApply {
-		selectorSwitchTag = activeNodeSelectorSwitchTarget(currentCfg, newCfg, reloadPlan)
+		selectorSwitch = activeNodeSelectorSwitchTarget(currentCfg, newCfg, reloadPlan)
+		if reload && d.isRuntimeRunningOrDegraded() && selectorSwitch.Target == "" && selectorSwitch.Reason != "" && selectorSwitch.Reason != "active-node-unchanged" {
+			log.Printf("runtime selector-switch rejected: reason=%s", selectorSwitch.Reason)
+		}
 	}
 	if reload && d.isRuntimeRunningOrDegraded() && len(reloadPlan.ChangedKeys) > 0 {
 		mode := "hot-swap"
@@ -33,7 +42,21 @@ func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, op
 		log.Printf("runtime reload plan: mode=%s changed_env=%s", mode, strings.Join(reloadPlan.ChangedKeys, ","))
 	}
 
-	return applytx.ApplyRuntimeConfig(
+	if reload && d.isRuntimeRunningOrDegraded() && selectorSwitch.Target != "" {
+		if result, ok, err := d.applyConfigWithSynchronousSelectorSwitch(newCfg, selectorSwitch.Target); ok || err != nil {
+			return result, err
+		}
+	}
+	applyResult := applytx.ConfigApplyResult{}
+	if reload && d.isRuntimeRunningOrDegraded() {
+		applyResult.RuntimeApplyMode = "hot-swap"
+		if selectorSwitch.Target == "" && selectorSwitch.Reason != "" && selectorSwitch.Reason != "active-node-unchanged" {
+			applyResult.RequiresHotSwap = true
+			applyResult.RuntimeApplyReason = selectorSwitch.Reason
+		}
+	}
+
+	if err := applytx.ApplyRuntimeConfig(
 		applytx.RuntimeConfigApplyInput{
 			NewConfig:            newCfg,
 			ConfigPath:           d.cfgPath,
@@ -52,15 +75,15 @@ func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, op
 				return err
 			},
 			ReloadRuntime: func(cfg *config.Config, generation int64, fullRestart bool, netstackReapplyAfter bool) error {
-				if selectorSwitchTag != "" && !fullRestart && !netstackReapplyAfter {
-					if err := switchSingboxSelector(cfg, singboxProxySelectorTag, selectorSwitchTag); err == nil {
-						log.Printf("runtime reload plan: mode=selector-switch selector=%s outbound=%s", singboxProxySelectorTag, selectorSwitchTag)
+				if selectorSwitch.Target != "" && !fullRestart && !netstackReapplyAfter {
+					if err := switchSingboxSelector(cfg, singboxProxySelectorTag, selectorSwitch.Target); err == nil {
+						log.Printf("runtime reload plan: mode=selector-switch selector=%s outbound=%s", singboxProxySelectorTag, selectorSwitch.Target)
 						d.runtimeV2.SetActiveOperationStep(
 							generation,
 							"selector-switch",
 							"ok",
 							"",
-							"selector="+singboxProxySelectorTag+" outbound="+selectorSwitchTag,
+							"selector="+singboxProxySelectorTag+" outbound="+selectorSwitch.Target,
 						)
 						d.coreMgr.MarkSelectorActive(cfg.ResolveProfile())
 						return nil
@@ -85,7 +108,34 @@ func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, op
 				)
 			},
 		},
-	)
+	); err != nil {
+		return applytx.ConfigApplyResult{}, err
+	}
+	return applyResult, nil
+}
+
+func (d *daemon) applyConfigWithSynchronousSelectorSwitch(newCfg *config.Config, selectorSwitchTag string) (applytx.ConfigApplyResult, bool, error) {
+	if err := d.failIfRuntimeOperationActive(); err != nil {
+		return applytx.ConfigApplyResult{}, false, err
+	}
+	if err := newCfg.Save(d.cfgPath); err != nil {
+		return applytx.ConfigApplyResult{}, true, err
+	}
+	d.commitAppliedRuntimeConfig(newCfg)
+	if err := d.syncRuntimeV2DesiredState(); err != nil {
+		return applytx.ConfigApplyResult{}, true, fmt.Errorf("config saved: sync runtime desired state: %w", err)
+	}
+	if err := switchSingboxSelector(newCfg, singboxProxySelectorTag, selectorSwitchTag); err != nil {
+		log.Printf("runtime selector switch failed; falling back to hot-swap: %v", err)
+		return applytx.ConfigApplyResult{}, false, nil
+	}
+	log.Printf("runtime reload plan: mode=selector-switch selector=%s outbound=%s", singboxProxySelectorTag, selectorSwitchTag)
+	d.coreMgr.MarkSelectorActive(newCfg.ResolveProfile())
+	return applytx.ConfigApplyResult{
+		RuntimeApply:     "applied",
+		RuntimeApplied:   true,
+		RuntimeApplyMode: "selector-switch",
+	}, true, nil
 }
 
 func (d *daemon) commitAppliedRuntimeConfig(newCfg *config.Config) {

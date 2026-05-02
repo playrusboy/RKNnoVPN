@@ -84,19 +84,10 @@ class DaemonctlExecutor @Inject constructor() {
         // Keep the single bridge lane for short, frequent calls; long RPCs use
         // one-shot daemonctl so they cannot block status/compat polling.
         private val BRIDGE_METHODS = setOf(
-            "app.resolveUid",
             "backend.status",
             "compat.check",
-            "config-list",
             "ipc.contract",
             "profile.get",
-            "profile.dns.patch",
-            "profile.inbound.patch",
-            "profile.node.remove",
-            "profile.node.upsert",
-            "profile.patch",
-            "profile.routing.patch",
-            "profile.setActiveNode",
             "version",
         )
 
@@ -213,7 +204,7 @@ class DaemonctlExecutor @Inject constructor() {
         method: String,
         params: JsonObject,
     ): DaemonctlResult? {
-        if (!canUseBridge(method, params)) return null
+        if (!canUseBridge(method)) return null
         return bridgeMutex.withLock {
             val now = System.currentTimeMillis()
             if (now < bridgeDisabledUntilMs) return@withLock null
@@ -260,12 +251,8 @@ class DaemonctlExecutor @Inject constructor() {
         }
     }
 
-    private fun canUseBridge(method: String, params: JsonObject): Boolean {
-        if (method in BRIDGE_METHODS) return true
-        if (method == "profile.patch") {
-            return params.keys.all { it == "activeNodeId" || it == "reload" }
-        }
-        return false
+    private fun canUseBridge(method: String): Boolean {
+        return method in BRIDGE_METHODS
     }
 
     fun disableBridge(reason: String) {
@@ -622,6 +609,51 @@ class DaemonctlExecutor @Inject constructor() {
         }
     }
 
+    private data class ExtractedJsonFrame(
+        val json: String,
+        val discardedOutput: String = "",
+    )
+
+    private fun extractJsonFrame(stdout: String): ExtractedJsonFrame? {
+        val text = stdout.trim()
+        if (text.isEmpty()) return null
+
+        if (text.startsWith("{") && text.endsWith("}")) {
+            val wholeJsonObject = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
+            if (wholeJsonObject != null) {
+                return ExtractedJsonFrame(text)
+            }
+        }
+
+        val lines = stdout
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toList()
+
+        val candidate = lines.asReversed().firstOrNull { line ->
+            line.startsWith("{") &&
+                line.endsWith("}") &&
+                (
+                    line.contains("\"jsonrpc\"") ||
+                        line.contains("\"ok\"") ||
+                        line.contains("\"result\"")
+                    ) &&
+                runCatching { json.parseToJsonElement(line).jsonObject }.isSuccess
+        } ?: lines.asReversed().firstOrNull { line ->
+            line.startsWith("{") &&
+                line.endsWith("}") &&
+                runCatching { json.parseToJsonElement(line).jsonObject }.isSuccess
+        }
+
+        return candidate?.let {
+            ExtractedJsonFrame(
+                json = it,
+                discardedOutput = lines.filterNot { line -> line == it }.joinToString("\n"),
+            )
+        }
+    }
+
     private fun writeParamsSafely(process: Process, paramsJson: String?) {
         process.outputStream.use { output ->
             if (!paramsJson.isNullOrEmpty()) {
@@ -668,13 +700,21 @@ class DaemonctlExecutor @Inject constructor() {
         }
 
         var stdoutParseError: Exception? = null
-        if (stdout.isNotBlank()) {
+        val extracted = extractJsonFrame(stdout)
+        if (extracted != null) {
             try {
-                val jsonElement = json.parseToJsonElement(stdout)
+                if (extracted.discardedOutput.isNotBlank()) {
+                    Log.w(
+                        TAG,
+                        "daemonctl returned extra stdout before/after JSON for $method: " +
+                            extracted.discardedOutput.take(300)
+                    )
+                }
+                val jsonElement = json.parseToJsonElement(extracted.json)
                 return parseJsonResponse(jsonElement, exitCode, stderr, method, transport, expectedJsonRpcId)
             } catch (e: Exception) {
                 stdoutParseError = e
-                Log.w(TAG, "Failed to parse stdout as JSON: ${stdout.take(100)}", e)
+                Log.w(TAG, "Failed to parse extracted stdout JSON: ${extracted.json.take(300)}", e)
             }
         }
 

@@ -281,8 +281,8 @@
     <string name="update_check_button">Проверить обновления</string>
     <string name="update_download_button">Скачать</string>
     <string name="update_install_button">Установить</string>
-    <string name="update_module_too_old">Модуль слишком старый для обновлений из приложения</string>
-    <string name="update_module_too_old_hint">Ваш модуль не поддерживает обновления из приложения. Скачайте последнюю версию модуля из GitHub Releases и установите вручную.</string>
+    <string name="update_module_too_old">Нужно ручное обновление</string>
+    <string name="update_module_too_old_hint">Проверка обновлений из приложения требует запущенный демон модуля. Откройте GitHub Releases и установите последнюю версию вручную.</string>
     <string name="update_open_github">Открыть GitHub Releases</string>
 
     <!-- Общие -->
@@ -318,6 +318,7 @@
     <string name="error_module_disabled">Модуль RKNnoVPN отключён в root-менеджере. Включите модуль и перезагрузите устройство.</string>
     <string name="error_module_install_incomplete">Установка модуля выглядит неполной: service.sh не найден. Переустановите модуль и перезагрузите устройство.</string>
     <string name="error_invalid_daemon_response">Некорректный ответ демона</string>
+    <string name="error_daemon_schema_incompatible">APK и модуль/daemon несовместимы. Переустановите APK и модуль одной версии или перезагрузите устройство после staged update.</string>
     <string name="error_unexpected_with_reason">Неожиданная ошибка: %1$s</string>
     <string name="error_operation_failed_with_reason">Не удалось выполнить действие «%1$s»: %2$s</string>
     <string name="error_no_profile_loaded">Профиль не загружен</string>
@@ -328,6 +329,7 @@
     <string name="operation_active_step_with_code">Текущий шаг: %1$s (%2$s)</string>
     <string name="operation_saved_runtime_stopped">Настройки сохранены. Runtime остановлен, поэтому они применятся при следующем запуске.</string>
     <string name="operation_saved_runtime_not_applied">Настройки сохранены, но runtime их не применил.</string>
+    <string name="operation_requires_hotswap">Быстрое переключение недоступно: %1$s; применяем через HotSwap.</string>
     <string name="operation_cleanup_succeeded">Runtime cleanup выполнен.</string>
     <string name="operation_cleanup_incomplete">Runtime cleanup требует внимания.</string>
     <string name="operation_failure_code">код: %1$s</string>

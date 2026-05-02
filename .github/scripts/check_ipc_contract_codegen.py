@@ -436,7 +436,7 @@ def check_profile_operation_surface() -> list[str]:
             "profiledoc.FromConfig(current)",
             "ProfileValidationRPCError(",
             "ProfileRPCErrorSaved(",
-            "ProfileSuccess(",
+            "ProfileSuccessWithRuntimeApply(",
         ],
         CONTROL_MUTATION_ENVELOPE: [
             "func ProfileValidationRPCError(",
@@ -906,8 +906,9 @@ def _direct_executor_usage_errors() -> list[str]:
 def _literal_method_calls(source: str) -> list[str]:
     import re
 
-    methods = re.findall(r'\bcall(?:ConfigMutation)?\(\s*"([^"]+)"', source)
+    methods = re.findall(r'\bcall(?:ConfigMutation|BackendStatusMutation)?\(\s*"([^"]+)"', source)
     methods.extend(re.findall(r'\bcall\(\s*method\s*=\s*"([^"]+)"', source))
+    methods.extend(re.findall(r'\bcallBackendStatusMutation\(\s*method\s*=\s*"([^"]+)"', source))
     return methods
 
 

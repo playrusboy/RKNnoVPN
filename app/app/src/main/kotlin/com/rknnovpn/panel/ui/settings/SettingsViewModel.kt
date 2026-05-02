@@ -7,6 +7,7 @@ import com.rknnovpn.panel.BuildConfig
 import com.rknnovpn.panel.i18n.UserMessageFormatter
 import com.rknnovpn.panel.ipc.DaemonClient
 import com.rknnovpn.panel.ipc.DaemonClientResult
+import com.rknnovpn.panel.ipc.DaemonctlResult
 import com.rknnovpn.panel.model.CachedUpdateCheckState
 import com.rknnovpn.panel.model.ConnectionState
 import com.rknnovpn.panel.model.DaemonStatus
@@ -27,6 +28,10 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
 
 private const val TAG = "SettingsViewModel"
@@ -678,6 +683,17 @@ class SettingsViewModel @Inject constructor(
     fun checkForUpdates() {
         _updateState.update { it.copy(status = UpdateStatus.CHECKING, errorMessage = "") }
         viewModelScope.launch {
+            val moduleState = daemonClient.moduleState()
+            if (!moduleState.allowsDaemonBackedUpdateCheck()) {
+                _updateState.update {
+                    it.copy(
+                        status = UpdateStatus.MODULE_TOO_OLD,
+                        errorMessage = formatModuleStateUpdateError(moduleState),
+                    )
+                }
+                return@launch
+            }
+
             when (val result = daemonClient.updateCheck()) {
                 is DaemonClientResult.Ok -> {
                     val info = result.data
@@ -695,10 +711,17 @@ class SettingsViewModel @Inject constructor(
                 }
                 else -> {
                     _updateState.update {
-                        it.copy(
-                            status = UpdateStatus.ERROR,
-                            errorMessage = formatUpdateError(result),
-                        )
+                        if (result.requiresManualUpdateFlow()) {
+                            it.copy(
+                                status = UpdateStatus.MODULE_TOO_OLD,
+                                errorMessage = formatUpdateError(result),
+                            )
+                        } else {
+                            it.copy(
+                                status = UpdateStatus.ERROR,
+                                errorMessage = formatUpdateError(result),
+                            )
+                        }
                     }
                 }
             }
@@ -1081,6 +1104,61 @@ class SettingsViewModel @Inject constructor(
 
     private fun <T> formatUpdateError(result: DaemonClientResult<T>): String =
         messages.formatDaemonFailure(result)
+
+    private fun DaemonctlResult.allowsDaemonBackedUpdateCheck(): Boolean {
+        val state = (this as? DaemonctlResult.Success)
+            ?.let { runCatching { it.data.jsonObject }.getOrNull() }
+            ?: return false
+        if (state["status"]?.jsonPrimitive?.contentOrNull != "active") {
+            return false
+        }
+        return state["socketAccepting"]?.jsonPrimitive?.booleanOrNull == true
+    }
+
+    private fun formatModuleStateUpdateError(result: DaemonctlResult): String =
+        when (result) {
+            is DaemonctlResult.RootDenied ->
+                messages.get(com.rknnovpn.panel.R.string.error_root_access_denied)
+            is DaemonctlResult.Timeout ->
+                messages.get(
+                    com.rknnovpn.panel.R.string.error_request_timed_out_with_method,
+                    result.method,
+                )
+            is DaemonctlResult.DaemonNotFound ->
+                messages.get(com.rknnovpn.panel.R.string.error_daemon_not_installed)
+            is DaemonctlResult.DaemonUnavailable ->
+                messages.get(com.rknnovpn.panel.R.string.error_daemon_not_running)
+            is DaemonctlResult.UnexpectedError ->
+                messages.formatControlPlaneFailure(
+                    result.throwable.message,
+                    com.rknnovpn.panel.R.string.error_unexpected_with_reason,
+                )
+            is DaemonctlResult.Error ->
+                messages.get(
+                    com.rknnovpn.panel.R.string.error_daemon_with_code,
+                    result.code,
+                    result.message,
+                )
+            is DaemonctlResult.Success -> {
+                val state = runCatching { result.data.jsonObject }.getOrNull()
+                if (state == null) {
+                    messages.get(com.rknnovpn.panel.R.string.error_daemon_schema_incompatible)
+                } else {
+                    val status = state["status"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                    val message = state["message"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                    when {
+                        status == "active" -> messages.get(com.rknnovpn.panel.R.string.error_daemon_not_running)
+                        message.isNotBlank() -> message
+                        status.isNotBlank() -> status
+                        else -> messages.get(com.rknnovpn.panel.R.string.error_daemon_not_running)
+                    }
+                }
+            }
+        }
+
+    private fun DaemonClientResult<*>.requiresManualUpdateFlow(): Boolean =
+        this is DaemonClientResult.DaemonNotFound ||
+            this is DaemonClientResult.DaemonUnavailable
 
     private fun formatPersistedUpdateInstallState(state: UpdateInstallState): String {
         val step = state.step.ifBlank { state.code }.ifBlank { state.status }

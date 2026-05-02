@@ -169,32 +169,37 @@ func (s *Server) handleConn(conn net.Conn) {
 
 	reader := bufio.NewReader(conn)
 
-	if err := conn.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
-		log.Printf("ipc: set read deadline: %v", err)
-		return
-	}
-	line, err := readFrame(reader)
-	if err != nil && err != io.EOF {
-		log.Printf("ipc: read error: %v", err)
-		return
-	}
-	if len(line) == 0 {
-		return
-	}
+	for {
+		if err := conn.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
+			log.Printf("ipc: set read deadline: %v", err)
+			return
+		}
+		line, err := readFrame(reader)
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("ipc: read error: %v", err)
+			}
+			return
+		}
+		if len(line) == 0 {
+			continue
+		}
 
-	resp := s.processRequest(context.Background(), line)
-	respBytes, err := json.Marshal(resp)
-	if err != nil {
-		log.Printf("ipc: marshal response error: %v", err)
-		return
-	}
-	respBytes = append(respBytes, '\n')
-	if err := conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
-		log.Printf("ipc: set write deadline: %v", err)
-		return
-	}
-	if _, err := conn.Write(respBytes); err != nil {
-		log.Printf("ipc: write error: %v", err)
+		resp := s.processRequest(context.Background(), line)
+		respBytes, err := json.Marshal(resp)
+		if err != nil {
+			log.Printf("ipc: marshal response error: %v", err)
+			return
+		}
+		respBytes = append(respBytes, '\n')
+		if err := conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+			log.Printf("ipc: set write deadline: %v", err)
+			return
+		}
+		if _, err := conn.Write(respBytes); err != nil {
+			log.Printf("ipc: write error: %v", err)
+			return
+		}
 	}
 }
 

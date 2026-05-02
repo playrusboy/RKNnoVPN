@@ -1,6 +1,7 @@
 package modulehelper
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -52,6 +53,44 @@ func TestCurrentStateReportsMissingAndInvalidProfile(t *testing.T) {
 			t.Fatalf("status = %q, want %q", state.Status, StatusInvalidProfile)
 		}
 	})
+}
+
+func TestCurrentStateReportsSocketAccepting(t *testing.T) {
+	moduleDir := t.TempDir()
+	profilePath := filepath.Join(t.TempDir(), "profile.json")
+	t.Setenv("RKNNOVPN_PROFILE_PATH", profilePath)
+	prepareModuleFixture(t, moduleDir)
+	if err := os.WriteFile(profilePath, []byte(`{"nodes":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	paths := modulecontract.NewPaths(moduleDir)
+	if state := CurrentState(moduleDir); state.SocketAccepting {
+		t.Fatal("socket accepting = true before socket listener exists")
+	}
+
+	listener, err := net.Listen("unix", paths.DaemonSocket())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	accepted := make(chan struct{})
+	go func() {
+		conn, err := listener.Accept()
+		if err == nil {
+			conn.Close()
+		}
+		close(accepted)
+	}()
+
+	state := CurrentState(moduleDir)
+	if !state.SocketPresent {
+		t.Fatal("socket present = false with unix listener")
+	}
+	if !state.SocketAccepting {
+		t.Fatal("socket accepting = false with unix listener")
+	}
+	<-accepted
 }
 
 func prepareModuleFixture(t *testing.T, moduleDir string) {

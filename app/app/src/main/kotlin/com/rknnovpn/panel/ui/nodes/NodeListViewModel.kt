@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 private const val TAG = "NodeListViewModel"
-private const val NODE_TEST_BATCH_SIZE = 6
+private const val NODE_TEST_BATCH_SIZE = 3
 
 enum class NodeSortMode { SOURCE_ORDER, NAME, LATENCY, THROUGHPUT, COUNTRY }
 enum class ImportSheetTab { PASTE_URI, SCAN_QR, SUBSCRIPTION }

@@ -308,7 +308,14 @@ func ProfileRPCErrorSaved(action string, err error, saved bool, status runtimev2
 }
 
 func ProfileSuccess(action string, reload bool, runtimeWasRunning bool, status runtimev2.Status, before runtimev2.Status, warnings []profiledoc.Warning, updated int) map[string]interface{} {
+	return ProfileSuccessWithRuntimeApply(action, reload, runtimeWasRunning, status, before, warnings, updated, applytx.ConfigTransactionResult{})
+}
+
+func ProfileSuccessWithRuntimeApply(action string, reload bool, runtimeWasRunning bool, status runtimev2.Status, before runtimev2.Status, warnings []profiledoc.Warning, updated int, mutation applytx.ConfigTransactionResult) map[string]interface{} {
 	runtimeApply := RuntimeApplyStatus(reload, runtimeWasRunning)
+	if mutation.RuntimeApply != "" {
+		runtimeApply = mutation.RuntimeApply
+	}
 	runtimeApplied := runtimeApply == "applied"
 	if runtimeApply == "accepted" {
 		runtimeApplied = false
@@ -333,6 +340,18 @@ func ProfileSuccess(action string, reload bool, runtimeWasRunning bool, status r
 	)
 	result["ok"] = true
 	result["runtimeStatus"] = status
+	if mutation.RuntimeApplyMode != "" {
+		result["runtimeApplyMode"] = mutation.RuntimeApplyMode
+		result["operation"].(map[string]interface{})["runtimeApplyMode"] = mutation.RuntimeApplyMode
+	}
+	if mutation.RuntimeApplyReason != "" {
+		result["runtimeApplyReason"] = mutation.RuntimeApplyReason
+		result["operation"].(map[string]interface{})["runtimeApplyReason"] = mutation.RuntimeApplyReason
+	}
+	if mutation.RequiresHotSwap {
+		result["requiresHotSwap"] = true
+		result["operation"].(map[string]interface{})["requiresHotSwap"] = true
+	}
 	return result
 }
 

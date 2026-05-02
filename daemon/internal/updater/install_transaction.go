@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -11,6 +12,7 @@ import (
 )
 
 type InstallTransaction struct {
+	Context           context.Context
 	DataDir           string
 	ModuleDir         string
 	Generation        int64
@@ -33,6 +35,13 @@ var (
 )
 
 func RunInstallTransaction(tx InstallTransaction) error {
+	ctx := tx.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("install cancelled before start: %w", err)
+	}
 	if tx.ModuleDir == "" {
 		tx.ModuleDir = modulecontract.NewPaths(tx.DataDir).Dir()
 	}
@@ -61,6 +70,9 @@ func RunInstallTransaction(tx InstallTransaction) error {
 	}()
 
 	if tx.Artifacts.ModuleExists {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("install cancelled before runtime stop: %w", err)
+		}
 		markStep("update-stop-runtime", "running", "UPDATE_STOP_RUNTIME", "stopping runtime before module install")
 		if tx.Hooks.StopRuntimeForModuleInstall != nil {
 			if err := tx.Hooks.StopRuntimeForModuleInstall(); err != nil {
@@ -72,6 +84,9 @@ func RunInstallTransaction(tx InstallTransaction) error {
 	}
 
 	if tx.Artifacts.ModuleExists {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("install cancelled before module install: %w", err)
+		}
 		markStep("update-install-module", "running", "MODULE_INSTALLING", filepath.Base(tx.Artifacts.ModulePath))
 		if err := installModuleUpdate(tx.Artifacts.ModulePath, tx.DataDir, tx.ModuleDir); err != nil {
 			if tx.WasRuntimeRunning && tx.Hooks.RestoreRuntimeAfterModuleFail != nil {
@@ -88,6 +103,9 @@ func RunInstallTransaction(tx InstallTransaction) error {
 	}
 
 	if tx.Artifacts.ApkExists {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("install cancelled before apk install: %w", err)
+		}
 		markStep("update-install-apk", "running", "APK_INSTALLING", filepath.Base(tx.Artifacts.ApkPath))
 		if err := installApkUpdate(tx.Artifacts.ApkPath); err != nil {
 			installLogf(tx, "APK install failed: %v", err)
@@ -100,6 +118,9 @@ func RunInstallTransaction(tx InstallTransaction) error {
 		markStep("update-install-apk", "ok", "", "")
 	}
 
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("install cancelled before cleanup: %w", err)
+	}
 	markStep("update-cleanup-downloads", "running", "UPDATE_CLEANUP", tx.Artifacts.UpdateDir)
 	if err := os.RemoveAll(tx.Artifacts.UpdateDir); err != nil {
 		markStep("update-cleanup-downloads", "failed", "UPDATE_CLEANUP_FAILED", err.Error())

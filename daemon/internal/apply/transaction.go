@@ -9,10 +9,23 @@ import (
 )
 
 type ConfigTransactionResult struct {
-	Action            string
-	ConfigSaved       bool
-	RuntimeWasRunning bool
-	RuntimeOperation  runtimev2.OperationKind
+	Action             string
+	ConfigSaved        bool
+	RuntimeWasRunning  bool
+	RuntimeOperation   runtimev2.OperationKind
+	RuntimeApply       string
+	RuntimeApplied     bool
+	RuntimeApplyMode   string
+	RuntimeApplyReason string
+	RequiresHotSwap    bool
+}
+
+type ConfigApplyResult struct {
+	RuntimeApply       string
+	RuntimeApplied     bool
+	RuntimeApplyMode   string
+	RuntimeApplyReason string
+	RequiresHotSwap    bool
 }
 
 type ConfigTransaction struct {
@@ -22,6 +35,7 @@ type ConfigTransaction struct {
 	EnsureIdle             func() error
 	SaveProfile            func(*config.Config) error
 	ApplyConfig            func(*config.Config, bool, runtimev2.OperationKind) error
+	ApplyConfigWithResult  func(*config.Config, bool, runtimev2.OperationKind) (ConfigApplyResult, error)
 	RuntimeRunning         func() bool
 }
 
@@ -63,6 +77,18 @@ func (tx ConfigTransaction) Run(nextCfg *config.Config, reload bool) (ConfigTran
 	result.ConfigSaved = true
 	if tx.RuntimeRunning != nil {
 		result.RuntimeWasRunning = tx.RuntimeRunning()
+	}
+	if tx.ApplyConfigWithResult != nil {
+		applyResult, err := tx.ApplyConfigWithResult(nextCfg, reload, result.RuntimeOperation)
+		if err != nil {
+			return result, err
+		}
+		result.RuntimeApply = applyResult.RuntimeApply
+		result.RuntimeApplied = applyResult.RuntimeApplied
+		result.RuntimeApplyMode = applyResult.RuntimeApplyMode
+		result.RuntimeApplyReason = applyResult.RuntimeApplyReason
+		result.RequiresHotSwap = applyResult.RequiresHotSwap
+		return result, nil
 	}
 	if tx.ApplyConfig == nil {
 		return result, fmt.Errorf("config apply is not configured")

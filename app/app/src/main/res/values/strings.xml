@@ -281,8 +281,8 @@
     <string name="update_check_button">Check for updates</string>
     <string name="update_download_button">Download</string>
     <string name="update_install_button">Install</string>
-    <string name="update_module_too_old">Module too old for in-app updates</string>
-    <string name="update_module_too_old_hint">Your installed module does not support in-app updates. Please download the latest module from GitHub Releases and flash it manually.</string>
+    <string name="update_module_too_old">Manual update required</string>
+    <string name="update_module_too_old_hint">In-app update checks require the installed module daemon to be running. Open GitHub Releases and install the latest package manually.</string>
     <string name="update_open_github">Open GitHub Releases</string>
 
     <!-- Shared -->
@@ -319,6 +319,7 @@
     <string name="error_module_disabled">The RKNnoVPN module is disabled in the root manager. Enable the module and reboot the device.</string>
     <string name="error_module_install_incomplete">The module install looks incomplete: service.sh is missing. Reinstall the module and reboot the device.</string>
     <string name="error_invalid_daemon_response">Invalid daemon response</string>
+    <string name="error_daemon_schema_incompatible">APK and module/daemon are incompatible. Reinstall the APK and module from the same release, or reboot after a staged update.</string>
     <string name="error_unexpected_with_reason">Unexpected error: %1$s</string>
     <string name="error_operation_failed_with_reason">%1$s failed: %2$s</string>
     <string name="error_no_profile_loaded">No profile loaded</string>
@@ -330,6 +331,7 @@
     <string name="operation_active_step_with_code">Current step: %1$s (%2$s)</string>
     <string name="operation_saved_runtime_stopped">Settings were saved. Runtime is stopped, so they will apply on the next start.</string>
     <string name="operation_saved_runtime_not_applied">Settings were saved, but runtime did not apply them.</string>
+    <string name="operation_requires_hotswap">Fast switch unavailable: %1$s; applying via HotSwap.</string>
     <string name="operation_cleanup_succeeded">Runtime cleanup completed.</string>
     <string name="operation_cleanup_incomplete">Runtime cleanup needs attention.</string>
     <string name="operation_failure_code">code: %1$s</string>

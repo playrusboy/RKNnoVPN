@@ -26,6 +26,7 @@ import javax.inject.Singleton
  * Coroutine-based daemon status poller.
  *
  * Polling intervals adapt to the connection state:
+ * - **Active operation**: every [ACTIVE_OPERATION_INTERVAL_MS] for quick runtime apply feedback.
  * - **Connected / Connecting**: every [FAST_INTERVAL_MS] (2 s) for responsive traffic stats.
  * - **Disconnected / Error / Unknown**: every [SLOW_INTERVAL_MS] (30 s) to conserve resources.
  *
@@ -39,6 +40,7 @@ class PollingStatusSource @Inject constructor(
 ) {
     companion object {
         private const val TAG = "PollingStatusSource"
+        private const val ACTIVE_OPERATION_INTERVAL_MS = 400L
         private const val FAST_INTERVAL_MS = 2_000L
         private const val SLOW_INTERVAL_MS = 30_000L
         /** After this many consecutive failures we switch to slow polling. */
@@ -181,8 +183,8 @@ class PollingStatusSource @Inject constructor(
             is DaemonClientResult.ParseError -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
-                _lastError.value = messages.get(com.rknnovpn.panel.R.string.error_invalid_daemon_response)
-                Log.w(TAG, "Failed to parse status response", result.cause)
+                _lastError.value = messages.get(com.rknnovpn.panel.R.string.error_daemon_schema_incompatible)
+                Log.w(TAG, "Failed to parse status response after IPC recovery", result.cause)
             }
             is DaemonClientResult.Failure -> {
                 consecutiveFailures++
@@ -209,7 +211,7 @@ class PollingStatusSource @Inject constructor(
 
         // Adapt based on daemon's connection state
         val status = _status.value
-        if (status?.activeOperation != null) return FAST_INTERVAL_MS
+        if (status?.activeOperation != null) return ACTIVE_OPERATION_INTERVAL_MS
         val daemonState = status?.state
         return when (daemonState) {
             ConnectionState.CONNECTED,

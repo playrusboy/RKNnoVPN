@@ -6,7 +6,7 @@
     "DiagnosticsReportRequest": {"lines": 120},
     "BackendStatusRequest": {"includeHealthRefresh": true, "includeCompatibility": true},
     "CommitImportBatchRequest": {"batchId": "import-1", "reload": true},
-    "CommitSubscriptionPreviewRequest": {"previewId": "0123456789abcdef0123456789abcdef"},
+    "CommitSubscriptionPreviewRequest": {"previewId": "0123456789abcdef0123456789abcdef", "reload": false},
     "CompatibilityCheckRequest": {"requiredMethods": ["backend.status"]},
     "ImportNodesBatchRequest": {"batchId": "import-1", "totalBatches": 2, "nodes": [{"id": "node-1", "name": "Local", "protocol": "SOCKS", "server": "127.0.0.1", "port": 10808}]},
     "LogsRequest": {"lines": 100},
@@ -19,7 +19,7 @@
     "ResolveUidRequest": {"uid": 10123},
     "SelfCheckRequest": {"lines": 80},
     "SetActiveNodeRequest": {"nodeId": "node-1"},
-    "SubscriptionURLRequest": {"url": "https://example.com/sub"},
+    "SubscriptionURLRequest": {"url": "https://example.com/sub", "reload": false},
     "TestNodesRequest": {"url": "https://www.gstatic.com/generate_204", "mode": "fast"}
   },
   "operationPolicies": {

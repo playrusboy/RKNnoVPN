@@ -1,6 +1,7 @@
 package root
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -156,6 +157,10 @@ func ReloadAfterConfigChange(input ConfigReloadInput, deps ConfigReloadDeps) err
 		profile = input.Config.ResolveProfile()
 	}
 	if err := deps.HotSwap(profile); err != nil {
+		if runtimeStillRunning(err) {
+			err = failStage("hot-swap", runtimeerr.Code(err, "CORE_SPAWN_FAILED"), err, true)
+			return fmt.Errorf("%s hot-swap failed; %s, previous runtime restored: %w", context, savedLabel, err)
+		}
 		resetReport := reloadResetReport(deps, input.Generation)
 		recordStage("reset-after-hot-swap-failure", resetReport.Status, "", resetReportDetail(resetReport), resetReport.Status != "ok")
 		err = failStage("hot-swap", runtimeerr.Code(err, "CORE_SPAWN_FAILED"), err, resetReport.Status != "ok")
@@ -215,6 +220,13 @@ func ReloadAfterConfigChange(input ConfigReloadInput, deps ConfigReloadDeps) err
 	report.FinishOK()
 	observeReport(deps, report)
 	return nil
+}
+
+func runtimeStillRunning(err error) bool {
+	var preserved interface {
+		RuntimeStillRunning() bool
+	}
+	return errors.As(err, &preserved) && preserved.RuntimeStillRunning()
 }
 
 func observeReport(deps ConfigReloadDeps, report core.RuntimeStageReport) {

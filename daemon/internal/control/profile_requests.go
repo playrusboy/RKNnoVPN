@@ -71,11 +71,15 @@ type InboundPatchRequest struct {
 }
 
 type SubscriptionURLRequest struct {
-	URL string
+	URL       string
+	Reload    bool
+	HasReload bool
 }
 
 type CommitSubscriptionPreviewRequest struct {
 	PreviewID string
+	Reload    bool
+	HasReload bool
 }
 
 func DecodeProfileApplyParams(params *json.RawMessage) (ProfileApplyRequest, error) {
@@ -395,12 +399,17 @@ func DecodeSubscriptionURLParams(params *json.RawMessage) (SubscriptionURLReques
 		return result, fmt.Errorf("params required: {\"url\": \"https://...\"}")
 	}
 	var p struct {
-		URL string `json:"url"`
+		URL    string `json:"url"`
+		Reload *bool  `json:"reload"`
 	}
 	if err := json.Unmarshal(*params, &p); err != nil {
 		return result, fmt.Errorf("invalid params: %w", err)
 	}
 	result.URL = p.URL
+	if p.Reload != nil {
+		result.Reload = *p.Reload
+		result.HasReload = true
+	}
 	return result, nil
 }
 
@@ -411,6 +420,7 @@ func DecodeCommitSubscriptionPreviewParams(params *json.RawMessage) (CommitSubsc
 	}
 	var p struct {
 		PreviewID string `json:"previewId"`
+		Reload    *bool  `json:"reload"`
 	}
 	if err := json.Unmarshal(*params, &p); err != nil {
 		return result, fmt.Errorf("invalid params: %w", err)
@@ -420,6 +430,10 @@ func DecodeCommitSubscriptionPreviewParams(params *json.RawMessage) (CommitSubsc
 		return result, fmt.Errorf("previewId is required")
 	}
 	result.PreviewID = p.PreviewID
+	if p.Reload != nil {
+		result.Reload = *p.Reload
+		result.HasReload = true
+	}
 	return result, nil
 }
 
