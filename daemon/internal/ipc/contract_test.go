@@ -2,6 +2,7 @@ package ipc
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -53,7 +54,7 @@ func TestAPKRequiredMethodsAreDeclaredContractMethods(t *testing.T) {
 
 func TestNewContractSortsCapabilities(t *testing.T) {
 	contract := NewContract(5, 5, []string{"z.cap", "a.cap"})
-	if contract.Version != 1 || contract.ControlProtocolVersion != 5 || contract.SchemaVersion != 5 {
+	if contract.Version != ContractVersion() || contract.ControlProtocolVersion != 5 || contract.SchemaVersion != 5 {
 		t.Fatalf("unexpected contract metadata: %#v", contract)
 	}
 	if got := contract.Capabilities; len(got) != 2 || got[0] != "a.cap" || got[1] != "z.cap" {
@@ -61,5 +62,18 @@ func TestNewContractSortsCapabilities(t *testing.T) {
 	}
 	if got := contract.APKRequiredMethods; !slices.Contains(got, "backend.status") || !slices.Contains(got, "profile.get") {
 		t.Fatalf("contract output must expose apk required methods: %#v", got)
+	}
+}
+
+func TestContractHashIsStableSHA256Hex(t *testing.T) {
+	hash := ContractHash()
+	if len(hash) != 64 {
+		t.Fatalf("contract hash length = %d, want 64: %q", len(hash), hash)
+	}
+	if strings.Trim(hash, "0123456789abcdef") != "" {
+		t.Fatalf("contract hash must be lowercase hex: %q", hash)
+	}
+	if again := ContractHash(); again != hash {
+		t.Fatalf("contract hash changed between calls: %q != %q", again, hash)
 	}
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulehelper"
 )
 
 const maxFrameBytes = 2 * 1024 * 1024
@@ -19,16 +20,25 @@ const maxFrameBytes = 2 * 1024 * 1024
 var Version = "dev"
 
 func main() {
-	if len(os.Args) < 2 {
+	opts, cmd, paramArgs, err := parseArgs(os.Args[1:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n\n", err)
+		printUsage()
+		os.Exit(1)
+	}
+	if cmd == "" {
 		printUsage()
 		os.Exit(1)
 	}
 
-	cmd := os.Args[1]
-
 	if cmd == "help" || cmd == "--help" || cmd == "-h" {
 		printUsage()
 		os.Exit(0)
+	}
+
+	if isModuleHelperCommand(cmd) {
+		runModuleHelperCommand(cmd)
+		return
 	}
 
 	if _, ok := supportedCommandSet()[cmd]; !ok {
@@ -46,7 +56,7 @@ func main() {
 
 	// Parse params either from argv or stdin (for large payloads that would
 	// otherwise overflow shell/argv limits).
-	if raw := readRawParams(os.Args[2:]); raw != "" {
+	if raw := readRawParams(paramArgs); raw != "" {
 		var params json.RawMessage
 		if err := json.Unmarshal([]byte(raw), &params); err != nil {
 			fmt.Fprintf(os.Stderr, "error: invalid JSON params: %v\n", err)
@@ -94,7 +104,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: daemon closed connection without response\n")
 		os.Exit(1)
 	}
+	os.Exit(writeResponse(line, opts.rawOutput, os.Stdout, os.Stderr))
+}
 
+func writeResponse(line []byte, rawOutput bool, stdout io.Writer, stderr io.Writer) int {
+	if rawOutput {
+		printRaw(stdout, line)
+	}
 	// Parse response.
 	var resp struct {
 		JSONRPC string           `json:"jsonrpc"`
@@ -108,45 +124,92 @@ func main() {
 	}
 
 	if err := json.Unmarshal(line, &resp); err != nil {
-		fmt.Fprintf(os.Stderr, "error: parse response: %v\n", err)
-		fmt.Fprintf(os.Stderr, "raw: %s\n", string(line))
-		os.Exit(1)
+		fmt.Fprintf(stderr, "error: parse response: %v\n", err)
+		if !rawOutput {
+			fmt.Fprintf(stderr, "raw: %s\n", string(line))
+		}
+		return 1
 	}
 
 	// Handle error response.
 	if resp.Error != nil {
-		fmt.Fprintf(os.Stderr, "error [%d]: %s\n", resp.Error.Code, resp.Error.Message)
-		prettyPrint(line)
-		os.Exit(1)
+		if !rawOutput {
+			fmt.Fprintf(stderr, "error [%d]: %s\n", resp.Error.Code, resp.Error.Message)
+			prettyPrint(stdout, line)
+		}
+		return 1
+	}
+	if rawOutput {
+		return 0
 	}
 
 	// Print result.
 	if resp.Result != nil {
-		prettyPrint(*resp.Result)
+		prettyPrint(stdout, *resp.Result)
 	} else {
-		fmt.Println("ok")
+		fmt.Fprintln(stdout, "ok")
+	}
+	return 0
+}
+
+type options struct {
+	rawOutput bool
+}
+
+func parseArgs(args []string) (options, string, []string, error) {
+	opts := options{
+		rawOutput: envFlagEnabled("RKNNOVPN_DAEMONCTL_RAW"),
+	}
+	for len(args) > 0 {
+		switch args[0] {
+		case "--raw", "--compact":
+			opts.rawOutput = true
+			args = args[1:]
+		case "--help", "-h":
+			return opts, args[0], args[1:], nil
+		default:
+			if strings.HasPrefix(args[0], "-") {
+				return opts, "", nil, fmt.Errorf("unknown option %q", args[0])
+			}
+			return opts, args[0], args[1:], nil
+		}
+	}
+	return opts, "", nil, nil
+}
+
+func envFlagEnabled(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "", "0", "false", "no", "off":
+		return false
+	default:
+		return true
 	}
 }
 
-func prettyPrint(data json.RawMessage) {
+func printRaw(w io.Writer, data []byte) {
+	_, _ = w.Write(data)
+	_, _ = w.Write([]byte{'\n'})
+}
+
+func prettyPrint(w io.Writer, data json.RawMessage) {
 	var obj interface{}
 	if err := json.Unmarshal(data, &obj); err != nil {
-		fmt.Println(string(data))
+		fmt.Fprintln(w, string(data))
 		return
 	}
 
 	pretty, err := json.MarshalIndent(obj, "", "  ")
 	if err != nil {
-		fmt.Println(string(data))
+		fmt.Fprintln(w, string(data))
 		return
 	}
-	fmt.Println(string(pretty))
+	fmt.Fprintln(w, string(pretty))
 }
 
 func printUsage() {
 	fmt.Println("daemonctl - RKNnoVPN daemon control CLI")
 	fmt.Println()
-	fmt.Println("Usage: daemonctl <command> [json_params]")
+	fmt.Println("Usage: daemonctl [--raw|--compact] <command> [json_params]")
 	fmt.Println()
 	fmt.Println("Commands:")
 
@@ -157,8 +220,17 @@ func printUsage() {
 			maxLen = len(cmd)
 		}
 	}
+	for _, cmd := range orderedModuleHelperCommands() {
+		if len(cmd) > maxLen {
+			maxLen = len(cmd)
+		}
+	}
 
 	for _, cmd := range orderedCommands() {
+		desc := commandDescription(cmd)
+		fmt.Printf("  %-*s  %s\n", maxLen, cmd, desc)
+	}
+	for _, cmd := range orderedModuleHelperCommands() {
 		desc := commandDescription(cmd)
 		fmt.Printf("  %-*s  %s\n", maxLen, cmd, desc)
 	}
@@ -166,6 +238,7 @@ func printUsage() {
 	fmt.Println()
 	fmt.Println("Environment:")
 	fmt.Printf("  RKNNOVPN_SOCKET  daemon socket path (default: %s)\n", modulecontract.NewPaths("").DaemonSocket())
+	fmt.Println("  RKNNOVPN_DAEMONCTL_RAW  print the daemon JSON-RPC response without pretty-printing")
 	fmt.Println()
 	fmt.Println("Examples:")
 	printExamples()
@@ -191,6 +264,9 @@ func orderedCommands() []string {
 }
 
 func commandDescription(method string) string {
+	if desc := moduleHelperCommandDescription(method); desc != "" {
+		return desc
+	}
 	for _, contract := range ipc.MethodContracts() {
 		if contract.Method != method {
 			continue
@@ -216,6 +292,60 @@ func commandDescription(method string) string {
 		}
 	}
 	return "IPC contract method"
+}
+
+func isModuleHelperCommand(cmd string) bool {
+	_, ok := moduleHelperCommandDescriptions()[cmd]
+	return ok
+}
+
+func orderedModuleHelperCommands() []string {
+	methods := make([]string, 0, len(moduleHelperCommandDescriptions()))
+	for method := range moduleHelperCommandDescriptions() {
+		methods = append(methods, method)
+	}
+	sort.Strings(methods)
+	return methods
+}
+
+func moduleHelperCommandDescription(method string) string {
+	return moduleHelperCommandDescriptions()[method]
+}
+
+func moduleHelperCommandDescriptions() map[string]string {
+	return map[string]string{
+		"module.repair":       "local root helper; start daemon repair when IPC is unavailable",
+		"module.repairStatus": "local root helper; report structured app repair status",
+		"module.state":        "local root helper; report module install/profile/daemon state",
+	}
+}
+
+func runModuleHelperCommand(cmd string) {
+	var result interface{}
+	switch cmd {
+	case "module.state":
+		result = modulehelper.CurrentState("")
+	case "module.repair":
+		result = modulehelper.StartRepair("")
+	case "module.repairStatus":
+		result = modulehelper.CurrentRepairStatus("")
+	default:
+		fmt.Fprintf(os.Stderr, "error: unknown module helper command %q\n", cmd)
+		os.Exit(1)
+	}
+	printHelperEnvelope(result)
+}
+
+func printHelperEnvelope(result interface{}) {
+	data, err := json.MarshalIndent(map[string]interface{}{
+		"ok":     true,
+		"result": result,
+	}, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: marshal helper result: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(string(data))
 }
 
 func printExamples() {

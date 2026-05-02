@@ -2,6 +2,7 @@ package updater
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,6 +33,10 @@ const (
 	maxExtractedZipBytes  = 300 * 1024 * 1024
 	maxExtractedZipFiles  = 1024
 	maxExtractedPathDepth = 32
+	updateCommandKillWait = 2 * time.Second
+	updateScriptTimeout   = 2 * time.Minute
+	apkInstallTimeout     = 5 * time.Minute
+	binaryVerifyTimeout   = 5 * time.Second
 )
 
 type ModulePreflight struct {
@@ -337,8 +342,7 @@ func ScheduleSelfExit(delay time.Duration) {
 // InstallApkUpdate installs the APK using the Android package manager.
 // Requires root privileges (the daemon runs as root).
 func InstallApkUpdate(apkPath string) error {
-	cmd := exec.Command("pm", "install", "-r", apkPath)
-	output, err := cmd.CombinedOutput()
+	output, err := combinedOutputWithTimeout(apkInstallTimeout, nil, "pm", "install", "-r", apkPath)
 	if err != nil {
 		return fmt.Errorf("pm install: %s: %w", string(output), err)
 	}
@@ -440,9 +444,8 @@ func execScriptWithEnv(scriptPath string, action string, env []string) error {
 	if _, err := os.Stat(shell); err != nil {
 		shell = "/bin/sh"
 	}
-	cmd := exec.Command(shell, scriptPath, action)
-	cmd.Env = append(os.Environ(), env...)
-	output, err := cmd.CombinedOutput()
+	cmdEnv := append(os.Environ(), env...)
+	output, err := combinedOutputWithTimeout(updateScriptTimeout, cmdEnv, shell, scriptPath, action)
 	if err != nil {
 		return fmt.Errorf("%s %s: %s: %w", scriptPath, action, string(output), err)
 	}
@@ -845,34 +848,46 @@ func verifyBinary(binPath string) error {
 	// Try --version first, then -h, then just run with no args and check
 	// that we get a non-signal exit. The important thing is that the ELF
 	// loader doesn't reject it.
-	cmd := exec.Command(binPath, "--version")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	// 5 second timeout to avoid hanging.
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Run()
-	}()
-	select {
-	case err := <-done:
-		// Exit code 0 or 2 (flag parsing error for "--version") are fine.
-		// Signal-based exits (SIGSEGV, SIGBUS, SIGILL) indicate a bad binary.
-		if err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				ws := exitErr.Sys().(syscall.WaitStatus)
-				if ws.Signaled() {
-					return fmt.Errorf("binary crashed with signal %d", ws.Signal())
-				}
-				// Non-zero exit (e.g. 2 for "unknown flag") is acceptable
-				return nil
+	_, err := combinedOutputWithTimeout(binaryVerifyTimeout, nil, binPath, "--version")
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			ws := exitErr.Sys().(syscall.WaitStatus)
+			if ws.Signaled() {
+				return fmt.Errorf("binary crashed with signal %d", ws.Signal())
 			}
-			return fmt.Errorf("exec failed: %w", err)
+			// Non-zero exit (e.g. 2 for "unknown flag") is acceptable.
+			return nil
+		}
+		return fmt.Errorf("exec failed: %w", err)
+	}
+	return nil
+}
+
+func combinedOutputWithTimeout(timeout time.Duration, env []string, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	if env != nil {
+		cmd.Env = env
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
+			return err
 		}
 		return nil
-	case <-time.After(5 * time.Second):
-		cmd.Process.Kill()
-		return fmt.Errorf("binary did not exit within 5 seconds")
 	}
+	cmd.WaitDelay = updateCommandKillWait
+
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return out, fmt.Errorf("%s timed out after %s", name, timeout)
+	}
+	return out, err
 }
 
 // atomicCopyFile copies src to dst atomically by writing to a temp file

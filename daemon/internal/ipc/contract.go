@@ -1,6 +1,7 @@
 package ipc
 
 import (
+	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,8 @@ var (
 	manifestOnce sync.Once
 	manifestData Contract
 	manifestErr  error
+	hashOnce     sync.Once
+	hashValue    string
 )
 
 type OperationContract struct {
@@ -135,6 +138,14 @@ func MethodOperationType(method string) (string, bool) {
 
 func ContractVersion() int {
 	return contractManifest().Version
+}
+
+func ContractHash() string {
+	hashOnce.Do(func() {
+		sum := sha256.Sum256(contractManifestJSON)
+		hashValue = fmt.Sprintf("%x", sum[:])
+	})
+	return hashValue
 }
 
 func NewContract(controlProtocolVersion int, schemaVersion int, capabilities []string) Contract {

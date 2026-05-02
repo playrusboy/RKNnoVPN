@@ -22,10 +22,10 @@ fun rknnoVpnVersionCode(versionName: String): Int {
     val major = match.groupValues[1].toInt()
     val minor = match.groupValues[2].toInt()
     val patch = match.groupValues[3].toInt()
-    require(major < 10 && patch < 100) {
-        "RKNnoVPN versionCode supports major 0..9 and patch 0..99: $versionName"
+    require(major < 100 && minor < 100 && patch < 100) {
+        "RKNnoVPN versionCode supports major/minor/patch 0..99: $versionName"
     }
-    return "$major$minor${patch.toString().padStart(2, '0')}".toInt()
+    return major * 1_000_000 + minor * 10_000 + patch * 100
 }
 
 val rknnoVpnVersionCode = rknnoVpnVersionCodeOverride ?: rknnoVpnVersionCode(rknnoVpnVersionName)

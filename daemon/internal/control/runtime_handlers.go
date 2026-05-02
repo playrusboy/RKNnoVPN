@@ -28,14 +28,29 @@ type RuntimeHandlers struct {
 	Reset                 func() (runtimev2.Status, error)
 }
 
+type BackendStatusRequest struct {
+	IncludeHealthRefresh bool `json:"includeHealthRefresh"`
+}
+
 func (h RuntimeHandlers) BackendStatus(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	if !h.initialized() {
 		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "v2 runtime is not initialized"}
+	}
+	request, err := DecodeBackendStatusParams(params)
+	if err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: err.Error(),
+		}
 	}
 	if h.RefreshCompatibility != nil {
 		h.RefreshCompatibility()
 	}
 	status := h.refreshActiveProgress()
+	if request.IncludeHealthRefresh {
+		h.refreshHealth()
+		return h.finalizeStatus(h.status()), nil
+	}
 	if status.ActiveOperation != nil {
 		return h.finalizeStatus(status), nil
 	}

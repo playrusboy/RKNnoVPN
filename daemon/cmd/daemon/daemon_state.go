@@ -6,6 +6,7 @@ import (
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/rescue"
@@ -29,6 +30,7 @@ type daemon struct {
 
 	mu                    sync.Mutex // protects cfg
 	metricsMu             sync.Mutex
+	compatibilityMu       sync.Mutex
 	runtimeOpMu           sync.Mutex
 	resetMu               sync.Mutex
 	reportMu              sync.Mutex
@@ -36,6 +38,8 @@ type daemon struct {
 	runtimeOpEpoch        uint64
 	latency               latencySnapshot
 	traffic               trafficSnapshot
+	trafficSamplerStop    chan struct{}
+	releaseIntegrity      cachedReleaseIntegrity
 	healthKick            time.Time
 	lastReloadReport      core.RuntimeStageReport
 
@@ -45,9 +49,17 @@ type daemon struct {
 type latencySnapshot = rootruntime.EgressProbeState
 
 type trafficSnapshot struct {
-	txBytes   int64
-	rxBytes   int64
+	stats     runtimev2.TrafficStats
 	checkedAt time.Time
+}
+
+type cachedReleaseIntegrity struct {
+	value         diagnostics.ReleaseIntegrity
+	releasePath   string
+	manifestPath  string
+	manifestMTime time.Time
+	manifestSize  int64
+	checkedAt     time.Time
 }
 
 func (d *daemon) currentConfig() *config.Config {

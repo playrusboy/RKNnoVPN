@@ -1,8 +1,11 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -104,6 +107,37 @@ func TestBackendStatusIncludesCompatibilitySnapshot(t *testing.T) {
 	}
 	if !containsString(status.Compatibility.SupportedMethods, "backend.status") {
 		t.Fatalf("expected supported methods in backend.status, got %#v", status.Compatibility.SupportedMethods)
+	}
+}
+
+func TestBackendStatusUsesCachedReleaseIntegrity(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	releaseDir := writeTestRelease(t, d.dataDir, "v1", "daemon", []byte("old"))
+	if err := os.Symlink(releaseDir, filepath.Join(d.dataDir, "current")); err != nil {
+		t.Fatal(err)
+	}
+	d.initRuntimeV2()
+
+	if err := os.WriteFile(filepath.Join(releaseDir, "daemon"), []byte("changed"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	payload, rpcErr := d.runtimeControlHandlers().BackendStatus(nil)
+	if rpcErr != nil {
+		t.Fatalf("backend status failed: %#v", rpcErr)
+	}
+	status := payload.(runtimev2.Status)
+	if !status.Compatibility.CurrentReleaseOK {
+		t.Fatalf("backend.status should reuse cached release integrity, got %#v", status.Compatibility)
+	}
+
+	writeTestReleaseManifest(t, releaseDir, "v22", "daemon", []byte("changed"))
+	payload, rpcErr = d.runtimeControlHandlers().BackendStatus(nil)
+	if rpcErr != nil {
+		t.Fatalf("backend status after manifest update failed: %#v", rpcErr)
+	}
+	status = payload.(runtimev2.Status)
+	if status.Compatibility.CurrentReleaseVersion != "v22" {
+		t.Fatalf("backend.status should refresh when manifest fingerprint changes, got %#v", status.Compatibility)
 	}
 }
 
@@ -417,5 +451,27 @@ func TestProfileApplyReturnsRuntimeStatus(t *testing.T) {
 	}
 	if saved.Health.IntervalSec != doc.Health.IntervalSec {
 		t.Fatalf("saved profile health interval = %d, want %d", saved.Health.IntervalSec, doc.Health.IntervalSec)
+	}
+}
+
+func writeTestRelease(t *testing.T, dataDir string, version string, name string, content []byte) string {
+	t.Helper()
+	releaseDir := filepath.Join(dataDir, "releases", version)
+	if err := os.MkdirAll(releaseDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(releaseDir, name), content, 0640); err != nil {
+		t.Fatal(err)
+	}
+	writeTestReleaseManifest(t, releaseDir, version, name, content)
+	return releaseDir
+}
+
+func writeTestReleaseManifest(t *testing.T, releaseDir string, version string, name string, content []byte) {
+	t.Helper()
+	sum := sha256.Sum256(content)
+	manifest := fmt.Sprintf(`{"version":%q,"installed_at":"test","files_sha256":{%q:%q}}`, version, name, fmt.Sprintf("%x", sum))
+	if err := os.WriteFile(filepath.Join(releaseDir, "install-manifest.json"), []byte(manifest), 0640); err != nil {
+		t.Fatal(err)
 	}
 }

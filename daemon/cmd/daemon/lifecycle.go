@@ -14,6 +14,8 @@ import (
 )
 
 func (d *daemon) startSubsystems() {
+	d.startTrafficSampler()
+
 	cfg := d.currentConfig()
 	if d.healthMon != nil && cfg != nil && cfg.Health.Enabled && cfg.Health.IntervalSec > 0 {
 		d.healthMon.Start()
@@ -27,6 +29,8 @@ func (d *daemon) startSubsystems() {
 }
 
 func (d *daemon) stopSubsystems() {
+	d.stopTrafficSampler()
+
 	if d.healthMon != nil {
 		d.healthMon.Stop()
 	}

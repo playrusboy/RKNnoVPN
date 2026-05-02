@@ -133,7 +133,8 @@ func (h DiagnosticsHandlers) buildReport(lines int) map[string]interface{} {
 		ipc.ContractVersion(),
 		ipc.APKRequiredMethods(),
 	).WithRuntimePreflight(runtimePreflight)
-	versions := addIPCContractFields(map[string]interface{}{
+	daemonPID, socketInode := DaemonIdentity(modulePaths.DaemonSocket())
+	versions := addCompatibilityIdentityFields(addIPCContractFields(map[string]interface{}{
 		"daemon":             h.Version,
 		"core":               h.Version,
 		"daemonctl_expected": h.Version,
@@ -141,7 +142,7 @@ func (h DiagnosticsHandlers) buildReport(lines int) map[string]interface{} {
 		"sing_box":           diagnostics.SingBoxVersion(singBoxPath, lines, exec),
 		"module":             moduleVersion,
 		"runtime_preflight":  runtimePreflight,
-	})
+	}), h.Version, moduleVersion["version"], daemonPID, socketInode)
 
 	report := map[string]interface{}{
 		"generated_at":      h.now().Format(time.RFC3339),

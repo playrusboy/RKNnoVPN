@@ -11,6 +11,7 @@ import com.rknnovpn.panel.model.BackendStatusV2
 import com.rknnovpn.panel.model.DaemonConnectionState
 import com.rknnovpn.panel.model.DaemonStatus
 import com.rknnovpn.panel.model.HealthResult
+import com.rknnovpn.panel.model.RuntimeOperationResult
 import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -69,7 +70,7 @@ class StatusRepository @Inject constructor(
     suspend fun start(): CommandOutcome {
         val result = client.start()
         publishOrPoll(result)
-        return toOutcome(result, R.string.operation_start)
+        return toOutcome(result, R.string.operation_start, setOf("start"))
     }
 
     /**
@@ -78,7 +79,7 @@ class StatusRepository @Inject constructor(
     suspend fun stop(): CommandOutcome {
         val result = client.stop()
         publishOrPoll(result)
-        return toOutcome(result, R.string.operation_stop)
+        return toOutcome(result, R.string.operation_stop, setOf("stop"))
     }
 
     /**
@@ -87,7 +88,7 @@ class StatusRepository @Inject constructor(
     suspend fun reload(): CommandOutcome {
         val result = client.reload()
         publishOrPoll(result)
-        return toOutcome(result, R.string.operation_reload)
+        return toOutcome(result, R.string.operation_reload, setOf("restart", "reload"))
     }
 
     suspend fun networkReset(): DaemonClientResult<BackendStatusV2> {
@@ -103,9 +104,7 @@ class StatusRepository @Inject constructor(
     suspend fun health(): DaemonClientResult<DaemonStatus> {
         val result = client.health()
         if (result is DaemonClientResult.Ok) {
-            // The health response is a full DaemonStatus; the poller will
-            // pick it up on the next tick, but we can hint an immediate poll.
-            poller.pollNow()
+            poller.publishDaemonStatus(result.data)
         }
         return result
     }
@@ -139,8 +138,12 @@ class StatusRepository @Inject constructor(
         get() = connectionState.value == DaemonConnectionState.REACHABLE &&
                 status.value?.state == com.rknnovpn.panel.model.ConnectionState.CONNECTED
 
-    private fun <T> toOutcome(result: DaemonClientResult<T>, operationResId: Int): CommandOutcome = when (result) {
-        is DaemonClientResult.Ok -> CommandOutcome.Success
+    private fun toOutcome(
+        result: DaemonClientResult<BackendStatusV2>,
+        operationResId: Int,
+        operationKinds: Set<String>,
+    ): CommandOutcome = when (result) {
+        is DaemonClientResult.Ok -> result.data.toCommandOutcome(operationResId, operationKinds)
         else -> CommandOutcome.Failed(
             messages.formatOperationFailure(
                 operationResId,
@@ -148,6 +151,26 @@ class StatusRepository @Inject constructor(
             )
         )
     }
+
+    private fun BackendStatusV2.toCommandOutcome(
+        operationResId: Int,
+        operationKinds: Set<String>,
+    ): CommandOutcome {
+        val completed = lastOperation
+            ?.takeIf { operation -> activeOperation == null && operation.kind in operationKinds }
+            ?: return CommandOutcome.Accepted(messages.formatOperationAccepted(operationResId))
+        return completed.toCommandOutcome(operationResId, health.rollbackApplied)
+    }
+
+    private fun RuntimeOperationResult.toCommandOutcome(
+        operationResId: Int,
+        rollbackApplied: Boolean,
+    ): CommandOutcome =
+        if (succeeded) {
+            CommandOutcome.Success
+        } else {
+            CommandOutcome.Failed(messages.formatOperationFailure(operationResId, this, rollbackApplied))
+        }
 
     private fun publishOrPoll(result: DaemonClientResult<BackendStatusV2>) {
         when (result) {
@@ -163,8 +186,9 @@ class StatusRepository @Inject constructor(
  * Simplified outcome for fire-and-forget commands (start, stop, reload).
  */
 sealed class CommandOutcome {
+    data class Accepted(val message: String) : CommandOutcome()
     data object Success : CommandOutcome()
     data class Failed(val message: String) : CommandOutcome()
 
-    val isSuccess: Boolean get() = this is Success
+    val isSuccess: Boolean get() = this is Success || this is Accepted
 }

@@ -68,6 +68,35 @@ func TestDecodeImportNodesParamsRejectsEmptyNodes(t *testing.T) {
 	}
 }
 
+func TestDecodeImportNodesBatchParams(t *testing.T) {
+	raw := json.RawMessage(`{"batchId":"batch-1","totalBatches":2,"nodes":[{"id":"node-1","name":"Local","protocol":"SOCKS","server":"127.0.0.1","port":10808,"stale":true,"source":{"type":"SUBSCRIPTION"}}]}`)
+	now := time.UnixMilli(1234567890)
+
+	request, err := DecodeImportNodesBatchParams(&raw, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.BatchID != "batch-1" || request.TotalBatches != 2 || len(request.Nodes) != 1 {
+		t.Fatalf("unexpected batch request: %#v", request)
+	}
+	node := request.Nodes[0]
+	if node.Stale || node.Source.Type != "MANUAL" || node.CreatedAt != now.UnixMilli() {
+		t.Fatalf("batch node was not normalized as manual/live: %#v", node)
+	}
+}
+
+func TestDecodeCommitImportBatchParams(t *testing.T) {
+	raw := json.RawMessage(`{"batchId":"batch-1","reload":false}`)
+
+	request, err := DecodeCommitImportBatchParams(&raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.BatchID != "batch-1" || request.Reload {
+		t.Fatalf("unexpected commit request: %#v", request)
+	}
+}
+
 func TestDecodeSetActiveNodeParamsRequiresNodeID(t *testing.T) {
 	raw := json.RawMessage(`{"reload":false}`)
 	if _, err := DecodeSetActiveNodeParams(&raw); err == nil || !strings.Contains(err.Error(), "nodeId is required") {

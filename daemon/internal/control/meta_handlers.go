@@ -28,16 +28,19 @@ func (h MetaHandlers) VersionInfo(params *json.RawMessage) (interface{}, *ipc.RP
 		}
 	}
 	modulePaths := modulecontract.NewPaths(h.DataDir)
+	moduleVersion := diagnostics.ReadModuleVersion()
+	daemonPID, socketInode := DaemonIdentity(modulePaths.DaemonSocket())
 	singBoxPath := filepath.Join(modulePaths.BinDir(), "sing-box")
-	return addIPCContractFields(map[string]interface{}{
+	info := addIPCContractFields(map[string]interface{}{
 		"daemon":            h.Version,
 		"core":              h.Version,
 		"daemonctl":         h.Version,
-		"module":            diagnostics.ReadModuleVersion(),
+		"module":            moduleVersion,
 		"current_release":   diagnostics.ReleaseIntegrityReport(h.DataDir),
 		"runtime_preflight": diagnostics.RuntimePreflightReport(h.DataDir),
 		"sing_box":          diagnostics.SingBoxVersion(singBoxPath, 20, exec),
 		"control_protocol":  ProtocolVersion,
 		"panel_min_version": h.Version,
-	}), nil
+	})
+	return addCompatibilityIdentityFields(info, h.Version, moduleVersion["version"], daemonPID, socketInode), nil
 }

@@ -57,7 +57,7 @@ func TestSupportedRPCMethodsAdvertiseCanonicalContract(t *testing.T) {
 	if !slices.Equal(methods, ipc.SupportedMethods()) {
 		t.Fatalf("supported methods drifted from IPC contract:\nmethods=%#v\ncontract=%#v", methods, ipc.SupportedMethods())
 	}
-	for _, method := range []string{"diagnostics.report", "config-import", "backend.reset", "diagnostics.testNodes", "self-check", "ipc.contract", "profile.get", "profile.apply", "profile.importNodes", "profile.setActiveNode", "subscription.preview", "subscription.refresh"} {
+	for _, method := range []string{"diagnostics.report", "config-import", "backend.reset", "diagnostics.testNodes", "self-check", "ipc.contract", "profile.get", "profile.apply", "profile.importNodes", "profile.importNodesBatch", "profile.commitImportBatch", "profile.setActiveNode", "subscription.preview", "subscription.refresh"} {
 		if !slices.Contains(methods, method) {
 			t.Fatalf("supported methods missing %s: %#v", method, methods)
 		}
@@ -93,7 +93,7 @@ func TestGeneratedKotlinRequiredMethodsMatchIPCContract(t *testing.T) {
 	if !slices.Equal(required, contract) {
 		t.Fatalf("generated Kotlin APK_REQUIRED_METHODS drifted from IPC contract:\nkotlin=%#v\ncontract=%#v", required, contract)
 	}
-	for _, method := range []string{"backend.status", "profile.get", "profile.apply", "profile.importNodes", "profile.setActiveNode", "subscription.preview", "subscription.refresh", "ipc.contract", "version"} {
+	for _, method := range []string{"backend.status", "profile.get", "profile.apply", "profile.importNodes", "profile.importNodesBatch", "profile.commitImportBatch", "profile.setActiveNode", "subscription.preview", "subscription.refresh", "ipc.contract", "version"} {
 		if !slices.Contains(required, method) {
 			t.Fatalf("generated APK_REQUIRED_METHODS missing APK-used contract method %s: %#v", method, required)
 		}

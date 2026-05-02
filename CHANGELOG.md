@@ -3,7 +3,7 @@
 ## v2.3.1
 
 - Made `VERSION` the only manual release version source; module metadata is a stamped template and `update.json` remains workflow-generated release feed metadata.
-- Switched release `versionCode` generation to compact semver digits (`v2.3.1` -> `2301`) and kept a guard against the old oversized formula.
+- Switched release `versionCode` generation to fixed semver slots (`v2.3.1` -> `2030100`) with explicit `major/minor/patch < 100` guards.
 - Hardened GitHub Actions release stamping so only strict `vMAJOR.MINOR.PATCH` tags are treated as stable releases.
 
 ## v2.3.0

@@ -9,10 +9,15 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
-const networkStackUID = "1073"
+const (
+	networkStackUID       = "1073"
+	defaultCommandTimeout = 2 * time.Minute
+	commandKillWait       = 2 * time.Second
+)
 
 var (
 	packageListPath            = "/data/system/packages.list"
@@ -276,16 +281,14 @@ func ExecScript(scriptPath string, command string, env map[string]string) error 
 		shell = "/bin/sh"
 	}
 
-	cmd := exec.Command(shell, scriptPath, command)
-
 	// Inherit the current environment, then layer the caller's overrides.
-	cmd.Env = os.Environ()
+	cmdEnv := os.Environ()
 	for k, v := range env {
-		cmd.Env = append(cmd.Env, k+"="+v)
+		cmdEnv = append(cmdEnv, k+"="+v)
 	}
 
 	// Capture combined output for error reporting.
-	out, err := cmd.CombinedOutput()
+	out, err := combinedOutputWithTimeout(defaultCommandTimeout, cmdEnv, shell, scriptPath, command)
 	if err != nil {
 		return fmt.Errorf("exec %s %s: %w\noutput: %s",
 			scriptPath, command, err, strings.TrimSpace(string(out)))
@@ -374,9 +377,35 @@ func formatPortTargets(hosts []string, port int) string {
 // It is used by health checks that need to inspect command output (e.g.
 // ip rule show, iptables -C ...).
 func ExecCommand(name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
-	out, err := cmd.CombinedOutput()
+	out, err := combinedOutputWithTimeout(defaultCommandTimeout, nil, name, args...)
 	return strings.TrimSpace(string(out)), err
+}
+
+func combinedOutputWithTimeout(timeout time.Duration, env []string, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	if env != nil {
+		cmd.Env = env
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
+			return err
+		}
+		return nil
+	}
+	cmd.WaitDelay = commandKillWait
+
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return out, fmt.Errorf("%s timed out after %s", name, timeout)
+	}
+	return out, err
 }
 
 // ResolvePackageUIDsDetailed resolves explicitly selected packages and keeps

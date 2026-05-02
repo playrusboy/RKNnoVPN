@@ -32,6 +32,7 @@ func (d *daemon) profileControlHandlers() control.ProfileHandlers {
 		CurrentConfig:         d.currentConfig,
 		PersistConfigMutation: d.persistConfigMutationForAction,
 		RuntimeStatus:         d.controlRuntimeStatus,
+		ImportBatches:         control.NewImportBatchStore(),
 		Now:                   time.Now,
 	}
 }

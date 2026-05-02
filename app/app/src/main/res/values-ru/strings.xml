@@ -319,10 +319,16 @@
     <string name="error_no_profile_loaded">Профиль не загружен</string>
     <string name="error_no_runtime_node_configured">Добавьте или выберите сервер перед запуском.</string>
     <string name="operation_accepted">Операция принята. Ждём завершения…</string>
+    <string name="operation_accepted_with_name">Операция «%1$s» принята. Ждём завершения…</string>
+    <string name="operation_active_step">Текущий шаг: %1$s</string>
+    <string name="operation_active_step_with_code">Текущий шаг: %1$s (%2$s)</string>
     <string name="operation_saved_runtime_stopped">Настройки сохранены. Runtime остановлен, поэтому они применятся при следующем запуске.</string>
     <string name="operation_saved_runtime_not_applied">Настройки сохранены, но runtime их не применил.</string>
     <string name="operation_cleanup_succeeded">Runtime cleanup выполнен.</string>
     <string name="operation_cleanup_incomplete">Runtime cleanup требует внимания.</string>
+    <string name="operation_failure_code">код: %1$s</string>
+    <string name="operation_failure_stage">стадия: %1$s</string>
+    <string name="operation_failure_rollback_applied">rollback выполнен</string>
     <string name="operation_start">запуск</string>
     <string name="operation_stop">остановка</string>
     <string name="operation_reload">перезагрузка</string>

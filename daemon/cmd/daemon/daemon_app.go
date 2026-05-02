@@ -114,8 +114,40 @@ func configureProcess(opts daemonOptions) (func(), error) {
 			return nil, fmt.Errorf("mkdir %s: %w", sub, err)
 		}
 	}
+	if err := hardenRunDir(filepath.Join(opts.DataDir, "run")); err != nil {
+		cleanupAll()
+		return nil, err
+	}
 
 	return cleanupAll, nil
+}
+
+func hardenRunDir(path string) error {
+	if os.Geteuid() == 0 {
+		gid, err := currentGID(path)
+		if err != nil {
+			return err
+		}
+		if err := os.Chown(path, 0, gid); err != nil {
+			return fmt.Errorf("chown run dir: %w", err)
+		}
+	}
+	if err := os.Chmod(path, 0750); err != nil {
+		return fmt.Errorf("chmod run dir: %w", err)
+	}
+	return nil
+}
+
+func currentGID(path string) (int, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return 0, fmt.Errorf("stat run dir: %w", err)
+	}
+	sys, ok := st.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, fmt.Errorf("stat run dir: unsupported file info")
+	}
+	return int(sys.Gid), nil
 }
 
 func newDaemonApp(opts daemonOptions) (*daemonApp, error) {
@@ -185,6 +217,7 @@ func (a *daemonApp) start() error {
 	if err := a.daemon.ipcServer.Start(); err != nil {
 		return fmt.Errorf("ipc start: %w", err)
 	}
+	a.daemon.refreshRuntimeV2Compatibility()
 	a.maybeAutostart()
 	return nil
 }

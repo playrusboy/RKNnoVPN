@@ -17,6 +17,17 @@ type DiagnosticsReportRequest struct {
 	Lines int
 }
 
+func DecodeBackendStatusParams(params *json.RawMessage) (BackendStatusRequest, error) {
+	request := BackendStatusRequest{}
+	if params == nil {
+		return request, nil
+	}
+	if err := decodeStrict(*params, &request); err != nil {
+		return request, fmt.Errorf("invalid backend.status params: %w", err)
+	}
+	return request, nil
+}
+
 type LogsRequest struct {
 	Lines int
 	Files []string

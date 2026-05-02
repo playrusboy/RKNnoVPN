@@ -12,6 +12,7 @@ import com.rknnovpn.panel.model.DaemonStatus
 import com.rknnovpn.panel.model.Node
 import com.rknnovpn.panel.model.ProfileConfig
 import com.rknnovpn.panel.model.RuntimeOperationResult
+import com.rknnovpn.panel.model.RuntimeOperationStatus
 import com.rknnovpn.panel.model.TrafficStats
 import com.rknnovpn.panel.repository.CommandOutcome
 import com.rknnovpn.panel.repository.ProfileRepository
@@ -77,6 +78,7 @@ class DashboardViewModel @Inject constructor(
     private var latestStatus: DaemonStatus? = null
     private val appStartedAtEpochSeconds = System.currentTimeMillis() / 1000
     private var userRequestedRuntimeOperation = false
+    private var pendingRuntimeOperationKinds: Set<String> = emptySet()
 
     init {
         observeDaemonStatus()
@@ -134,6 +136,7 @@ class DashboardViewModel @Inject constructor(
             return
         }
         userRequestedRuntimeOperation = true
+        pendingRuntimeOperationKinds = setOf("restart", "reload")
         _uiState.update {
             it.copy(
                 runtimeActionActive = true,
@@ -143,8 +146,18 @@ class DashboardViewModel @Inject constructor(
         }
         viewModelScope.launch {
             when (val outcome = statusRepository.reload()) {
+                is CommandOutcome.Accepted -> {
+                    Log.d(TAG, "Backend restart accepted from dashboard")
+                    _uiState.update {
+                        it.copy(
+                            statusMessage = outcome.message,
+                            errorMessage = null,
+                        )
+                    }
+                }
                 is CommandOutcome.Success -> {
                     Log.d(TAG, "Backend restart succeeded from dashboard")
+                    pendingRuntimeOperationKinds = emptySet()
                     _uiState.update {
                         it.copy(
                             statusMessage = messages.get(com.rknnovpn.panel.R.string.daemon_status_restarted),
@@ -154,6 +167,7 @@ class DashboardViewModel @Inject constructor(
                 }
                 is CommandOutcome.Failed -> {
                     Log.w(TAG, "Backend restart failed from dashboard: ${outcome.message}")
+                    pendingRuntimeOperationKinds = emptySet()
                     _uiState.update {
                         it.copy(
                             statusMessage = null,
@@ -195,6 +209,7 @@ class DashboardViewModel @Inject constructor(
                 return@launch
             }
             userRequestedRuntimeOperation = true
+            pendingRuntimeOperationKinds = setOf("start")
             _uiState.update {
                 it.copy(
                     connectionState = ConnectionState.CONNECTING,
@@ -204,12 +219,23 @@ class DashboardViewModel @Inject constructor(
                 )
             }
             when (val outcome = statusRepository.start()) {
+                is CommandOutcome.Accepted -> {
+                    Log.d(TAG, "Start accepted; waiting for lastOperation")
+                    _uiState.update {
+                        it.copy(
+                            statusMessage = outcome.message,
+                            errorMessage = null,
+                        )
+                    }
+                }
                 is CommandOutcome.Success -> {
                     Log.d(TAG, "Start command succeeded; waiting for status poll")
+                    pendingRuntimeOperationKinds = emptySet()
                     // Status will be updated via the observer when the poll fires
                 }
                 is CommandOutcome.Failed -> {
                     Log.w(TAG, "Start failed: ${outcome.message}")
+                    pendingRuntimeOperationKinds = emptySet()
                     _uiState.update {
                         it.copy(
                             connectionState = ConnectionState.ERROR,
@@ -226,6 +252,7 @@ class DashboardViewModel @Inject constructor(
     private fun disconnect() {
         viewModelScope.launch {
             userRequestedRuntimeOperation = true
+            pendingRuntimeOperationKinds = setOf("stop")
             _uiState.update {
                 it.copy(
                     connectionState = ConnectionState.CONNECTING,
@@ -236,8 +263,18 @@ class DashboardViewModel @Inject constructor(
                 )
             }
             when (val outcome = statusRepository.stop()) {
+                is CommandOutcome.Accepted -> {
+                    Log.d(TAG, "Stop accepted; waiting for lastOperation")
+                    _uiState.update {
+                        it.copy(
+                            statusMessage = outcome.message,
+                            errorMessage = null,
+                        )
+                    }
+                }
                 is CommandOutcome.Success -> {
                     Log.d(TAG, "Stop command succeeded; waiting for status poll")
+                    pendingRuntimeOperationKinds = emptySet()
                     // Clear traffic history immediately for snappy feel
                     _trafficRing.clear()
                     _uiState.update {
@@ -248,6 +285,7 @@ class DashboardViewModel @Inject constructor(
                 }
                 is CommandOutcome.Failed -> {
                     Log.w(TAG, "Stop failed: ${outcome.message}")
+                    pendingRuntimeOperationKinds = emptySet()
                     _uiState.update {
                         it.copy(
                             connectionState = ConnectionState.ERROR,
@@ -339,6 +377,10 @@ class DashboardViewModel @Inject constructor(
             _trafficRing.clear()
         }
         latestStatus = status
+        val completedPendingOperation = status.lastOperation
+            ?.takeIf { operation ->
+                status.activeOperation == null && operation.kind in pendingRuntimeOperationKinds
+            }
 
         _uiState.update {
             val showRuntimeHealth = status.shouldShowRuntimeHealth()
@@ -357,7 +399,8 @@ class DashboardViewModel @Inject constructor(
             val lastOperationFailure = lastFailedOperation?.let { operation ->
                 messages.formatOperationFailure(
                     operation.kind.operationNameRes(),
-                    operation.errorMessage.ifBlank { operation.errorCode },
+                    operation,
+                    status.health.rollbackApplied,
                 )
             }
             val visibleLastOperationFailure = if (
@@ -376,6 +419,12 @@ class DashboardViewModel @Inject constructor(
                 ?.let { operation ->
                     formatStuckOperation(operation.stepDetail, operation.step)
                 }
+            val completedPendingMessage = completedPendingOperation
+                ?.takeIf { operation -> operation.succeeded }
+                ?.let(::formatCompletedOperation)
+            val activeOperationMessage = status.activeOperation
+                ?.takeIf { operation -> !operation.stuck }
+                ?.let(::formatActiveOperation)
             it.copy(
                 connectionState = status.state,
                 runtimePhase = status.health.phase,
@@ -409,14 +458,17 @@ class DashboardViewModel @Inject constructor(
                     activeOperationStuckMessage == null &&
                     !operationalDegraded &&
                     visibleLastOperationFailure == null &&
-                    (status.state != ConnectionState.ERROR || hideStaleStatusError) &&
-                    status.activeOperation == null
+                    (status.state != ConnectionState.ERROR || hideStaleStatusError)
                 ) {
-                    it.statusMessage
+                    activeOperationMessage ?: completedPendingMessage ?: it.statusMessage
                 } else {
                     null
                 },
             )
+        }
+        if (completedPendingOperation != null) {
+            pendingRuntimeOperationKinds = emptySet()
+            userRequestedRuntimeOperation = false
         }
     }
 
@@ -446,6 +498,17 @@ class DashboardViewModel @Inject constructor(
             messages.get(com.rknnovpn.panel.R.string.daemon_status_operation_stuck_with_step, currentStep)
         }
     }
+
+    private fun formatActiveOperation(operation: RuntimeOperationStatus): String =
+        messages.formatActiveOperationStep(operation.stepDetail, operation.step, operation.stepCode)
+
+    private fun formatCompletedOperation(operation: RuntimeOperationResult): String =
+        when (operation.kind) {
+            "start" -> messages.get(com.rknnovpn.panel.R.string.state_connected)
+            "stop" -> messages.get(com.rknnovpn.panel.R.string.daemon_status_stopped)
+            "restart", "reload" -> messages.get(com.rknnovpn.panel.R.string.daemon_status_restarted)
+            else -> messages.get(com.rknnovpn.panel.R.string.dns_ok)
+        }
 
     private fun formatActiveNodeName(status: DaemonStatus, profile: ProfileConfig?): String? {
         val mode = effectiveActiveNodeMode(status, profile)

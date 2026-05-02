@@ -7,6 +7,7 @@ import com.rknnovpn.panel.ipc.ConfigMutationInfo
 import com.rknnovpn.panel.ipc.DaemonClientErrorCodes
 import com.rknnovpn.panel.ipc.DaemonClientResult
 import com.rknnovpn.panel.ipc.RejectedSubscriptionNode
+import com.rknnovpn.panel.model.RuntimeOperationResult
 import com.rknnovpn.panel.model.RuntimeStageReport
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.json.booleanOrNull
@@ -136,6 +137,47 @@ class UserMessageFormatter @Inject constructor(
 
     fun formatOperationFailure(@StringRes operationResId: Int, reason: String): String =
         get(R.string.error_operation_failed_with_reason, get(operationResId), formatRuntimeReason(reason))
+
+    fun formatOperationAccepted(@StringRes operationResId: Int): String =
+        get(R.string.operation_accepted_with_name, get(operationResId))
+
+    fun formatOperationFailure(
+        @StringRes operationResId: Int,
+        operation: RuntimeOperationResult,
+        rollbackApplied: Boolean = false,
+    ): String {
+        val message = operation.errorMessage.trim()
+        val code = operation.errorCode.trim()
+        val reason = message.ifBlank { code }.ifBlank { get(R.string.daemon_status_unknown_text) }
+        val details = buildList {
+            if (message.isNotBlank() && code.isNotBlank()) {
+                add(get(R.string.operation_failure_code, code))
+            }
+            operation.phase.name
+                .takeIf { it.isNotBlank() }
+                ?.let { add(get(R.string.operation_failure_stage, it)) }
+            if (rollbackApplied) {
+                add(get(R.string.operation_failure_rollback_applied))
+            }
+        }
+        val fullReason = if (details.isEmpty()) {
+            reason
+        } else {
+            "$reason (${details.joinToString(", ")})"
+        }
+        return formatOperationFailure(operationResId, fullReason)
+    }
+
+    fun formatActiveOperationStep(stepDetail: String, step: String, stepCode: String): String {
+        val currentStep = stepDetail.ifBlank { step }.trim()
+        val code = stepCode.trim()
+        return when {
+            currentStep.isBlank() && code.isBlank() -> get(R.string.operation_accepted)
+            code.isBlank() -> get(R.string.operation_active_step, currentStep)
+            currentStep.isBlank() -> get(R.string.operation_active_step, code)
+            else -> get(R.string.operation_active_step_with_code, currentStep, code)
+        }
+    }
 
     fun formatConfigMutationNotice(info: ConfigMutationInfo): String? {
         val base = when (info.runtimeApply) {

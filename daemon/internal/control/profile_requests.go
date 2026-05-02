@@ -19,6 +19,17 @@ type ImportNodesRequest struct {
 	Reload bool
 }
 
+type ImportNodesBatchRequest struct {
+	BatchID      string
+	TotalBatches int
+	Nodes        []profiledoc.Node
+}
+
+type CommitImportBatchRequest struct {
+	BatchID string
+	Reload  bool
+}
+
 type SetActiveNodeRequest struct {
 	NodeID string
 	Reload bool
@@ -92,6 +103,68 @@ func DecodeImportNodesParams(params *json.RawMessage, now time.Time) (ImportNode
 		}
 	}
 	result.Nodes = p.Nodes
+	return result, nil
+}
+
+func DecodeImportNodesBatchParams(params *json.RawMessage, now time.Time) (ImportNodesBatchRequest, error) {
+	var result ImportNodesBatchRequest
+	if params == nil {
+		return result, fmt.Errorf("params required: {\"batchId\": \"...\", \"totalBatches\": 1, \"nodes\": [...]}")
+	}
+	var p struct {
+		BatchID      string            `json:"batchId"`
+		TotalBatches int               `json:"totalBatches"`
+		Nodes        []profiledoc.Node `json:"nodes"`
+	}
+	if err := json.Unmarshal(*params, &p); err != nil {
+		return result, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.BatchID == "" {
+		return result, fmt.Errorf("batchId is required")
+	}
+	if p.TotalBatches <= 0 {
+		return result, fmt.Errorf("totalBatches must be positive")
+	}
+	if len(p.Nodes) == 0 {
+		return result, fmt.Errorf("nodes must not be empty")
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	createdAt := now.UnixMilli()
+	for i := range p.Nodes {
+		p.Nodes[i].Stale = false
+		p.Nodes[i].Source = profiledoc.NodeSource{Type: "MANUAL"}
+		if p.Nodes[i].CreatedAt == 0 {
+			p.Nodes[i].CreatedAt = createdAt
+		}
+	}
+	result.BatchID = p.BatchID
+	result.TotalBatches = p.TotalBatches
+	result.Nodes = p.Nodes
+	return result, nil
+}
+
+func DecodeCommitImportBatchParams(params *json.RawMessage) (CommitImportBatchRequest, error) {
+	var result CommitImportBatchRequest
+	result.Reload = true
+	if params == nil {
+		return result, fmt.Errorf("params required: {\"batchId\": \"...\"}")
+	}
+	var p struct {
+		BatchID string `json:"batchId"`
+		Reload  *bool  `json:"reload"`
+	}
+	if err := json.Unmarshal(*params, &p); err != nil {
+		return result, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.BatchID == "" {
+		return result, fmt.Errorf("batchId is required")
+	}
+	if p.Reload != nil {
+		result.Reload = *p.Reload
+	}
+	result.BatchID = p.BatchID
 	return result, nil
 }
 

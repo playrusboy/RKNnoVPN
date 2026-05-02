@@ -7,12 +7,13 @@ import com.rknnovpn.panel.BuildConfig
 import com.rknnovpn.panel.i18n.UserMessageFormatter
 import com.rknnovpn.panel.ipc.DaemonClient
 import com.rknnovpn.panel.ipc.DaemonClientResult
-import com.rknnovpn.panel.ipc.GeneratedDaemonContract
 import com.rknnovpn.panel.model.ConnectionState
 import com.rknnovpn.panel.model.DaemonStatus
 import com.rknnovpn.panel.model.DnsIpv6Mode
 import com.rknnovpn.panel.model.FallbackPolicy
 import com.rknnovpn.panel.model.ProfileConfig
+import com.rknnovpn.panel.model.RuntimeOperationResult
+import com.rknnovpn.panel.model.RuntimeOperationStatus
 import com.rknnovpn.panel.model.UpdateInstallState
 import com.rknnovpn.panel.repository.CommandOutcome
 import com.rknnovpn.panel.repository.ProfileRepository
@@ -28,18 +29,6 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 private const val TAG = "SettingsViewModel"
-private val APPLYING_OPERATION_REQUIRED_STAGES = setOf(
-    "validate",
-    "render",
-    "persist-draft",
-    "runtime-apply",
-    "verify",
-    "commit-generation",
-    "cleanup",
-)
-private val APPLYING_OPERATION_KINDS = GeneratedDaemonContract.OPERATION_POLICIES
-    .filterValues { policy -> APPLYING_OPERATION_REQUIRED_STAGES.all { it in policy.stages } }
-    .keys
 
 enum class RoutingMode { GLOBAL, WHITELIST, BYPASS, RULES, DIRECT }
 
@@ -135,6 +124,7 @@ class SettingsViewModel @Inject constructor(
     val updateState: StateFlow<UpdateUiState> = _updateState.asStateFlow()
 
     private var lastCheckedHasUpdate: Boolean = false
+    private var pendingDaemonOperationKinds: Set<String> = emptySet()
 
     init {
         observeProfile()
@@ -521,6 +511,7 @@ class SettingsViewModel @Inject constructor(
 
     fun restartDaemon() {
         if (_uiState.value.runtimeActionActive) return
+        pendingDaemonOperationKinds = setOf("restart", "reload")
         _uiState.update {
             it.copy(
                 daemonStatusText = messages.get(com.rknnovpn.panel.R.string.daemon_status_restarting),
@@ -530,14 +521,22 @@ class SettingsViewModel @Inject constructor(
         }
         viewModelScope.launch {
             when (val outcome = statusRepository.reload()) {
+                is CommandOutcome.Accepted -> {
+                    Log.d(TAG, "Backend restart accepted")
+                    _uiState.update {
+                        it.copy(daemonStatusText = outcome.message)
+                    }
+                }
                 is CommandOutcome.Success -> {
                     Log.d(TAG, "Backend restart succeeded")
+                    pendingDaemonOperationKinds = emptySet()
                     _uiState.update {
                         it.copy(daemonStatusText = messages.get(com.rknnovpn.panel.R.string.daemon_status_restarted))
                     }
                 }
                 is CommandOutcome.Failed -> {
                     Log.w(TAG, "Backend restart failed: ${outcome.message}")
+                    pendingDaemonOperationKinds = emptySet()
                     _uiState.update {
                         it.copy(
                             daemonStatusText = messages.get(com.rknnovpn.panel.R.string.state_error),
@@ -827,6 +826,10 @@ class SettingsViewModel @Inject constructor(
                 .collect { status ->
                     val completedUpdateInstall = status.lastOperation
                         ?.takeIf { operation -> operation.kind == "update-install" && status.activeOperation == null }
+                    val completedDaemonOperation = status.lastOperation
+                        ?.takeIf { operation ->
+                            operation.kind in pendingDaemonOperationKinds && status.activeOperation == null
+                        }
                     if (completedUpdateInstall != null) {
                         _updateState.update { current ->
                             if (current.status != UpdateStatus.INSTALLING) {
@@ -864,25 +867,54 @@ class SettingsViewModel @Inject constructor(
                             ?.takeIf { operation -> it.isResetting && operation.kind == "reset" && status.activeOperation == null }
                         if (resetResult != null) {
                             val report = resetResult.resetReport
+                            val resetFailure = resetResult
+                                .takeUnless { operation -> operation.succeeded }
+                                ?.let { operation ->
+                                    messages.formatOperationFailure(
+                                        operation.kind.operationNameRes(),
+                                        operation,
+                                        status.health.rollbackApplied,
+                                    )
+                                }
                             it.copy(
                                 daemonStatusText = if (resetResult.succeeded) {
                                     messages.get(com.rknnovpn.panel.R.string.daemon_status_stopped)
                                 } else {
                                     messages.get(com.rknnovpn.panel.R.string.daemon_status_partial_reset)
                                 },
-                                errorMessage = resetResult.errorMessage.ifBlank { null },
+                                errorMessage = resetFailure,
                                 lastResetSummary = report?.let(::summarizeResetReport)
                                     ?: resetResult.errorMessage.ifBlank { messages.get(com.rknnovpn.panel.R.string.state_error) },
                                 isResetting = false,
                                 runtimeActionActive = false,
                             )
                         } else {
+                            val completedDaemonFailure = completedDaemonOperation
+                                ?.takeUnless { operation -> operation.succeeded }
+                                ?.let { operation ->
+                                    messages.formatOperationFailure(
+                                        operation.kind.operationNameRes(),
+                                        operation,
+                                        status.health.rollbackApplied,
+                                    )
+                                }
                             it.copy(
-                                daemonStatusText = formatRuntimeStatus(status, it.daemonStatusText),
+                                daemonStatusText = when {
+                                    completedDaemonOperation?.succeeded == true ->
+                                        formatCompletedOperation(completedDaemonOperation)
+                                    completedDaemonFailure != null ->
+                                        messages.get(com.rknnovpn.panel.R.string.state_error)
+                                    else ->
+                                        formatRuntimeStatus(status, it.daemonStatusText)
+                                },
+                                errorMessage = completedDaemonFailure ?: it.errorMessage,
                                 isResetting = status.activeOperation?.kind == "reset",
                                 runtimeActionActive = status.activeOperation != null,
                             )
                         }
+                    }
+                    if (completedDaemonOperation != null) {
+                        pendingDaemonOperationKinds = emptySet()
                     }
                 }
         }
@@ -985,12 +1017,8 @@ class SettingsViewModel @Inject constructor(
                             status.activeOperation.stepDetail,
                             status.activeOperation.step,
                         )
-                    status.activeOperation?.kind == "reset" ->
-                        messages.get(com.rknnovpn.panel.R.string.daemon_status_resetting)
-                    status.activeOperation?.kind == "restart" || status.activeOperation?.kind == "reload" ->
-                        messages.get(com.rknnovpn.panel.R.string.daemon_status_restarting)
-                    status.activeOperation?.kind in APPLYING_OPERATION_KINDS ->
-                        messages.get(com.rknnovpn.panel.R.string.daemon_status_applying)
+                    status.activeOperation != null ->
+                        formatActiveOperation(status.activeOperation)
                     else ->
                         messages.get(com.rknnovpn.panel.R.string.state_connecting)
                 }
@@ -1005,6 +1033,17 @@ class SettingsViewModel @Inject constructor(
                 messages.get(com.rknnovpn.panel.R.string.daemon_status_unknown_text)
         }
     }
+
+    private fun formatActiveOperation(operation: RuntimeOperationStatus): String =
+        messages.formatActiveOperationStep(operation.stepDetail, operation.step, operation.stepCode)
+
+    private fun formatCompletedOperation(operation: RuntimeOperationResult): String =
+        when (operation.kind) {
+            "restart", "reload" -> messages.get(com.rknnovpn.panel.R.string.daemon_status_restarted)
+            "start" -> messages.get(com.rknnovpn.panel.R.string.state_connected)
+            "stop" -> messages.get(com.rknnovpn.panel.R.string.daemon_status_stopped)
+            else -> messages.get(com.rknnovpn.panel.R.string.dns_ok)
+        }
 
     private fun formatStuckOperation(stepDetail: String, step: String): String {
         val currentStep = stepDetail.ifBlank { step }.trim()
@@ -1084,4 +1123,15 @@ class SettingsViewModel @Inject constructor(
             }
         }
     }
+}
+
+private fun String.operationNameRes(): Int = when (this) {
+    "start" -> com.rknnovpn.panel.R.string.operation_start
+    "stop" -> com.rknnovpn.panel.R.string.operation_stop
+    "restart", "reload" -> com.rknnovpn.panel.R.string.operation_reload
+    "applyDesiredState" -> com.rknnovpn.panel.R.string.operation_apply_desired_state
+    "profile-apply" -> com.rknnovpn.panel.R.string.operation_profile_apply
+    "config-mutation" -> com.rknnovpn.panel.R.string.operation_config_import
+    "reset" -> com.rknnovpn.panel.R.string.reset_network_rules
+    else -> com.rknnovpn.panel.R.string.operation_runtime
 }

@@ -3,6 +3,7 @@ package ipc
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -67,7 +68,7 @@ func (s *Server) Methods() []string {
 // Start begins listening on the Unix domain socket and accepting connections.
 func (s *Server) Start() error {
 	// Remove stale socket file if it exists.
-	if err := os.Remove(s.socketPath); err != nil && !os.IsNotExist(err) {
+	if err := removeStaleSocket(s.socketPath); err != nil {
 		return err
 	}
 
@@ -98,9 +99,28 @@ func (s *Server) Stop() {
 			s.listener.Close()
 		}
 		s.wg.Wait()
-		os.Remove(s.socketPath)
+		if err := removeStaleSocket(s.socketPath); err != nil {
+			log.Printf("ipc: warning: remove socket: %v", err)
+		}
 		log.Printf("ipc: server stopped")
 	})
+}
+
+func removeStaleSocket(path string) error {
+	st, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if st.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("refuse to remove non-socket: %s", path)
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func (s *Server) acceptLoop() {

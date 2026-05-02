@@ -12,7 +12,7 @@ func (d *daemon) runtimeControlHandlers() control.RuntimeHandlers {
 		Initialized: func() bool {
 			return d.runtimeV2 != nil
 		},
-		RefreshCompatibility:  d.refreshRuntimeV2Compatibility,
+		RefreshCompatibility:  d.maybeRefreshRuntimeV2Compatibility,
 		RefreshActiveProgress: d.runtimeV2.RefreshActiveProgress,
 		Status:                d.runtimeV2.Status,
 		RuntimeStats:          d.currentRuntimeTrafficStats,

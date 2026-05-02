@@ -112,6 +112,12 @@ internal fun parseVersionInfo(element: JsonElement): VersionInfo {
             ?: 0,
         schemaVersion = obj["schema_version"]?.jsonPrimitive?.intOrNull ?: 0,
         ipcContractVersion = obj["ipc_contract_version"]?.jsonPrimitive?.intOrNull ?: 0,
+        contractHash = obj.stringValue("contract_hash", "contractHash"),
+        compatibilityFingerprint = obj.stringValue("compatibility_fingerprint", "compatibilityFingerprint"),
+        daemonPid = obj["daemon_pid"]?.jsonPrimitive?.intOrNull
+            ?: obj["daemonPid"]?.jsonPrimitive?.intOrNull
+            ?: 0,
+        socketInode = obj.stringValue("socket_inode", "socketInode"),
         panelMinVersion = obj["panel_min_version"]?.jsonPrimitive?.contentOrNull ?: "",
         capabilities = obj["capabilities"]?.jsonArray?.mapNotNull {
             it.jsonPrimitive.contentOrNull
@@ -128,6 +134,9 @@ internal fun parseVersionInfo(element: JsonElement): VersionInfo {
         methods = obj.methodContracts("methods"),
     )
 }
+
+private fun JsonObject.stringValue(vararg keys: String): String =
+    keys.firstNotNullOfOrNull { key -> this[key]?.jsonPrimitive?.contentOrNull }.orEmpty()
 
 private fun JsonObject.stringList(vararg keys: String): List<String> {
     val element = keys.firstNotNullOfOrNull { key -> this[key] } ?: return emptyList()

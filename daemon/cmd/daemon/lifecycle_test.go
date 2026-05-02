@@ -3,8 +3,40 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
+
+func TestHardenRunDirTightensModeAndRootOwnerWhenRoot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run")
+	if err := os.Mkdir(path, 0777); err != nil {
+		t.Fatalf("mkdir run: %v", err)
+	}
+	if err := os.Chmod(path, 0777); err != nil {
+		t.Fatalf("chmod setup: %v", err)
+	}
+
+	if err := hardenRunDir(path); err != nil {
+		t.Fatalf("harden run dir: %v", err)
+	}
+
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat run dir: %v", err)
+	}
+	if got := st.Mode().Perm(); got != 0750 {
+		t.Fatalf("run dir mode = %o, want 0750", got)
+	}
+	if os.Geteuid() == 0 {
+		sys, ok := st.Sys().(*syscall.Stat_t)
+		if !ok {
+			t.Fatalf("expected syscall.Stat_t")
+		}
+		if sys.Uid != 0 {
+			t.Fatalf("run dir uid = %d, want 0", sys.Uid)
+		}
+	}
+}
 
 func TestRemovePIDIfOwnedKeepsNewDaemonPID(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "daemon.pid")

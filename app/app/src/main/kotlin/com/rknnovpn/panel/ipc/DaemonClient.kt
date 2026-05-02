@@ -21,6 +21,7 @@ import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -54,6 +55,9 @@ class DaemonClient @Inject constructor(
         isLenient = true
         coerceInputValues = true
     }
+
+    @Volatile
+    private var compatibilityCache: CompatibilityCache? = null
 
     fun toDaemonStatus(status: BackendStatusV2): DaemonStatus = status.toDaemonStatus()
 
@@ -106,14 +110,8 @@ class DaemonClient @Inject constructor(
 
     /** Run a full health check and return the result in the dashboard shape. */
     suspend fun health(): DaemonClientResult<DaemonStatus> {
-        return when (val statusResult = backendStatus()) {
-            is DaemonClientResult.Ok -> when (val healthResult = diagnosticsHealth()) {
-                is DaemonClientResult.Ok -> {
-                    DaemonClientResult.Ok(statusResult.data.toDaemonStatus(healthOverride = healthResult.data))
-                }
-                is DaemonClientResult.DaemonError -> healthResult.asFailure()
-                else -> healthResult.asFailure()
-            }
+        return when (val statusResult = backendStatus(includeHealthRefresh = true)) {
+            is DaemonClientResult.Ok -> DaemonClientResult.Ok(statusResult.data.toDaemonStatus())
             is DaemonClientResult.DaemonError -> statusResult.asFailure()
             else -> statusResult.asFailure()
         }
@@ -141,12 +139,16 @@ class DaemonClient @Inject constructor(
         reload: Boolean = true,
     ): DaemonClientResult<ConfigMutationInfo> {
         requireCompatible("profile.apply", allowModuleRepair = true)?.let { return it.asFailure() }
+        val params = buildJsonObject {
+            put("profile", json.encodeToJsonElement(ProfileConfig.serializer(), config))
+            put("reload", reload)
+        }
+        if (jsonRpcRequestFrameByteSize("profile.apply", params) > IPC_MAX_FRAME_BYTES) {
+            return payloadTooLargeError()
+        }
         return callConfigMutation(
             "profile.apply",
-            buildJsonObject {
-                put("profile", json.encodeToJsonElement(ProfileConfig.serializer(), config))
-                put("reload", reload)
-            },
+            params,
         )
     }
 
@@ -155,12 +157,13 @@ class DaemonClient @Inject constructor(
         reload: Boolean = true,
     ): DaemonClientResult<ConfigMutationInfo> {
         requireCompatible("profile.importNodes", allowModuleRepair = true)?.let { return it.asFailure() }
+        val params = importNodesParams(nodes, reload)
+        if (jsonRpcRequestFrameByteSize("profile.importNodes", params) > IPC_MAX_FRAME_BYTES) {
+            return profileImportNodesBatched(nodes, reload)
+        }
         return callConfigMutation(
             "profile.importNodes",
-            buildJsonObject {
-                put("nodes", json.encodeToJsonElement(ListSerializer(Node.serializer()), nodes))
-                put("reload", reload)
-            },
+            params,
         )
     }
 
@@ -217,8 +220,17 @@ class DaemonClient @Inject constructor(
         }
     }
 
-    suspend fun backendStatus(): DaemonClientResult<BackendStatusV2> =
-        call("backend.status") { json.decodeFromJsonElement(BackendStatusV2.serializer(), it) }
+    suspend fun backendStatus(includeHealthRefresh: Boolean = false): DaemonClientResult<BackendStatusV2> {
+        val params = if (includeHealthRefresh) {
+            buildJsonObject { put("includeHealthRefresh", true) }
+        } else {
+            emptyJsonObject()
+        }
+        val timeoutMs = if (includeHealthRefresh) 30_000L else 5_000L
+        return call("backend.status", params = params, timeoutMs = timeoutMs) {
+            json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
+        }
+    }
 
     suspend fun backendStart(): DaemonClientResult<BackendStatusV2> {
         requireCompatible("backend.start", "backend.status", allowModuleRepair = true)?.let { return it.asFailure() }
@@ -427,6 +439,100 @@ class DaemonClient @Inject constructor(
             }
     }
 
+    private suspend fun profileImportNodesBatched(
+        nodes: List<Node>,
+        reload: Boolean,
+    ): DaemonClientResult<ConfigMutationInfo> {
+        requireCompatible("profile.importNodesBatch", allowModuleRepair = true)?.let {
+            return payloadTooLargeError()
+        }
+        requireCompatible("profile.commitImportBatch", allowModuleRepair = true)?.let {
+            return payloadTooLargeError()
+        }
+        val batches = splitImportNodeBatches(nodes)
+        if (batches.isEmpty()) {
+            return payloadTooLargeError()
+        }
+        val batchId = "apk-${UUID.randomUUID()}"
+        val totalBatches = batches.size
+        for (batch in batches) {
+            val result = call(
+                "profile.importNodesBatch",
+                importNodesBatchParams(batchId, totalBatches, batch),
+                timeoutMs = 60_000L,
+                allowModuleRepair = true,
+            ) {
+                Unit
+            }
+            if (result !is DaemonClientResult.Ok) {
+                return result.asFailure()
+            }
+        }
+        return callConfigMutation(
+            "profile.commitImportBatch",
+            buildJsonObject {
+                put("batchId", batchId)
+                put("reload", reload)
+            },
+        )
+    }
+
+    private fun splitImportNodeBatches(nodes: List<Node>): List<List<Node>> {
+        val result = mutableListOf<List<Node>>()
+        val current = mutableListOf<Node>()
+        val maxTotalBatchesDigits = nodes.size.coerceAtLeast(1)
+        for (node in nodes) {
+            val candidate = current + node
+            val candidateParams = importNodesBatchParams(
+                batchId = "apk-00000000-0000-0000-0000-000000000000",
+                totalBatches = maxTotalBatchesDigits,
+                nodes = candidate,
+            )
+            if (
+                current.isNotEmpty() &&
+                jsonRpcRequestFrameByteSize("profile.importNodesBatch", candidateParams) > IPC_IMPORT_BATCH_TARGET_BYTES
+            ) {
+                result += current.toList()
+                current.clear()
+            }
+            current += node
+            val singleParams = importNodesBatchParams(
+                batchId = "apk-00000000-0000-0000-0000-000000000000",
+                totalBatches = maxTotalBatchesDigits,
+                nodes = current,
+            )
+            if (jsonRpcRequestFrameByteSize("profile.importNodesBatch", singleParams) > IPC_IMPORT_BATCH_TARGET_BYTES) {
+                return emptyList()
+            }
+        }
+        if (current.isNotEmpty()) {
+            result += current.toList()
+        }
+        return result
+    }
+
+    private fun importNodesParams(nodes: List<Node>, reload: Boolean): JsonObject =
+        buildJsonObject {
+            put("nodes", json.encodeToJsonElement(ListSerializer(Node.serializer()), nodes))
+            put("reload", reload)
+        }
+
+    private fun importNodesBatchParams(
+        batchId: String,
+        totalBatches: Int,
+        nodes: List<Node>,
+    ): JsonObject = buildJsonObject {
+        put("batchId", batchId)
+        put("totalBatches", totalBatches)
+        put("nodes", json.encodeToJsonElement(ListSerializer(Node.serializer()), nodes))
+    }
+
+    private fun payloadTooLargeError(): DaemonClientResult.DaemonError =
+        DaemonClientResult.DaemonError(
+            code = -32602,
+            message = IPC_PAYLOAD_TOO_LARGE_MESSAGE,
+        )
+
     private suspend fun requireCompatible(
         vararg requiredMethods: String,
         allowModuleRepair: Boolean = false,
@@ -440,6 +546,25 @@ class DaemonClient @Inject constructor(
                         "APK и модуль несовместимы: daemon не рекламирует IPC contract",
                     )
                 }
+                val fingerprint = info.compatibilityFingerprint()
+                compatibilityCache
+                    ?.takeIf { it.fingerprint == fingerprint }
+                    ?.takeIf { cache -> cache.supports(requiredMethods.toList() + listOf("ipc.contract", "version")) }
+                    ?.let { cache ->
+                        val cachedIssue = ipcCompatibilityIssue(
+                            info = info,
+                            contract = cache.contract,
+                            apkVersion = BuildConfig.VERSION_NAME,
+                            requiredMethods = requiredMethods.toList(),
+                            minControlProtocolVersion = MIN_CONTROL_PROTOCOL_VERSION,
+                            minSchemaVersion = MIN_SCHEMA_VERSION,
+                        )
+                        return if (cachedIssue == null) {
+                            null
+                        } else {
+                            DaemonClientResult.DaemonError(DaemonClientErrorCodes.COMPATIBILITY, cachedIssue)
+                        }
+                    }
                 val contract = when (val contractResult = ipcContract(allowModuleRepair)) {
                     is DaemonClientResult.Ok -> contractResult.data
                     is DaemonClientResult.DaemonError -> return DaemonClientResult.DaemonError(
@@ -466,6 +591,12 @@ class DaemonClient @Inject constructor(
                     minSchemaVersion = MIN_SCHEMA_VERSION,
                 )
                 if (issue == null) {
+                    compatibilityCache = CompatibilityCache(
+                        fingerprint = fingerprint,
+                        contract = contract,
+                        supportedMethods = contract.methods.mapTo(mutableSetOf()) { it.method },
+                        checkedAtMs = System.currentTimeMillis(),
+                    )
                     null
                 } else {
                     DaemonClientResult.DaemonError(DaemonClientErrorCodes.COMPATIBILITY, issue)
@@ -489,6 +620,30 @@ class DaemonClient @Inject constructor(
         }
     }
 
+}
+
+private data class CompatibilityCache(
+    val fingerprint: String,
+    val contract: IpcContractInfo,
+    val supportedMethods: Set<String>,
+    val checkedAtMs: Long,
+) {
+    fun supports(methods: Collection<String>): Boolean =
+        supportedMethods.isNotEmpty() && methods.all { it in supportedMethods }
+}
+
+private fun VersionInfo.compatibilityFingerprint(): String {
+    compatibilityFingerprint.takeIf { it.isNotBlank() }?.let { return it }
+    return listOf(
+        daemonVersion,
+        moduleVersion,
+        controlProtocolVersion.toString(),
+        schemaVersion.toString(),
+        ipcContractVersion.toString(),
+        contractHash,
+        daemonPid.toString(),
+        socketInode,
+    ).joinToString(":")
 }
 
 private const val ACCEPT_TIMEOUT_MS = 10_000L

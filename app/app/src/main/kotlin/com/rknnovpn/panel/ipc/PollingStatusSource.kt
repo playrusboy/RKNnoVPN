@@ -99,6 +99,10 @@ class PollingStatusSource @Inject constructor(
         publishStatus(client.toDaemonStatus(status))
     }
 
+    fun publishDaemonStatus(status: DaemonStatus) {
+        publishStatus(status)
+    }
+
     // ---- Internal ----
 
     private suspend fun pollLoop() {

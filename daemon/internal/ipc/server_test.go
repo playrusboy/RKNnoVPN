@@ -2,10 +2,46 @@ package ipc
 
 import (
 	"encoding/json"
+	"net"
+	"os"
 	"slices"
 	"strings"
 	"testing"
 )
+
+func TestRemoveStaleSocketRefusesNonSocket(t *testing.T) {
+	path := t.TempDir() + "/daemon.sock"
+	if err := os.WriteFile(path, []byte("not a socket"), 0600); err != nil {
+		t.Fatalf("write placeholder: %v", err)
+	}
+
+	err := removeStaleSocket(path)
+
+	if err == nil || !strings.Contains(err.Error(), "refuse to remove non-socket") {
+		t.Fatalf("expected non-socket refusal, got %v", err)
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("non-socket path should remain: %v", statErr)
+	}
+}
+
+func TestRemoveStaleSocketRemovesSocket(t *testing.T) {
+	path := t.TempDir() + "/daemon.sock"
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("listen unix: %v", err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close listener: %v", err)
+	}
+
+	if err := removeStaleSocket(path); err != nil {
+		t.Fatalf("remove stale socket: %v", err)
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatalf("socket should be removed, err=%v", err)
+	}
+}
 
 func TestMethodNotFoundForLegacyConfigImportReturnsCanonicalHint(t *testing.T) {
 	server := NewServer(t.TempDir() + "/daemon.sock")

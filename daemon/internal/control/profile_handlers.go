@@ -18,8 +18,11 @@ type ProfileHandlers struct {
 	PersistConfigMutation PersistConfigMutationFunc
 	RuntimeStatus         RuntimeStatusFunc
 	SubscriptionClient    subscription.Client
+	ImportBatches         *ImportBatchStore
 	Now                   func() time.Time
 }
+
+var defaultImportBatchStore = NewImportBatchStore()
 
 func (h ProfileHandlers) ProfileGet(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	current, rpcErr := h.currentProfile()
@@ -53,6 +56,57 @@ func (h ProfileHandlers) ProfileImportNodes(params *json.RawMessage) (interface{
 	}
 	if obj, ok := result.(map[string]interface{}); ok {
 		obj["imported"] = len(request.Nodes)
+		obj["merge"] = stats
+	}
+	return result, nil
+}
+
+func (h ProfileHandlers) ProfileImportNodesBatch(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	request, err := DecodeImportNodesBatchParams(params, h.now())
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
+	}
+	state, err := h.importBatchStore().Add(request.BatchID, request.TotalBatches, request.Nodes, h.now())
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
+	}
+	return map[string]interface{}{
+		"batchId":         state.BatchID,
+		"totalBatches":    state.TotalBatches,
+		"receivedBatches": state.ReceivedBatches,
+		"receivedNodes":   state.ReceivedNodes,
+		"ready":           state.Ready,
+	}, nil
+}
+
+func (h ProfileHandlers) ProfileCommitImportBatch(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	request, err := DecodeCommitImportBatchParams(params)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
+	}
+	nodes, state, err := h.importBatchStore().Commit(request.BatchID, h.now())
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error(), Data: map[string]interface{}{
+			"batchId":         state.BatchID,
+			"totalBatches":    state.TotalBatches,
+			"receivedBatches": state.ReceivedBatches,
+			"receivedNodes":   state.ReceivedNodes,
+			"ready":           state.Ready,
+		}}
+	}
+	current, rpcErr := h.currentProfile()
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	next, stats := profiledoc.MergeNodes(current, nodes)
+	result, rpcErr := h.applyProfile(next, request.Reload, "profile.commitImportBatch", len(nodes))
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if obj, ok := result.(map[string]interface{}); ok {
+		obj["batchId"] = state.BatchID
+		obj["totalBatches"] = state.TotalBatches
+		obj["imported"] = len(nodes)
 		obj["merge"] = stats
 	}
 	return result, nil
@@ -195,6 +249,13 @@ func (h ProfileHandlers) subscriptionClient() subscription.Client {
 		client.Now = h.Now
 	}
 	return client
+}
+
+func (h ProfileHandlers) importBatchStore() *ImportBatchStore {
+	if h.ImportBatches != nil {
+		return h.ImportBatches
+	}
+	return defaultImportBatchStore
 }
 
 func (h ProfileHandlers) now() time.Time {

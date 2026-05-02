@@ -230,22 +230,26 @@ type BackendCapability struct {
 }
 
 type CompatibilityStatus struct {
-	DaemonVersion          string                     `json:"daemonVersion,omitempty"`
-	ModuleVersion          string                     `json:"moduleVersion,omitempty"`
-	CurrentReleaseVersion  string                     `json:"currentReleaseVersion,omitempty"`
-	CurrentReleaseOK       bool                       `json:"currentReleaseOk"`
-	CurrentReleaseError    string                     `json:"currentReleaseError,omitempty"`
-	ControlProtocolVersion int                        `json:"controlProtocolVersion"`
-	SchemaVersion          int                        `json:"schemaVersion"`
-	IPCContractVersion     int                        `json:"ipcContractVersion"`
-	PanelMinVersion        string                     `json:"panelMinVersion,omitempty"`
-	Capabilities           []string                   `json:"capabilities,omitempty"`
-	SupportedMethods       []string                   `json:"supportedMethods,omitempty"`
-	APKRequiredMethods     []string                   `json:"apkRequiredMethods,omitempty"`
-	ErrorCodes             []string                   `json:"errorCodes,omitempty"`
-	CompatibilityPolicies  []string                   `json:"compatibilityPolicies,omitempty"`
-	OperationPolicies      map[string]OperationPolicy `json:"operationPolicies,omitempty"`
-	Methods                []MethodCapability         `json:"methods,omitempty"`
+	DaemonVersion            string                     `json:"daemonVersion,omitempty"`
+	ModuleVersion            string                     `json:"moduleVersion,omitempty"`
+	CurrentReleaseVersion    string                     `json:"currentReleaseVersion,omitempty"`
+	CurrentReleaseOK         bool                       `json:"currentReleaseOk"`
+	CurrentReleaseError      string                     `json:"currentReleaseError,omitempty"`
+	ControlProtocolVersion   int                        `json:"controlProtocolVersion"`
+	SchemaVersion            int                        `json:"schemaVersion"`
+	IPCContractVersion       int                        `json:"ipcContractVersion"`
+	ContractHash             string                     `json:"contractHash,omitempty"`
+	CompatibilityFingerprint string                     `json:"compatibilityFingerprint,omitempty"`
+	DaemonPID                int                        `json:"daemonPid,omitempty"`
+	SocketInode              string                     `json:"socketInode,omitempty"`
+	PanelMinVersion          string                     `json:"panelMinVersion,omitempty"`
+	Capabilities             []string                   `json:"capabilities,omitempty"`
+	SupportedMethods         []string                   `json:"supportedMethods,omitempty"`
+	APKRequiredMethods       []string                   `json:"apkRequiredMethods,omitempty"`
+	ErrorCodes               []string                   `json:"errorCodes,omitempty"`
+	CompatibilityPolicies    []string                   `json:"compatibilityPolicies,omitempty"`
+	OperationPolicies        map[string]OperationPolicy `json:"operationPolicies,omitempty"`
+	Methods                  []MethodCapability         `json:"methods,omitempty"`
 }
 
 type OperationPolicy struct {

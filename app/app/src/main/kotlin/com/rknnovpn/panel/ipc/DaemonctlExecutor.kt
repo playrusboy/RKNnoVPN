@@ -37,8 +37,8 @@ import kotlin.coroutines.resume
  * 1. Builds a JSON-RPC-style request for `daemonctl <method>`
  * 2. Streams optional JSON params via stdin to avoid argv length limits
  * 3. Runs it under `su -c "..."`
- * 4. Captures stdout, parses as JSON
- * 4. Maps the response to [DaemonctlResult]
+ * 4. Captures stdout, parses as JSON-RPC or typed daemon JSON
+ * 5. Maps the response to [DaemonctlResult]
  *
  * Thread-safety: all calls are dispatched on [Dispatchers.IO].
  * Timeout default: 5 000 ms, configurable per-call.
@@ -69,9 +69,8 @@ class DaemonctlExecutor @Inject constructor() {
         private const val TAG = "DaemonctlExecutor"
         private const val DEFAULT_TIMEOUT_MS = 5_000L
         private const val INLINE_PARAMS_LIMIT = 16 * 1024
-        private const val MODULE_SERVICE_PATH = "/data/adb/modules/rknnovpn/service.sh"
-        private const val PROFILE_PATH = "/data/adb/rknnovpn-data/profile.json"
-        private const val LEGACY_PROFILE_PATH = "/data/adb/modules/rknnovpn/config/profile.json"
+        private const val DAEMON_PATH = "/data/adb/modules/rknnovpn/bin/daemon"
+        private const val DAEMON_PID_PATH = "/data/adb/modules/rknnovpn/run/daemon.pid"
         private const val REPAIR_COOLDOWN_MS = 15_000L
         private const val REPAIR_RETRY_DELAY_MS = 1_500L
         private const val REPAIR_RETRY_TIMEOUT_MS = 5_000L
@@ -149,6 +148,17 @@ class DaemonctlExecutor @Inject constructor() {
         params: JsonObject
     ): DaemonctlResult {
         val paramsJson = params.toString()
+        val requestFrameBytes = jsonRpcRequestFrameByteSize(method, params)
+        if (requestFrameBytes > IPC_MAX_FRAME_BYTES) {
+            return DaemonctlResult.Error(
+                code = -32602,
+                message = IPC_PAYLOAD_TOO_LARGE_MESSAGE,
+                details = buildJsonObject {
+                    put("requestBytes", requestFrameBytes)
+                    put("maxFrameBytes", IPC_MAX_FRAME_BYTES)
+                },
+            )
+        }
         val useStdin = params.isNotEmpty() &&
             paramsJson.toByteArray(StandardCharsets.UTF_8).size > INLINE_PARAMS_LIMIT
         val commandString = buildDaemonctlCommand(method, paramsJson, useStdin, params.isEmpty())
@@ -172,20 +182,30 @@ class DaemonctlExecutor @Inject constructor() {
     ): String {
         val prelude = namespaceAwareDaemonctlPrelude()
         val ctl = daemonctlShellRef()
+        val machineMode = "RKNNOVPN_DAEMONCTL_RAW=1"
         return when {
-            paramsEmpty -> "$prelude $ctl ${shellQuote(method)}"
-            useStdin -> "$prelude RKNNOVPN_STDIN_PARAMS=1 $ctl ${shellQuote(method)}"
-            else -> "$prelude $ctl ${shellQuote(method)} ${shellQuote(paramsJson)}"
+            paramsEmpty -> "$prelude $machineMode $ctl ${shellQuote(method)}"
+            useStdin -> "$prelude $machineMode RKNNOVPN_STDIN_PARAMS=1 $ctl ${shellQuote(method)}"
+            else -> "$prelude $machineMode $ctl ${shellQuote(method)} ${shellQuote(paramsJson)}"
         }
     }
 
     private fun namespaceAwareDaemonctlPrelude(): String {
         val dollar = "$"
         return "ctl=${shellQuote(daemonctlPath)}; " +
-            "pid=${dollar}(pidof daemon 2>/dev/null); " +
-            "pid=${dollar}{pid%% *}; " +
-            "if [ -n \"${dollar}pid\" ] && [ -x \"/proc/${dollar}pid/root$daemonctlPath\" ]; then " +
+            "pid=''; " +
+            "if [ -r ${shellQuote(DAEMON_PID_PATH)} ]; then " +
+            "IFS= read -r pid < ${shellQuote(DAEMON_PID_PATH)}; " +
+            "pid=${dollar}{pid%%[!0-9]*}; " +
+            "fi; " +
+            "if [ -n \"${dollar}pid\" ] && [ -d \"/proc/${dollar}pid\" ]; then " +
+            "exe=${dollar}(readlink \"/proc/${dollar}pid/exe\" 2>/dev/null || true); " +
+            "cmd=${dollar}(tr '\\000' ' ' < \"/proc/${dollar}pid/cmdline\" 2>/dev/null || true); " +
+            "case \"${dollar}exe|${dollar}cmd\" in *${shellQuote(DAEMON_PATH)}*) " +
+            "if [ -x \"/proc/${dollar}pid/root$daemonctlPath\" ]; then " +
             "ctl=\"/proc/${dollar}pid/root$daemonctlPath\"; " +
+            "fi ;; " +
+            "esac; " +
             "fi;"
     }
 
@@ -301,7 +321,12 @@ class DaemonctlExecutor @Inject constructor() {
         }
         lastRepairAttemptAtMs = now
 
-        val commandString = "RKNNOVPN_APP_REPAIR=1 /system/bin/sh $MODULE_SERVICE_PATH --app-repair >/dev/null 2>&1 &"
+        val commandString = buildDaemonctlCommand(
+            method = "module.repair",
+            paramsJson = "{}",
+            useStdin = false,
+            paramsEmpty = true,
+        )
         var process: Process? = null
         return try {
             Log.w(TAG, "Daemon IPC unavailable; starting module repair: ${reason.take(160)}")
@@ -310,9 +335,19 @@ class DaemonctlExecutor @Inject constructor() {
                 terminateProcess(process, "app repair launch timeout")
                 false
             } else {
-                val ok = process.exitValue() == 0
+                val stdout = readStreamSafely(process.inputStream, "module-repair-stdout")
+                val stderr = readStreamSafely(process.errorStream, "module-repair-stderr")
+                val result = parseResponse(process.exitValue(), stdout, stderr, "module.repair")
+                val status = (result as? DaemonctlResult.Success)
+                    ?.data
+                    ?.jsonObject
+                    ?.get("status")
+                    ?.jsonPrimitive
+                    ?.contentOrNull
+                    .orEmpty()
+                val ok = status == "repair_started" || status == "repair_running"
                 if (!ok) {
-                    Log.w(TAG, "Module repair launcher exited with ${process.exitValue()}")
+                    Log.w(TAG, "Module repair did not start: status=$status result=$result")
                 }
                 ok
             }
@@ -350,7 +385,9 @@ class DaemonctlExecutor @Inject constructor() {
             "missing" -> DaemonctlResult.DaemonNotFound(daemonctlPath)
             "service_missing" -> DaemonctlResult.DaemonUnavailable("service.sh is missing")
             "daemonctl_missing" -> DaemonctlResult.DaemonNotFound(daemonctlPath)
-            "no_runtime_profile" -> if (!allowModuleRepair && result is DaemonctlResult.DaemonUnavailable) {
+            "repair_running" -> DaemonctlResult.DaemonUnavailable("module repair is running")
+            "repair_failed" -> DaemonctlResult.DaemonUnavailable("module repair failed")
+            "missing_profile", "no_runtime_profile" -> if (!allowModuleRepair && result is DaemonctlResult.DaemonUnavailable) {
                 DaemonctlResult.DaemonUnavailable(NO_RUNTIME_PROFILE_REASON)
             } else {
                 result
@@ -360,32 +397,12 @@ class DaemonctlExecutor @Inject constructor() {
     }
 
     private fun probeModuleInstallState(): String {
-        val commandString = """
-            if [ -d /data/adb/modules_update/rknnovpn ] ||
-               [ -d /data/adb/ksu/modules_update/rknnovpn ] ||
-               [ -d /data/adb/ap/modules_update/rknnovpn ]; then
-              echo pending_update
-            elif [ -e /data/adb/modules/rknnovpn/remove ]; then
-              echo pending_remove
-            elif [ -e /data/adb/modules/rknnovpn/disable ]; then
-              echo disabled
-            elif [ ! -e /data/adb/modules/rknnovpn ]; then
-              echo missing
-            elif [ ! -x /data/adb/modules/rknnovpn/service.sh ]; then
-              echo service_missing
-            elif [ ! -x /data/adb/modules/rknnovpn/bin/daemonctl ]; then
-              echo daemonctl_missing
-            elif { [ ! -f $PROFILE_PATH ] &&
-                   [ ! -f $LEGACY_PROFILE_PATH ]; } ||
-                 { [ -f $PROFILE_PATH ] &&
-                   ! tr -d '\n\r\t ' < $PROFILE_PATH 2>/dev/null | grep -q '"nodes":\[{'; } ||
-                 { [ ! -f $PROFILE_PATH ] &&
-                   ! tr -d '\n\r\t ' < $LEGACY_PROFILE_PATH 2>/dev/null | grep -q '"nodes":\[{'; }; then
-              echo no_runtime_profile
-            else
-              echo active
-            fi
-        """.trimIndent()
+        val commandString = buildDaemonctlCommand(
+            method = "module.state",
+            paramsJson = "{}",
+            useStdin = false,
+            paramsEmpty = true,
+        )
         var process: Process? = null
         return try {
             process = startRootProcess(commandString)
@@ -393,12 +410,27 @@ class DaemonctlExecutor @Inject constructor() {
                 terminateProcess(process, "module state probe timeout")
                 return "unknown"
             }
-            readStreamSafely(process.inputStream, "module-state-stdout")
-                .lineSequence()
-                .firstOrNull()
-                ?.trim()
+            val stdout = readStreamSafely(process.inputStream, "module-state-stdout")
+            val stderr = readStreamSafely(process.errorStream, "module-state-stderr")
+            val result = parseResponse(process.exitValue(), stdout, stderr, "module.state")
+            val state = (result as? DaemonctlResult.Success)
+                ?.data
+                ?.jsonObject
+            val status = state
+                ?.get("status")
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?.ifBlank { "unknown" }
+                ?: "unknown"
+            val repairStatus = state
+                ?.get("repairStatus")
+                ?.jsonPrimitive
+                ?.contentOrNull
                 .orEmpty()
-                .ifBlank { "unknown" }
+            when (repairStatus) {
+                "repair_running", "repair_failed" -> repairStatus
+                else -> status
+            }
         } catch (e: Exception) {
             Log.d(TAG, "Module install state probe failed: ${e.message}")
             "unknown"

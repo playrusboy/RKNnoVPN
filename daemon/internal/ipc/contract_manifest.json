@@ -1,9 +1,12 @@
 {
-  "version": 1,
+  "version": 2,
   "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR", "CONFIG_ERROR", "RUNTIME_BUSY", "RESET_IN_PROGRESS"],
   "compatibilityPolicies": ["release-mismatch-allowed", "requires-schema", "requires-runtime-schema"],
   "requestExamples": {
     "DiagnosticsReportRequest": {"lines": 120},
+    "BackendStatusRequest": {"includeHealthRefresh": true},
+    "CommitImportBatchRequest": {"batchId": "import-1", "reload": true},
+    "ImportNodesBatchRequest": {"batchId": "import-1", "totalBatches": 2, "nodes": [{"id": "node-1", "name": "Local", "protocol": "SOCKS", "server": "127.0.0.1", "port": 10808}]},
     "LogsRequest": {"lines": 100},
     "ResolveUidRequest": {"uid": 10123},
     "SelfCheckRequest": {"lines": 80},
@@ -97,8 +100,10 @@
     "ipc.contract",
     "logs",
     "profile.apply",
+    "profile.commitImportBatch",
     "profile.get",
     "profile.importNodes",
+    "profile.importNodesBatch",
     "profile.setActiveNode",
     "self-check",
     "subscription.preview",
@@ -183,7 +188,7 @@
     {
       "method": "backend.status",
       "capability": "runtime.v2",
-      "request": "empty",
+      "request": "BackendStatusRequest",
       "result": "BackendStatusV2",
       "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR"]
     },
@@ -271,6 +276,19 @@
       }
     },
     {
+      "method": "profile.commitImportBatch",
+      "capability": "profile.importNodes.v2",
+      "compatibility": "requires-schema",
+      "mutating": true,
+      "async": true,
+      "request": "CommitImportBatchRequest",
+      "result": "ProfileApplyResult",
+      "operation": {
+        "type": "profile-apply",
+        "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation"
+      }
+    },
+    {
       "method": "profile.get",
       "capability": "profile.document.v2",
       "request": "empty",
@@ -289,6 +307,13 @@
         "type": "profile-apply",
         "asyncResultVia": "backend.status.activeOperation|backend.status.lastOperation"
       }
+    },
+    {
+      "method": "profile.importNodesBatch",
+      "capability": "profile.importNodes.v2",
+      "request": "ImportNodesBatchRequest",
+      "result": "ImportNodesBatchResult",
+      "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR"]
     },
     {
       "method": "profile.setActiveNode",

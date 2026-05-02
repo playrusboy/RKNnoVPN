@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoadInstalledParsesPackagesList(t *testing.T) {
@@ -31,6 +32,60 @@ too_short
 	}
 	if apps[1].PackageName != "com.android.settings" || apps[1].Category != "SYSTEM" || !apps[1].IsSystemApp {
 		t.Fatalf("unexpected system app: %#v", apps[1])
+	}
+}
+
+func TestCatalogLoadInstalledCachesUntilPackagesListMetadataChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "packages.list")
+	first := "com.example.one 10123 0 /data/user/0/com.example.one default 35\n"
+	second := "com.example.two 10124 0 /data/user/0/com.example.two default 35\n"
+	if len(first) != len(second) {
+		t.Fatalf("test fixtures must have matching length: %d != %d", len(first), len(second))
+	}
+
+	fixedTime := time.Unix(1_700_000_000, 0)
+	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, fixedTime, fixedTime); err != nil {
+		t.Fatal(err)
+	}
+
+	catalog := &Catalog{}
+	apps, err := catalog.LoadInstalled(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(apps) != 1 || apps[0].PackageName != "com.example.one" {
+		t.Fatalf("unexpected first load: %#v", apps)
+	}
+
+	apps[0].PackageName = "mutated.result"
+	if err := os.WriteFile(path, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, fixedTime, fixedTime); err != nil {
+		t.Fatal(err)
+	}
+
+	apps, err = catalog.LoadInstalled(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(apps) != 1 || apps[0].PackageName != "com.example.one" {
+		t.Fatalf("expected cached app while mtime and size match, got %#v", apps)
+	}
+
+	changedTime := fixedTime.Add(time.Second)
+	if err := os.Chtimes(path, changedTime, changedTime); err != nil {
+		t.Fatal(err)
+	}
+	apps, err = catalog.LoadInstalled(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(apps) != 1 || apps[0].PackageName != "com.example.two" {
+		t.Fatalf("expected reload after metadata change, got %#v", apps)
 	}
 }
 

@@ -24,11 +24,11 @@ rknnovpn_version_code() {
     echo "invalid version: $1" >&2
     return 1
   fi
-  if (( 10#$major > 9 || 10#$patch > 99 )); then
-    echo "versionCode supports major 0..9 and patch 0..99: $1" >&2
+  if (( 10#$major > 99 || 10#$minor > 99 || 10#$patch > 99 )); then
+    echo "versionCode supports major/minor/patch 0..99: $1" >&2
     return 1
   fi
-  printf '%d%d%02d\n' "$((10#$major))" "$((10#$minor))" "$((10#$patch))"
+  printf '%d\n' "$((10#$major * 1000000 + 10#$minor * 10000 + 10#$patch * 100))"
 }
 
 rknnovpn_ci_version() {

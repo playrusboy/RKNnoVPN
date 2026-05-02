@@ -10,10 +10,13 @@ import (
 
 type AppHandlers struct {
 	PackagesListPath string
+	Catalog          *appcatalog.Catalog
 }
 
+var defaultAppCatalog = &appcatalog.Catalog{}
+
 func (h AppHandlers) AppList(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	apps, err := appcatalog.LoadInstalled(h.packagesListPath())
+	apps, err := h.loadInstalled()
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInternalError,
@@ -32,7 +35,7 @@ func (h AppHandlers) ResolveUID(params *json.RawMessage) (interface{}, *ipc.RPCE
 		}
 	}
 
-	apps, err := appcatalog.LoadInstalled(h.packagesListPath())
+	apps, err := h.loadInstalled()
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInternalError,
@@ -48,6 +51,14 @@ func (h AppHandlers) ResolveUID(params *json.RawMessage) (interface{}, *ipc.RPCE
 		Code:    ipc.CodeInvalidParams,
 		Message: fmt.Sprintf("no package found for uid %d", request.UID),
 	}
+}
+
+func (h AppHandlers) loadInstalled() ([]appcatalog.Info, error) {
+	catalog := h.Catalog
+	if catalog == nil {
+		catalog = defaultAppCatalog
+	}
+	return catalog.LoadInstalled(h.packagesListPath())
 }
 
 func (h AppHandlers) packagesListPath() string {

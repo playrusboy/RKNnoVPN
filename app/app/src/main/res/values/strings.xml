@@ -319,10 +319,16 @@
     <string name="error_no_runtime_node_configured">Add or select a server before starting.</string>
     <string name="error_config_saved_not_applied">Settings were saved, but runtime did not apply them: %1$s</string>
     <string name="operation_accepted">Operation accepted. Waiting for completion…</string>
+    <string name="operation_accepted_with_name">%1$s accepted. Waiting for completion…</string>
+    <string name="operation_active_step">Current step: %1$s</string>
+    <string name="operation_active_step_with_code">Current step: %1$s (%2$s)</string>
     <string name="operation_saved_runtime_stopped">Settings were saved. Runtime is stopped, so they will apply on the next start.</string>
     <string name="operation_saved_runtime_not_applied">Settings were saved, but runtime did not apply them.</string>
     <string name="operation_cleanup_succeeded">Runtime cleanup completed.</string>
     <string name="operation_cleanup_incomplete">Runtime cleanup needs attention.</string>
+    <string name="operation_failure_code">code: %1$s</string>
+    <string name="operation_failure_stage">stage: %1$s</string>
+    <string name="operation_failure_rollback_applied">rollback applied</string>
     <string name="operation_start">Start</string>
     <string name="operation_stop">Stop</string>
     <string name="operation_reload">Reload</string>
