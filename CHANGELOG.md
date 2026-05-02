@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.3.4
+
+- Enabled fast active-node switching by auto-provisioning the local Clash API for multi-node profiles.
+- Hardened selector switching with Xray sidecar guards, bearer-authenticated Clash API calls, selector verification, and visible `selector-switch` operation stages.
+- Made subscription preview/apply use one-time `previewId` commits so previewed nodes are not fetched and parsed twice.
+- Improved node diagnostics with bounded workers, latency-only default checks, authenticated Clash API delay probes, and APK timeouts sized for multi-node batches.
+- Kept cached profile data visible during transient daemon/root failures with explicit fresh/stale/error state.
+- Synchronized release metadata to `v2.3.4`.
+
 ## v2.3.2
 
 - Cached APK compatibility checks by daemon compatibility fingerprint so most RPCs avoid re-fetching the full IPC contract.
