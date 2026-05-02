@@ -63,6 +63,7 @@ type HealthMonitor struct {
 	runPortListeningCheck func(port int) CheckResult
 	runIptablesCheck      func() CheckResult
 	runRoutingCheck       func() CheckResult
+	runDNSListenerCheck   func() CheckResult
 	runDNSCheck           func() CheckResult
 }
 
@@ -102,6 +103,7 @@ func NewHealthMonitor(
 	h.runPortListeningCheck = h.checkPortListening
 	h.runIptablesCheck = h.checkIptablesIntact
 	h.runRoutingCheck = h.checkRoutingIntact
+	h.runDNSListenerCheck = h.checkDNSListener
 	h.runDNSCheck = h.checkDNS
 	return h
 }
@@ -254,7 +256,7 @@ func (h *HealthMonitor) RunOnce() *HealthResult {
 	result.Checks["routing"] = h.runRoutingCheck()
 
 	// 5. DNS listener and resolution (best-effort, not a hard health gate).
-	result.Checks["dns_listener"] = h.checkDNSListener()
+	result.Checks["dns_listener"] = h.runDNSListenerCheck()
 	result.Checks["dns"] = h.runDNSCheck()
 
 	// Hard health normally depends only on the core process, local listener,

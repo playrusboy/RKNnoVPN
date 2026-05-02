@@ -157,6 +157,9 @@ func TestStopReturnsWhenHealthCheckIsBlocked(t *testing.T) {
 	monitor.runRoutingCheck = func() CheckResult {
 		return CheckResult{Pass: true, Detail: "routing"}
 	}
+	monitor.runDNSListenerCheck = func() CheckResult {
+		return CheckResult{Pass: true, Detail: "dns listener"}
+	}
 	monitor.runDNSCheck = func() CheckResult {
 		return CheckResult{Pass: true, Detail: "dns"}
 	}
