@@ -349,25 +349,19 @@ class DaemonClient @Inject constructor(
 
     // ---- Updates ----
 
-    suspend fun updateCheck(
-        currentVersion: String = BuildConfig.VERSION_NAME,
-    ): DaemonClientResult<UpdateCheckInfo> {
+    suspend fun updateCheck(): DaemonClientResult<UpdateCheckInfo> {
         requireCompatible("update-check")?.let { return it.asFailure() }
         return call(
             "update-check",
-            updateVersionParams(currentVersion),
             timeoutMs = 30_000L,
             transform = ::parseUpdateCheckInfo,
         )
     }
 
-    suspend fun updateDownload(
-        currentVersion: String = BuildConfig.VERSION_NAME,
-    ): DaemonClientResult<UpdateDownloadInfo> {
+    suspend fun updateDownload(): DaemonClientResult<UpdateDownloadInfo> {
         requireCompatible("update-download")?.let { return it.asFailure() }
         return call(
             "update-download",
-            updateVersionParams(currentVersion),
             timeoutMs = 600_000L,
             transform = ::parseUpdateDownloadInfo,
         )
@@ -400,9 +394,6 @@ class DaemonClient @Inject constructor(
 
     suspend fun version(allowModuleRepair: Boolean = false): DaemonClientResult<VersionInfo> =
         call("version", allowModuleRepair = allowModuleRepair, transform = ::parseVersionInfo)
-
-    private fun updateVersionParams(currentVersion: String): JsonObject =
-        buildJsonObject { put("current_version", currentVersion) }
 
     // ---- Internal helpers ----
 

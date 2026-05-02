@@ -26,12 +26,12 @@ func TestUpdateDownloadRejectsActiveRuntimeOperation(t *testing.T) {
 	}
 }
 
-func TestCurrentUpdateVersionUsesAPKProvidedVersion(t *testing.T) {
+func TestCurrentUpdateVersionIgnoresAPKProvidedVersion(t *testing.T) {
 	raw := json.RawMessage(`{"current_version":"2.2.0"}`)
 	handlers := UpdateHandlers{Version: "v2.2.1"}
 
-	if got := handlers.currentUpdateVersion(&raw); got != "v2.2.0" {
-		t.Fatalf("currentUpdateVersion = %q, want v2.2.0", got)
+	if got := handlers.currentUpdateVersion(&raw); got != "v2.2.1" {
+		t.Fatalf("currentUpdateVersion = %q, want v2.2.1", got)
 	}
 }
 

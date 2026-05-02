@@ -27,6 +27,11 @@ type InstallHooks struct {
 	Logf                          func(format string, args ...interface{})
 }
 
+var (
+	installApkUpdate    = InstallApkUpdate
+	installModuleUpdate = InstallModuleUpdate
+)
+
 func RunInstallTransaction(tx InstallTransaction) error {
 	if tx.ModuleDir == "" {
 		tx.ModuleDir = modulecontract.NewPaths(tx.DataDir).Dir()
@@ -55,19 +60,6 @@ func RunInstallTransaction(tx InstallTransaction) error {
 		}
 	}()
 
-	if tx.Artifacts.ApkExists {
-		markStep("update-install-apk", "running", "APK_INSTALLING", filepath.Base(tx.Artifacts.ApkPath))
-		if err := InstallApkUpdate(tx.Artifacts.ApkPath); err != nil {
-			installLogf(tx, "APK install failed: %v", err)
-			markStep("update-install-apk", "failed", "APK_INSTALL_FAILED", err.Error())
-			return fmt.Errorf("apk install failed: %w", err)
-		}
-		if err := installTracker.MarkAPKInstalled(); err != nil {
-			installLogf(tx, "warning: record APK install success: %v", err)
-		}
-		markStep("update-install-apk", "ok", "", "")
-	}
-
 	if tx.Artifacts.ModuleExists {
 		markStep("update-stop-runtime", "running", "UPDATE_STOP_RUNTIME", "stopping runtime before module install")
 		if tx.Hooks.StopRuntimeForModuleInstall != nil {
@@ -81,7 +73,7 @@ func RunInstallTransaction(tx InstallTransaction) error {
 
 	if tx.Artifacts.ModuleExists {
 		markStep("update-install-module", "running", "MODULE_INSTALLING", filepath.Base(tx.Artifacts.ModulePath))
-		if err := InstallModuleUpdate(tx.Artifacts.ModulePath, tx.DataDir, tx.ModuleDir); err != nil {
+		if err := installModuleUpdate(tx.Artifacts.ModulePath, tx.DataDir, tx.ModuleDir); err != nil {
 			if tx.WasRuntimeRunning && tx.Hooks.RestoreRuntimeAfterModuleFail != nil {
 				tx.Hooks.RestoreRuntimeAfterModuleFail()
 			}
@@ -93,6 +85,19 @@ func RunInstallTransaction(tx InstallTransaction) error {
 			installLogf(tx, "warning: record module install success: %v", err)
 		}
 		markStep("update-install-module", "ok", "", "")
+	}
+
+	if tx.Artifacts.ApkExists {
+		markStep("update-install-apk", "running", "APK_INSTALLING", filepath.Base(tx.Artifacts.ApkPath))
+		if err := installApkUpdate(tx.Artifacts.ApkPath); err != nil {
+			installLogf(tx, "APK install failed: %v", err)
+			markStep("update-install-apk", "failed", "APK_INSTALL_FAILED", err.Error())
+			return fmt.Errorf("apk install failed: %w", err)
+		}
+		if err := installTracker.MarkAPKInstalled(); err != nil {
+			installLogf(tx, "warning: record APK install success: %v", err)
+		}
+		markStep("update-install-apk", "ok", "", "")
 	}
 
 	markStep("update-cleanup-downloads", "running", "UPDATE_CLEANUP", tx.Artifacts.UpdateDir)

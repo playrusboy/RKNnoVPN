@@ -547,6 +547,72 @@ func TestInstallTrackerRecordsFailedStep(t *testing.T) {
 	}
 }
 
+func TestRunInstallTransactionInstallsModuleBeforeAPK(t *testing.T) {
+	dataDir := t.TempDir()
+	updateDir := filepath.Join(dataDir, "update")
+	modulePath := filepath.Join(updateDir, "module.zip")
+	apkPath := filepath.Join(updateDir, "panel.apk")
+	writeTestFile(t, modulePath, 0644)
+	writeTestFile(t, apkPath, 0644)
+
+	oldInstallModule := installModuleUpdate
+	oldInstallAPK := installApkUpdate
+	t.Cleanup(func() {
+		installModuleUpdate = oldInstallModule
+		installApkUpdate = oldInstallAPK
+	})
+
+	var steps []string
+	installModuleUpdate = func(path string, dataDir string, moduleDir string) error {
+		steps = append(steps, "install-module")
+		if path != modulePath {
+			t.Fatalf("module path = %q, want %q", path, modulePath)
+		}
+		return nil
+	}
+	installApkUpdate = func(path string) error {
+		steps = append(steps, "install-apk")
+		if path != apkPath {
+			t.Fatalf("apk path = %q, want %q", path, apkPath)
+		}
+		return nil
+	}
+
+	err := RunInstallTransaction(InstallTransaction{
+		DataDir: dataDir,
+		Artifacts: InstallArtifacts{
+			UpdateDir:    updateDir,
+			ModulePath:   modulePath,
+			ApkPath:      apkPath,
+			ModuleExists: true,
+			ApkExists:    true,
+		},
+		Hooks: InstallHooks{
+			StopRuntimeForModuleInstall: func() error {
+				steps = append(steps, "stop-runtime")
+				return nil
+			},
+			ScheduleSelfExit: func() {
+				steps = append(steps, "schedule-exit")
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"stop-runtime", "install-module", "install-apk", "schedule-exit"}
+	if strings.Join(steps, ",") != strings.Join(want, ",") {
+		t.Fatalf("install order = %#v, want %#v", steps, want)
+	}
+	state, err := ReadInstallState(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.ModuleInstalled || !state.ApkInstalled || state.Status != "completed" {
+		t.Fatalf("unexpected install state: %#v", state)
+	}
+}
+
 func writeTestFile(t *testing.T, path string, perm os.FileMode, contents ...string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
