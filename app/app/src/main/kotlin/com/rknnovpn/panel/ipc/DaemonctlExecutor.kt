@@ -2,6 +2,7 @@ package com.rknnovpn.panel.ipc
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -114,6 +115,8 @@ class DaemonctlExecutor @Inject constructor() {
                 return@withContext retryAfterModuleDaemonRepair(method, params, timeoutMs)
             }
             checkedResult
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "execute($method) failed unexpectedly", e)
             DaemonctlResult.UnexpectedError(e)

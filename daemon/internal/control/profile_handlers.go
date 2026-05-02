@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -231,6 +232,10 @@ func (h ProfileHandlers) ProfileInboundPatch(params *json.RawMessage) (interface
 }
 
 func (h ProfileHandlers) SubscriptionPreview(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	return h.SubscriptionPreviewContext(context.Background(), params)
+}
+
+func (h ProfileHandlers) SubscriptionPreviewContext(ctx context.Context, params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	request, err := DecodeSubscriptionURLParams(params)
 	if err != nil {
 		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
@@ -239,7 +244,7 @@ func (h ProfileHandlers) SubscriptionPreview(params *json.RawMessage) (interface
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
-	preview, err := h.subscriptionClient().Preview(request.URL, current)
+	preview, err := h.subscriptionClient().PreviewContext(ctx, request.URL, current)
 	if err != nil {
 		return nil, subscriptionRPCError(request.URL, preview.FetchStatus, preview.FetchHeaders, nil, err)
 	}
@@ -247,6 +252,10 @@ func (h ProfileHandlers) SubscriptionPreview(params *json.RawMessage) (interface
 }
 
 func (h ProfileHandlers) SubscriptionRefresh(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	return h.SubscriptionRefreshContext(context.Background(), params)
+}
+
+func (h ProfileHandlers) SubscriptionRefreshContext(ctx context.Context, params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	request, err := DecodeSubscriptionURLParams(params)
 	if err != nil {
 		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
@@ -255,7 +264,7 @@ func (h ProfileHandlers) SubscriptionRefresh(params *json.RawMessage) (interface
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
-	refresh, err := h.subscriptionClient().ApplyRefresh(request.URL, current)
+	refresh, err := h.subscriptionClient().ApplyRefreshContext(ctx, request.URL, current)
 	if err != nil {
 		return nil, subscriptionRPCError(request.URL, refresh.FetchStatus, refresh.FetchHeaders, &refresh, err)
 	}

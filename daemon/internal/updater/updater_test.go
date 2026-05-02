@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -113,6 +114,36 @@ func TestDownloadUpdateRejectsOversizedReleaseMetadata(t *testing.T) {
 	}, t.TempDir(), nil)
 	if err == nil || !strings.Contains(err.Error(), "module.zip size") {
 		t.Fatalf("expected oversized module metadata to fail, got %v", err)
+	}
+}
+
+func TestDownloadUpdateWithContextHonorsCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := DownloadUpdateWithContext(ctx, &UpdateInfo{
+		ModuleURL:   "https://example.invalid/module.zip",
+		ApkURL:      "https://example.invalid/panel.apk",
+		ChecksumURL: "https://example.invalid/SHA256SUMS.txt",
+		ModuleSize:  int64(len("module")),
+		ApkSize:     int64(len("apk")),
+	}, t.TempDir(), nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+}
+
+func TestRunDownloadTransactionHonorsCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := RunDownloadTransaction(DownloadTransaction{
+		Context:        ctx,
+		CurrentVersion: "v0.0.0",
+		DataDir:        t.TempDir(),
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
 	}
 }
 

@@ -1,6 +1,7 @@
 package ipc
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"os"
@@ -47,7 +48,7 @@ func TestMethodNotFoundForLegacyConfigImportReturnsCanonicalHint(t *testing.T) {
 	server := NewServer(t.TempDir() + "/daemon.sock")
 	raw := []byte(`{"jsonrpc":"2.0","id":7,"method":"config.import","params":{"schema_version":5}}`)
 
-	response := server.processRequest(raw)
+	response := server.processRequest(context.Background(), raw)
 
 	if response.Error == nil {
 		t.Fatal("expected method not found error")

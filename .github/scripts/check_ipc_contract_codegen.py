@@ -658,12 +658,18 @@ def check_diagnostics_state_surface() -> list[str]:
             if snippet in source:
                 errors.append(f"{path.relative_to(REPO_ROOT)} must not use diagnostics CurrentState callback wrapper")
     registry = CONTROL_REGISTRY.read_text(encoding="utf-8") if CONTROL_REGISTRY.exists() else ""
-    for snippet in [
-        '"diagnostics.health":        g.Diagnostics.DiagnosticsHealth',
-        '"diagnostics.testNodes":     g.Diagnostics.DiagnosticsTestNodes',
+    for snippets in [
+        (
+            '"diagnostics.health":        g.Diagnostics.DiagnosticsHealth',
+            '"diagnostics.health":        ipc.WithoutContext(g.Diagnostics.DiagnosticsHealth)',
+        ),
+        (
+            '"diagnostics.testNodes":     g.Diagnostics.DiagnosticsTestNodes',
+            '"diagnostics.testNodes":     ipc.WithoutContext(g.Diagnostics.DiagnosticsTestNodes)',
+        ),
     ]:
-        if snippet not in registry:
-            errors.append(f"diagnostics IPC methods must be owned by DiagnosticsHandlers: missing {snippet!r}")
+        if not any(snippet in registry for snippet in snippets):
+            errors.append(f"diagnostics IPC methods must be owned by DiagnosticsHandlers: missing one of {snippets!r}")
     runtime_handlers = CONTROL_RUNTIME_HANDLERS.read_text(encoding="utf-8") if CONTROL_RUNTIME_HANDLERS.exists() else ""
     for snippet in ["DiagnosticsHealth", "DiagnosticsTestNodes", "TestNodes             func("]:
         if snippet in runtime_handlers:
@@ -915,14 +921,11 @@ def _literal_require_compatible_methods(source: str) -> list[str]:
 def _registered_daemon_control_methods(source: str) -> list[str]:
     import re
 
-    match = re.search(
-        r"func\s+\(g\s+HandlerGroups\)\s+ContractHandlers\(\)\s+map\[string\]ipc\.Handler\s+\{\s*return\s+map\[string\]ipc\.Handler\{(?P<body>.*?)\n\s*\}\s*\n\}",
-        source,
-        re.S,
-    )
-    if not match:
+    start = source.find("func (g HandlerGroups) ContractHandlers()")
+    end = source.find("func RegisterContractHandlers", start)
+    if start < 0 or end < 0:
         return []
-    return re.findall(r'"([^"]+)"\s*:', match.group("body"))
+    return re.findall(r'"([^"]+)"\s*:', source[start:end])
 
 
 def _go_switch_cases(source: str, func_name: str) -> list[str]:

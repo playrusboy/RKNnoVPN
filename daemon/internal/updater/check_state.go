@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -43,7 +44,11 @@ func ReadUpdateCheckState(dataDir string) (*UpdateCheckState, error) {
 }
 
 func CheckForUpdateAndPersist(dataDir, currentVersion string) (*UpdateInfo, error) {
-	info, err := CheckForUpdate(currentVersion)
+	return CheckForUpdateAndPersistWithContext(context.Background(), dataDir, currentVersion)
+}
+
+func CheckForUpdateAndPersistWithContext(ctx context.Context, dataDir, currentVersion string) (*UpdateInfo, error) {
+	info, err := CheckForUpdateWithContext(ctx, currentVersion)
 	state := updateCheckStateFromResult(currentVersion, info, err)
 	if writeErr := WriteUpdateCheckState(dataDir, state); writeErr != nil && err == nil {
 		return info, writeErr
@@ -52,6 +57,10 @@ func CheckForUpdateAndPersist(dataDir, currentVersion string) (*UpdateInfo, erro
 }
 
 func MaybeCheckForUpdate(dataDir, currentVersion string, now time.Time) (*UpdateCheckState, bool, error) {
+	return MaybeCheckForUpdateWithContext(context.Background(), dataDir, currentVersion, now)
+}
+
+func MaybeCheckForUpdateWithContext(ctx context.Context, dataDir, currentVersion string, now time.Time) (*UpdateCheckState, bool, error) {
 	state, err := ReadUpdateCheckState(dataDir)
 	if err != nil {
 		return nil, false, err
@@ -62,7 +71,7 @@ func MaybeCheckForUpdate(dataDir, currentVersion string, now time.Time) (*Update
 		now.Sub(state.LastCheckedAt) < UpdateCheckMinInterval {
 		return state, false, nil
 	}
-	info, err := CheckForUpdate(currentVersion)
+	info, err := CheckForUpdateWithContext(ctx, currentVersion)
 	state = updateCheckStateFromResult(currentVersion, info, err)
 	if writeErr := WriteUpdateCheckState(dataDir, state); writeErr != nil && err == nil {
 		return state, true, writeErr

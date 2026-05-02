@@ -106,6 +106,24 @@ func TestApplyRefreshRejectsAllRejectedSubscriptionEndpoints(t *testing.T) {
 	}
 }
 
+func TestPreviewContextHonorsCancelledContext(t *testing.T) {
+	var fetchCalls int
+	client := NewClient(FetcherFunc(func(rawURL string) (FetchResult, error) {
+		fetchCalls++
+		return FetchResult{Status: 200}, nil
+	}))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := client.PreviewContext(ctx, "https://example.com/sub", profiledoc.Document{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+	if fetchCalls != 0 {
+		t.Fatalf("cancelled context should not call fetcher, got %d calls", fetchCalls)
+	}
+}
+
 func TestBootstrapResolverIgnoresSystemLoopbackDNSServer(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

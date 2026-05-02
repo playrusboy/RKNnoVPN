@@ -1,6 +1,7 @@
 package root
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ type ProbeIO interface {
 }
 
 type NodeProbeRunner struct {
+	Context        context.Context
 	Config         *config.Config
 	TimeoutMS      int
 	Timeout        time.Duration
@@ -38,6 +40,7 @@ type NodeProbeRunner struct {
 }
 
 type NodeProbeInput struct {
+	Context       context.Context
 	Config        *config.Config
 	State         core.State
 	RuntimeHealth runtimev2.HealthSnapshot
@@ -49,10 +52,15 @@ type NodeProbeInput struct {
 }
 
 func RunNodeProbes(input NodeProbeInput) []runtimev2.NodeProbeResult {
+	ctx := input.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	profiles := ProbeNodeProfiles(input.Config)
 	timeout := time.Duration(input.TimeoutMS) * time.Millisecond
 	runtimeRunning := input.State == core.StateRunning || input.State == core.StateDegraded
 	runner := NodeProbeRunner{
+		Context:        ctx,
 		Config:         input.Config,
 		TimeoutMS:      input.TimeoutMS,
 		Timeout:        timeout,
@@ -70,6 +78,9 @@ func RunNodeProbes(input NodeProbeInput) []runtimev2.NodeProbeResult {
 func (r NodeProbeRunner) Run(profiles []*config.NodeProfile) []runtimev2.NodeProbeResult {
 	results := make([]runtimev2.NodeProbeResult, 0, len(profiles))
 	for _, profile := range profiles {
+		if r.Context.Err() != nil {
+			break
+		}
 		if len(r.Requested) > 0 && !r.Requested[profile.ID] {
 			continue
 		}
@@ -80,8 +91,22 @@ func (r NodeProbeRunner) Run(profiles []*config.NodeProfile) []runtimev2.NodePro
 
 func (r NodeProbeRunner) probeProfile(profile *config.NodeProfile) runtimev2.NodeProbeResult {
 	result := NewNodeProbeResult(profile)
+	if r.Context.Err() != nil {
+		result.URLStatus = "not_run"
+		result.ThroughputStatus = "unavailable"
+		result.Verdict = "unknown"
+		result.ErrorClass = "cancelled"
+		result.ErrorDetail = r.Context.Err().Error()
+		return result
+	}
 	r.runTCPDirectProbe(profile, &result)
+	if r.Context.Err() != nil {
+		return FinalizeNodeProbeResult(result)
+	}
 	r.runDNSBootstrapProbe(profile, &result)
+	if r.Context.Err() != nil {
+		return FinalizeNodeProbeResult(result)
+	}
 	r.runTunnelProbe(profile, &result)
 	return FinalizeNodeProbeResult(result)
 }

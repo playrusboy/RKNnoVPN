@@ -377,12 +377,26 @@ func formatPortTargets(hosts []string, port int) string {
 // It is used by health checks that need to inspect command output (e.g.
 // ip rule show, iptables -C ...).
 func ExecCommand(name string, args ...string) (string, error) {
-	out, err := combinedOutputWithTimeout(defaultCommandTimeout, nil, name, args...)
+	return ExecCommandContext(context.Background(), name, args...)
+}
+
+func ExecCommandContext(ctx context.Context, name string, args ...string) (string, error) {
+	out, err := combinedOutputWithContext(ctx, defaultCommandTimeout, nil, name, args...)
 	return strings.TrimSpace(string(out)), err
 }
 
 func combinedOutputWithTimeout(timeout time.Duration, env []string, name string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	return combinedOutputWithContext(context.Background(), timeout, env, name, args...)
+}
+
+func combinedOutputWithContext(parent context.Context, timeout time.Duration, env []string, name string, args ...string) ([]byte, error) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	if err := parent.Err(); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -402,6 +416,9 @@ func combinedOutputWithTimeout(timeout time.Duration, env []string, name string,
 	cmd.WaitDelay = commandKillWait
 
 	out, err := cmd.CombinedOutput()
+	if parent.Err() != nil {
+		return out, parent.Err()
+	}
 	if ctx.Err() == context.DeadlineExceeded {
 		return out, fmt.Errorf("%s timed out after %s", name, timeout)
 	}

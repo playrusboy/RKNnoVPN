@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"time"
@@ -37,14 +38,20 @@ type DiagnosticsHandlers struct {
 	NetstackReport        func(*config.Config) netstack.Report
 	NetstackRuntimeReport func(*config.Config) netstack.Report
 	TestNodes             func(url string, timeoutMS int, nodeIDs []string) []runtimev2.NodeProbeResult
+	TestNodesContext      func(ctx context.Context, url string, timeoutMS int, nodeIDs []string) []runtimev2.NodeProbeResult
 	CoreStartReport       func() core.RuntimeStageReport
 	CoreRuntimeReport     func() core.RuntimeStageReport
 	ReloadReport          func() core.RuntimeStageReport
 	Exec                  diagnostics.ExecCommandFunc
+	ExecContext           func(ctx context.Context, name string, args ...string) (string, error)
 	Now                   func() time.Time
 }
 
 func (h DiagnosticsHandlers) DiagnosticsReport(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	return h.DiagnosticsReportContext(context.Background(), params)
+}
+
+func (h DiagnosticsHandlers) DiagnosticsReportContext(ctx context.Context, params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	request, err := DecodeDiagnosticsReportParams(params)
 	if err != nil {
 		return nil, &ipc.RPCError{
@@ -52,11 +59,19 @@ func (h DiagnosticsHandlers) DiagnosticsReport(params *json.RawMessage) (interfa
 			Message: err.Error(),
 		}
 	}
-	return h.buildReport(request.Lines), nil
+	report, err := h.buildReportContext(ctx, request.Lines)
+	if err != nil {
+		return nil, contextRPCError(err)
+	}
+	return report, nil
 }
 
 func (h DiagnosticsHandlers) SelfCheck(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	summary, err := h.BuildSelfCheckSummary(DefaultDiagnosticsReportLines)
+	return h.SelfCheckContext(context.Background(), params)
+}
+
+func (h DiagnosticsHandlers) SelfCheckContext(ctx context.Context, params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	summary, err := h.BuildSelfCheckSummaryContext(ctx, DefaultDiagnosticsReportLines)
 	if err != nil {
 		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
 	}
@@ -64,10 +79,23 @@ func (h DiagnosticsHandlers) SelfCheck(params *json.RawMessage) (interface{}, *i
 }
 
 func (h DiagnosticsHandlers) DiagnosticsHealth(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	return h.DiagnosticsHealthContext(context.Background(), params)
+}
+
+func (h DiagnosticsHandlers) DiagnosticsHealthContext(ctx context.Context, params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	ctx = diagnosticsContext(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, contextRPCError(err)
+	}
 	return h.refreshRuntimeHealth(), nil
 }
 
 func (h DiagnosticsHandlers) DiagnosticsTestNodes(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	return h.DiagnosticsTestNodesContext(context.Background(), params)
+}
+
+func (h DiagnosticsHandlers) DiagnosticsTestNodesContext(ctx context.Context, params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	ctx = diagnosticsContext(ctx)
 	var p struct {
 		NodeIDs   []string `json:"node_ids"`
 		URL       string   `json:"url"`
@@ -81,11 +109,17 @@ func (h DiagnosticsHandlers) DiagnosticsTestNodes(params *json.RawMessage) (inte
 	if p.TimeoutMS <= 0 {
 		p.TimeoutMS = 5000
 	}
-	if h.TestNodes == nil {
+	if h.TestNodes == nil && h.TestNodesContext == nil {
 		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "node probe callback is not configured"}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, contextRPCError(err)
+	}
 
-	results := h.TestNodes(p.URL, p.TimeoutMS, p.NodeIDs)
+	results := h.testNodes(ctx, p.URL, p.TimeoutMS, p.NodeIDs)
+	if err := ctx.Err(); err != nil {
+		return nil, contextRPCError(err)
+	}
 	return map[string]interface{}{
 		"url":     p.URL,
 		"results": results,
@@ -93,6 +127,15 @@ func (h DiagnosticsHandlers) DiagnosticsTestNodes(params *json.RawMessage) (inte
 }
 
 func (h DiagnosticsHandlers) buildReport(lines int) map[string]interface{} {
+	report, _ := h.buildReportContext(context.Background(), lines)
+	return report
+}
+
+func (h DiagnosticsHandlers) buildReportContext(ctx context.Context, lines int) (map[string]interface{}, error) {
+	ctx = diagnosticsContext(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	state := h.state()
 	cfg := state.Config
 	cfgPath := state.ConfigPath
@@ -103,6 +146,9 @@ func (h DiagnosticsHandlers) buildReport(lines int) map[string]interface{} {
 	renderedConfigPath := filepath.Join(modulePaths.RenderedConfigDir(), "singbox.json")
 	singBoxPath := filepath.Join(modulePaths.BinDir(), "sing-box")
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	healthResult := h.runHealth()
 	healthSnapshot := h.healthSnapshot(healthResult, true)
 	var backendStatus interface{}
@@ -117,12 +163,18 @@ func (h DiagnosticsHandlers) buildReport(lines int) map[string]interface{} {
 	netstackRuntimeReport := h.netstackRuntimeReport(cfg)
 	leftovers := netstackReport.Leftovers
 	var nodeResults []runtimev2.NodeProbeResult
-	if cfg != nil && h.TestNodes != nil {
-		nodeResults = h.TestNodes(cfg.Health.URL, 2500, nil)
+	if cfg != nil && (h.TestNodes != nil || h.TestNodesContext != nil) {
+		nodeResults = h.testNodes(ctx, cfg.Health.URL, 2500, nil)
 	}
-	exec := h.exec()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	exec := h.execForContext(ctx)
 	privacy := diagnostics.Privacy(cfg, lines, exec)
 	singBoxCheck := diagnostics.SingBoxCheck(singBoxPath, renderedConfigPath, lines, exec)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	releaseIntegrity := diagnostics.ReleaseIntegrityReport(dataDir)
 	runtimePreflight := diagnostics.RuntimePreflightReport(dataDir)
 	routingSummary := diagnostics.RoutingSummaryFromConfig(cfg)
@@ -195,10 +247,18 @@ func (h DiagnosticsHandlers) buildReport(lines int) map[string]interface{} {
 		"release_integrity": releaseIntegrity,
 	}
 	report["sing_box_check"] = singBoxCheck
-	return report
+	return report, nil
 }
 
 func (h DiagnosticsHandlers) BuildSelfCheckSummary(lines int) (diagnostics.Summary, error) {
+	return h.BuildSelfCheckSummaryContext(context.Background(), lines)
+}
+
+func (h DiagnosticsHandlers) BuildSelfCheckSummaryContext(ctx context.Context, lines int) (diagnostics.Summary, error) {
+	ctx = diagnosticsContext(ctx)
+	if err := ctx.Err(); err != nil {
+		return diagnostics.Summary{}, err
+	}
 	state := h.state()
 	cfg := state.Config
 	dataDir := state.DataDir
@@ -213,14 +273,20 @@ func (h DiagnosticsHandlers) BuildSelfCheckSummary(lines int) (diagnostics.Summa
 	singBoxPath := filepath.Join(modulePaths.BinDir(), "sing-box")
 	healthResult := h.runHealth()
 	healthSnapshot := h.healthSnapshot(healthResult, true)
+	if err := ctx.Err(); err != nil {
+		return diagnostics.Summary{}, err
+	}
 	netstackReport := h.netstackReport(cfg)
 	netstackRuntimeReport := h.netstackRuntimeReport(cfg)
 	var nodeResults []runtimev2.NodeProbeResult
-	if cfg != nil && h.TestNodes != nil {
-		nodeResults = h.TestNodes(cfg.Health.URL, 2500, nil)
+	if cfg != nil && (h.TestNodes != nil || h.TestNodesContext != nil) {
+		nodeResults = h.testNodes(ctx, cfg.Health.URL, 2500, nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return diagnostics.Summary{}, err
 	}
 	runtimeStatus, _ := h.runtimeStatus()
-	exec := h.exec()
+	exec := h.execForContext(ctx)
 	runtimePreflight := diagnostics.RuntimePreflightReport(dataDir)
 	return diagnostics.WithIPCContractFacts(
 		diagnostics.BuildSummaryWithCanonical(
@@ -334,9 +400,49 @@ func (h DiagnosticsHandlers) exec() diagnostics.ExecCommandFunc {
 	}
 }
 
+func (h DiagnosticsHandlers) execForContext(ctx context.Context) diagnostics.ExecCommandFunc {
+	ctx = diagnosticsContext(ctx)
+	if h.ExecContext != nil {
+		return func(name string, args ...string) (string, error) {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+			return h.ExecContext(ctx, name, args...)
+		}
+	}
+	exec := h.exec()
+	return func(name string, args ...string) (string, error) {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		return exec(name, args...)
+	}
+}
+
+func (h DiagnosticsHandlers) testNodes(ctx context.Context, url string, timeoutMS int, nodeIDs []string) []runtimev2.NodeProbeResult {
+	if h.TestNodesContext != nil {
+		return h.TestNodesContext(ctx, url, timeoutMS, nodeIDs)
+	}
+	if h.TestNodes != nil {
+		return h.TestNodes(url, timeoutMS, nodeIDs)
+	}
+	return nil
+}
+
 func (h DiagnosticsHandlers) now() time.Time {
 	if h.Now != nil {
 		return h.Now()
 	}
 	return time.Now()
+}
+
+func diagnosticsContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
+func contextRPCError(err error) *ipc.RPCError {
+	return &ipc.RPCError{Code: ipc.CodeInternalError, Message: "request cancelled: " + err.Error()}
 }

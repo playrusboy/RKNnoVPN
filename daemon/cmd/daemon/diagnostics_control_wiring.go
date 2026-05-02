@@ -21,10 +21,12 @@ func (d *daemon) diagnosticsControlHandlers() control.DiagnosticsHandlers {
 		NetstackReport:        d.diagnosticNetstackReport,
 		NetstackRuntimeReport: d.diagnosticNetstackRuntimeReport,
 		TestNodes:             d.testNodeProbesV2,
+		TestNodesContext:      d.testNodeProbesV2Context,
 		CoreStartReport:       d.coreMgr.LastStartReport,
 		CoreRuntimeReport:     d.coreMgr.LastRuntimeReport,
 		ReloadReport:          d.LastReloadReport,
 		Exec:                  core.ExecCommand,
+		ExecContext:           core.ExecCommandContext,
 		Now:                   time.Now,
 	}
 }

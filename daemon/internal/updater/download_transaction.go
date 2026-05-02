@@ -1,11 +1,13 @@
 package updater
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 )
 
 type DownloadTransaction struct {
+	Context        context.Context
 	CurrentVersion string
 	DataDir        string
 	Progress       func(downloaded, total int64)
@@ -13,15 +15,25 @@ type DownloadTransaction struct {
 }
 
 func RunDownloadTransaction(tx DownloadTransaction) (*DownloadedUpdate, error) {
+	ctx := tx.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	tracker := NewDownloadTracker(tx.DataDir)
 	if err := tracker.Begin(); err != nil {
 		return nil, err
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := tracker.Step("update-check", "running", "UPDATE_CHECKING", "checking latest release"); err != nil {
 		return nil, err
 	}
-	info, err := CheckForUpdate(NormalizeVersionTag(tx.CurrentVersion))
+	info, err := CheckForUpdateWithContext(ctx, NormalizeVersionTag(tx.CurrentVersion))
 	if err != nil {
 		_ = tracker.Step("update-check", "failed", "UPDATE_CHECK_FAILED", err.Error())
 		return nil, err
@@ -34,7 +46,7 @@ func RunDownloadTransaction(tx DownloadTransaction) (*DownloadedUpdate, error) {
 		return nil, err
 	}
 
-	downloaded, err := DownloadUpdate(info, filepath.Join(tx.DataDir, "update"), func(downloaded, total int64) {
+	downloaded, err := DownloadUpdateWithContext(ctx, info, filepath.Join(tx.DataDir, "update"), func(downloaded, total int64) {
 		detail := fmt.Sprintf("%d/%d", downloaded, total)
 		_ = tracker.Step("update-download", "running", "UPDATE_DOWNLOADING", detail)
 		if tx.Logf != nil {
@@ -48,6 +60,9 @@ func RunDownloadTransaction(tx DownloadTransaction) (*DownloadedUpdate, error) {
 		_ = tracker.Step("update-download", "failed", "UPDATE_DOWNLOAD_FAILED", err.Error())
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := tracker.Step("update-verify", "running", "UPDATE_VERIFYING", "verifying downloaded artifacts"); err != nil {
 		return nil, err
 	}
@@ -56,6 +71,9 @@ func RunDownloadTransaction(tx DownloadTransaction) (*DownloadedUpdate, error) {
 		return nil, err
 	}
 	if err := tracker.Step("persist-artifacts", "running", "UPDATE_PERSISTING", "persisting verified artifact state"); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if err := tracker.CompleteDownload(downloaded); err != nil {

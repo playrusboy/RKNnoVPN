@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -25,7 +26,11 @@ type UpdateHandlers struct {
 }
 
 func (h UpdateHandlers) UpdateCheck(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	info, err := updater.CheckForUpdateAndPersist(h.DataDir, h.currentUpdateVersion(params))
+	return h.UpdateCheckContext(context.Background(), params)
+}
+
+func (h UpdateHandlers) UpdateCheckContext(ctx context.Context, params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	info, err := updater.CheckForUpdateAndPersistWithContext(ctx, h.DataDir, h.currentUpdateVersion(params))
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInternalError,
@@ -36,10 +41,15 @@ func (h UpdateHandlers) UpdateCheck(params *json.RawMessage) (interface{}, *ipc.
 }
 
 func (h UpdateHandlers) UpdateDownload(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	return h.UpdateDownloadContext(context.Background(), params)
+}
+
+func (h UpdateHandlers) UpdateDownloadContext(ctx context.Context, params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	if rpcErr := h.failIfRuntimeOperationActive(); rpcErr != nil {
 		return nil, rpcErr
 	}
 	downloaded, err := updater.RunDownloadTransaction(updater.DownloadTransaction{
+		Context:        ctx,
 		CurrentVersion: h.currentUpdateVersion(params),
 		DataDir:        h.DataDir,
 		Logf:           h.logf,

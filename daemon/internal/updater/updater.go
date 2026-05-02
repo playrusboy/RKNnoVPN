@@ -99,10 +99,20 @@ type ghAsset struct {
 // CheckForUpdate queries the GitHub Releases API and compares the latest
 // tag against currentVersion. Both are expected in "vX.Y.Z" format.
 func CheckForUpdate(currentVersion string) (*UpdateInfo, error) {
+	return CheckForUpdateWithContext(context.Background(), currentVersion)
+}
+
+func CheckForUpdateWithContext(ctx context.Context, currentVersion string) (*UpdateInfo, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	client := newHTTPClient(httpTimeout)
 	currentVersion = NormalizeVersionTag(currentVersion)
 
-	req, err := http.NewRequest("GET", releasesURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", releasesURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("updater: build request: %w", err)
 	}
@@ -166,6 +176,16 @@ func NormalizeVersionTag(version string) string {
 // SHA256 checksums before the artifacts can be installed. The progress callback
 // is called periodically with downloaded/total byte counts.
 func DownloadUpdate(info *UpdateInfo, destDir string, progress func(downloaded, total int64)) (*DownloadedUpdate, error) {
+	return DownloadUpdateWithContext(context.Background(), info, destDir, progress)
+}
+
+func DownloadUpdateWithContext(ctx context.Context, info *UpdateInfo, destDir string, progress func(downloaded, total int64)) (*DownloadedUpdate, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(destDir, 0750); err != nil {
 		return nil, fmt.Errorf("updater: mkdir %s: %w", destDir, err)
 	}
@@ -200,7 +220,7 @@ func DownloadUpdate(info *UpdateInfo, destDir string, progress func(downloaded, 
 	// Download module zip.
 	if info.ModuleURL != "" {
 		p := filepath.Join(destDir, "module.zip")
-		if err := downloadFile(info.ModuleURL, p, info.ModuleSize, maxModuleDownloadBytes, report); err != nil {
+		if err := downloadFileWithContext(ctx, info.ModuleURL, p, info.ModuleSize, maxModuleDownloadBytes, report); err != nil {
 			return nil, fmt.Errorf("updater: download module: %w", err)
 		}
 		result.ModulePath = p
@@ -209,14 +229,14 @@ func DownloadUpdate(info *UpdateInfo, destDir string, progress func(downloaded, 
 	// Download APK.
 	if info.ApkURL != "" {
 		p := filepath.Join(destDir, "panel.apk")
-		if err := downloadFile(info.ApkURL, p, info.ApkSize, maxAPKDownloadBytes, report); err != nil {
+		if err := downloadFileWithContext(ctx, info.ApkURL, p, info.ApkSize, maxAPKDownloadBytes, report); err != nil {
 			return nil, fmt.Errorf("updater: download apk: %w", err)
 		}
 		result.ApkPath = p
 	}
 
 	checksumPath := filepath.Join(destDir, "SHA256SUMS.txt")
-	if err := downloadFile(info.ChecksumURL, checksumPath, 0, maxChecksumDownloadBytes, nil); err != nil {
+	if err := downloadFileWithContext(ctx, info.ChecksumURL, checksumPath, 0, maxChecksumDownloadBytes, nil); err != nil {
 		return nil, fmt.Errorf("updater: download checksums: %w", err)
 	}
 
@@ -354,9 +374,23 @@ func requireRegularArtifact(path string, label string) error {
 // downloadFile fetches a URL to a local path, calling onProgress with each
 // chunk's byte count.
 func downloadFile(url, dest string, expectedSize int64, maxSize int64, onProgress func(int64)) error {
+	return downloadFileWithContext(context.Background(), url, dest, expectedSize, maxSize, onProgress)
+}
+
+func downloadFileWithContext(ctx context.Context, url, dest string, expectedSize int64, maxSize int64, onProgress func(int64)) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	client := newHTTPClient(10 * time.Minute)
 
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -394,6 +428,9 @@ func downloadFile(url, dest string, expectedSize int64, maxSize int64, onProgres
 	buf := make([]byte, 64*1024)
 	var written int64
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
 			written += int64(n)
@@ -417,10 +454,16 @@ func downloadFile(url, dest string, expectedSize int64, maxSize int64, onProgres
 	if expectedSize > 0 && written != expectedSize {
 		return fmt.Errorf("downloaded %d bytes; release metadata expected %d", written, expectedSize)
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := f.Sync(); err != nil {
 		return err
 	}
 	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, dest); err != nil {

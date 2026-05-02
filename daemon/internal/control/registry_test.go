@@ -41,7 +41,7 @@ func TestRegisterContractHandlersRegistersFullContract(t *testing.T) {
 func TestRegisterContractHandlersRejectsDriftWithoutPartialRegistration(t *testing.T) {
 	handlers := contractHandlerMap()
 	delete(handlers, ipc.MethodContracts()[0].Method)
-	handlers["not.in.contract"] = dummyHandler
+	handlers["not.in.contract"] = ipc.WithoutContext(dummyHandler)
 	registrar := &recordingRegistrar{}
 
 	err := RegisterContractHandlers(registrar, handlers)
@@ -65,7 +65,7 @@ func TestRegisterContractHandlersRejectsNilRegistrar(t *testing.T) {
 func contractHandlerMap() map[string]ipc.Handler {
 	handlers := make(map[string]ipc.Handler, len(ipc.MethodContracts()))
 	for _, contract := range ipc.MethodContracts() {
-		handlers[contract.Method] = dummyHandler
+		handlers[contract.Method] = ipc.WithoutContext(dummyHandler)
 	}
 	return handlers
 }

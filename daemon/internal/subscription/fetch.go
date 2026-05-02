@@ -49,10 +49,28 @@ type Fetcher interface {
 	FetchURL(rawURL string) (FetchResult, error)
 }
 
+type ContextFetcher interface {
+	FetchURLContext(ctx context.Context, rawURL string) (FetchResult, error)
+}
+
 type FetcherFunc func(rawURL string) (FetchResult, error)
 
 func (f FetcherFunc) FetchURL(rawURL string) (FetchResult, error) {
 	return f(rawURL)
+}
+
+func (f FetcherFunc) FetchURLContext(_ context.Context, rawURL string) (FetchResult, error) {
+	return f(rawURL)
+}
+
+type ContextFetcherFunc func(ctx context.Context, rawURL string) (FetchResult, error)
+
+func (f ContextFetcherFunc) FetchURL(rawURL string) (FetchResult, error) {
+	return f(context.Background(), rawURL)
+}
+
+func (f ContextFetcherFunc) FetchURLContext(ctx context.Context, rawURL string) (FetchResult, error) {
+	return f(ctx, rawURL)
 }
 
 type Client struct {
@@ -62,13 +80,17 @@ type Client struct {
 
 func NewClient(fetcher Fetcher) Client {
 	if fetcher == nil {
-		fetcher = FetcherFunc(FetchURL)
+		fetcher = ContextFetcherFunc(FetchURLContext)
 	}
 	return Client{Fetcher: fetcher, Now: time.Now}
 }
 
 func (c Client) Preview(rawURL string, current profiledoc.Document) (PreviewResult, error) {
-	parsed, err := c.fetchAndParse(rawURL)
+	return c.PreviewContext(context.Background(), rawURL, current)
+}
+
+func (c Client) PreviewContext(ctx context.Context, rawURL string, current profiledoc.Document) (PreviewResult, error) {
+	parsed, err := c.fetchAndParse(ctx, rawURL)
 	if err != nil {
 		return PreviewResult{
 			Source:       parsed.Source,
@@ -94,7 +116,11 @@ func (c Client) Preview(rawURL string, current profiledoc.Document) (PreviewResu
 }
 
 func (c Client) ApplyRefresh(rawURL string, current profiledoc.Document) (RefreshResult, error) {
-	parsed, err := c.fetchAndParse(rawURL)
+	return c.ApplyRefreshContext(context.Background(), rawURL, current)
+}
+
+func (c Client) ApplyRefreshContext(ctx context.Context, rawURL string, current profiledoc.Document) (RefreshResult, error) {
+	parsed, err := c.fetchAndParse(ctx, rawURL)
 	if err != nil {
 		return RefreshResult{
 			Source:       parsed.Source,
@@ -160,19 +186,19 @@ type parsedFetch struct {
 	Fetch         FetchResult
 }
 
-func (c Client) fetchAndParse(rawURL string) (parsedFetch, error) {
+func (c Client) fetchAndParse(ctx context.Context, rawURL string) (parsedFetch, error) {
 	source, err := NewSubscriptionSource(rawURL)
 	if err != nil {
 		return parsedFetch{Source: source}, err
 	}
 	if c.Fetcher == nil {
-		c.Fetcher = FetcherFunc(FetchURL)
+		c.Fetcher = ContextFetcherFunc(FetchURLContext)
 	}
 	now := time.Now()
 	if c.Now != nil {
 		now = c.Now()
 	}
-	fetched, err := c.Fetcher.FetchURL(source.URL)
+	fetched, err := fetchWithContext(ctx, c.Fetcher, source.URL)
 	if err != nil {
 		return parsedFetch{Source: source, Fetch: fetched}, err
 	}
@@ -187,14 +213,41 @@ func (c Client) fetchAndParse(rawURL string) (parsedFetch, error) {
 	}, nil
 }
 
+func fetchWithContext(ctx context.Context, fetcher Fetcher, rawURL string) (FetchResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return FetchResult{}, err
+	}
+	if contextFetcher, ok := fetcher.(ContextFetcher); ok {
+		return contextFetcher.FetchURLContext(ctx, rawURL)
+	}
+	result, err := fetcher.FetchURL(rawURL)
+	if err != nil {
+		return result, err
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return result, ctxErr
+	}
+	return result, nil
+}
+
 func FetchURL(rawURL string) (FetchResult, error) {
+	return FetchURLContext(context.Background(), rawURL)
+}
+
+func FetchURLContext(ctx context.Context, rawURL string) (FetchResult, error) {
 	var result FetchResult
 	source, err := NewSubscriptionSource(rawURL)
 	if err != nil {
 		return result, err
 	}
 
-	req, err := http.NewRequest(http.MethodGet, source.URL, nil)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source.URL, nil)
 	if err != nil {
 		return result, fmt.Errorf("invalid URL: %w", err)
 	}
