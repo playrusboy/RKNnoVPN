@@ -44,7 +44,7 @@ type ResetController interface {
 }
 
 type NodeProber interface {
-	TestNodeProbes(url string, timeoutMS int, nodeIDs []string) []runtimev2.NodeProbeResult
+	TestNodeProbes(url string, timeoutMS int, nodeIDs []string, mode string) []runtimev2.NodeProbeResult
 }
 
 type Dependencies struct {
@@ -163,7 +163,7 @@ func (b *Backend) RefreshHealth() runtimev2.HealthSnapshot {
 }
 
 func (b *Backend) TestNodes(desired runtimev2.DesiredState, url string, timeoutMS int, nodeIDs []string) ([]runtimev2.NodeProbeResult, error) {
-	return b.deps.Probes.TestNodeProbes(url, timeoutMS, nodeIDs), nil
+	return b.deps.Probes.TestNodeProbes(url, timeoutMS, nodeIDs, "fast"), nil
 }
 
 func (b *Backend) restart(generation int64) error {

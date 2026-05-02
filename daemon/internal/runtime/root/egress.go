@@ -17,8 +17,8 @@ type EgressProbeState struct {
 }
 
 type EgressProbeIO interface {
-	ClashDelay(apiPort int, outboundTag string, testURL string, timeoutMS int) (int64, int, error)
-	TransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int) (URLProbeMetrics, error)
+	ClashDelay(apiPort int, apiSecret string, outboundTag string, testURL string, timeoutMS int) (int64, int, error)
+	TransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int, includeThroughput bool) (URLProbeMetrics, error)
 }
 
 type EgressProbeInput struct {
@@ -95,9 +95,13 @@ func RefreshOutboundURLProbe(input EgressProbeInput) EgressProbeResult {
 	for _, testURL := range EgressURLs(input.Config) {
 		lastURL = testURL
 		if input.APIPort > 0 {
-			latency, _, err = input.IO.ClashDelay(input.APIPort, "proxy", testURL, input.TimeoutMS)
+			apiSecret := ""
+			if input.Config != nil {
+				apiSecret = input.Config.Proxy.APISecret
+			}
+			latency, _, err = input.IO.ClashDelay(input.APIPort, apiSecret, "proxy", testURL, input.TimeoutMS)
 		} else {
-			metrics, probeErr := input.IO.TransparentURLProbe(input.Config, testURL, input.TimeoutMS)
+			metrics, probeErr := input.IO.TransparentURLProbe(input.Config, testURL, input.TimeoutMS, false)
 			latency = metrics.LatencyMS
 			err = probeErr
 		}

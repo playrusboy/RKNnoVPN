@@ -218,6 +218,9 @@ func ApplyToConfig(base *config.Config, doc Document) (*config.Config, []Warning
 		Interfaces: append([]string(nil), normalized.Sharing.Interfaces...),
 	}
 	next.SyncFromProfileProjection(true)
+	if _, err := next.EnsureLocalClashAPIForMultiNode(); err != nil {
+		return nil, warnings, err
+	}
 	if err := next.Validate(); err != nil {
 		return nil, warnings, err
 	}

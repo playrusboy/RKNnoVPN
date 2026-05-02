@@ -91,6 +91,6 @@ func (p rootRuntimePorts) ShouldSkipRootReconcile() (bool, string) {
 	return p.d.shouldSkipRootReconcile()
 }
 
-func (p rootRuntimePorts) TestNodeProbes(url string, timeoutMS int, nodeIDs []string) []runtimev2.NodeProbeResult {
-	return p.d.testNodeProbesV2(url, timeoutMS, nodeIDs)
+func (p rootRuntimePorts) TestNodeProbes(url string, timeoutMS int, nodeIDs []string, mode string) []runtimev2.NodeProbeResult {
+	return p.d.testNodeProbesV2(url, timeoutMS, nodeIDs, mode)
 }

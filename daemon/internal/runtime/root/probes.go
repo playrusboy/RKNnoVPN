@@ -24,34 +24,36 @@ type URLProbeMetrics struct {
 type ProbeIO interface {
 	TCPConnect(host string, port int, timeout time.Duration) (int64, error)
 	BootstrapDNS(cfg *config.Config, host string, timeout time.Duration) bool
-	ClashDelay(apiPort int, outboundTag string, testURL string, timeoutMS int) (int64, int, error)
-	TransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int) (URLProbeMetrics, error)
+	ClashDelay(apiPort int, apiSecret string, outboundTag string, testURL string, timeoutMS int) (int64, int, error)
+	TransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int, includeThroughput bool) (URLProbeMetrics, error)
 }
 
 type NodeProbeRunner struct {
-	Context        context.Context
-	Config         *config.Config
-	TimeoutMS      int
-	Timeout        time.Duration
-	Requested      map[string]bool
-	TestURL        string
-	RuntimeRunning bool
-	RuntimeHealth  runtimev2.HealthSnapshot
-	APIPort        int
-	ProfileCount   int
-	IO             ProbeIO
+	Context           context.Context
+	Config            *config.Config
+	TimeoutMS         int
+	Timeout           time.Duration
+	Requested         map[string]bool
+	TestURL           string
+	RuntimeRunning    bool
+	RuntimeHealth     runtimev2.HealthSnapshot
+	APIPort           int
+	ProfileCount      int
+	IncludeThroughput bool
+	IO                ProbeIO
 }
 
 type NodeProbeInput struct {
-	Context       context.Context
-	Config        *config.Config
-	State         core.State
-	RuntimeHealth runtimev2.HealthSnapshot
-	URL           string
-	TimeoutMS     int
-	NodeIDs       []string
-	APIPort       int
-	IO            ProbeIO
+	Context           context.Context
+	Config            *config.Config
+	State             core.State
+	RuntimeHealth     runtimev2.HealthSnapshot
+	URL               string
+	TimeoutMS         int
+	NodeIDs           []string
+	APIPort           int
+	IncludeThroughput bool
+	IO                ProbeIO
 }
 
 func RunNodeProbes(input NodeProbeInput) []runtimev2.NodeProbeResult {
@@ -63,17 +65,18 @@ func RunNodeProbes(input NodeProbeInput) []runtimev2.NodeProbeResult {
 	timeout := time.Duration(input.TimeoutMS) * time.Millisecond
 	runtimeRunning := input.State == core.StateRunning || input.State == core.StateDegraded
 	runner := NodeProbeRunner{
-		Context:        ctx,
-		Config:         input.Config,
-		TimeoutMS:      input.TimeoutMS,
-		Timeout:        timeout,
-		Requested:      RequestedNodeIDs(input.NodeIDs),
-		TestURL:        ResolveNodeProbeURL(input.URL, input.Config),
-		RuntimeRunning: runtimeRunning,
-		RuntimeHealth:  input.RuntimeHealth,
-		APIPort:        input.APIPort,
-		ProfileCount:   len(profiles),
-		IO:             input.IO,
+		Context:           ctx,
+		Config:            input.Config,
+		TimeoutMS:         input.TimeoutMS,
+		Timeout:           timeout,
+		Requested:         RequestedNodeIDs(input.NodeIDs),
+		TestURL:           ResolveNodeProbeURL(input.URL, input.Config),
+		RuntimeRunning:    runtimeRunning,
+		RuntimeHealth:     input.RuntimeHealth,
+		APIPort:           input.APIPort,
+		ProfileCount:      len(profiles),
+		IncludeThroughput: input.IncludeThroughput,
+		IO:                input.IO,
 	}
 	return runner.Run(profiles)
 }
@@ -137,6 +140,12 @@ func (r NodeProbeRunner) probeProfile(profile *config.NodeProfile) runtimev2.Nod
 	if r.Context.Err() != nil {
 		return FinalizeNodeProbeResult(result)
 	}
+	if result.TCPStatus == "fail" {
+		result.URLStatus = "not_run"
+		result.ThroughputStatus = "unavailable"
+		result.Verdict = "unusable"
+		return FinalizeNodeProbeResult(result)
+	}
 	r.runDNSBootstrapProbe(profile, &result)
 	if r.Context.Err() != nil {
 		return FinalizeNodeProbeResult(result)
@@ -178,6 +187,12 @@ func (r NodeProbeRunner) runDNSBootstrapProbe(profile *config.NodeProfile, resul
 }
 
 func (r NodeProbeRunner) runTunnelProbe(profile *config.NodeProfile, result *runtimev2.NodeProbeResult) {
+	if result.TCPStatus == "fail" {
+		result.URLStatus = "not_run"
+		result.ThroughputStatus = "unavailable"
+		result.Verdict = "unusable"
+		return
+	}
 	if !r.RuntimeRunning {
 		result.URLStatus = "fail"
 		result.Verdict = "unusable"
@@ -233,12 +248,16 @@ func isSoftURLProbeFailure(errorClass string) bool {
 
 func (r NodeProbeRunner) runTunnelURLProbe(profile *config.NodeProfile, result *runtimev2.NodeProbeResult) (int64, error) {
 	if r.APIPort > 0 {
-		urlMS, _, err := r.IO.ClashDelay(r.APIPort, profile.Tag, r.TestURL, r.TimeoutMS)
+		apiSecret := ""
+		if r.Config != nil {
+			apiSecret = r.Config.Proxy.APISecret
+		}
+		urlMS, _, err := r.IO.ClashDelay(r.APIPort, apiSecret, profile.Tag, r.TestURL, r.TimeoutMS)
 		result.ThroughputStatus = "latency_only"
 		return urlMS, err
 	}
 	if r.ProfileCount == 1 || profile.ID == strings.TrimSpace(r.Config.Profile.ActiveNodeID) {
-		metrics, err := r.IO.TransparentURLProbe(r.Config, r.TestURL, r.TimeoutMS)
+		metrics, err := r.IO.TransparentURLProbe(r.Config, r.TestURL, r.TimeoutMS, r.IncludeThroughput)
 		if metrics.ResponseBytes > 0 {
 			responseBytes := metrics.ResponseBytes
 			result.ResponseBytes = &responseBytes

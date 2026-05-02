@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
@@ -71,6 +72,10 @@ type InboundPatchRequest struct {
 
 type SubscriptionURLRequest struct {
 	URL string
+}
+
+type CommitSubscriptionPreviewRequest struct {
+	PreviewID string
 }
 
 func DecodeProfileApplyParams(params *json.RawMessage) (ProfileApplyRequest, error) {
@@ -396,6 +401,25 @@ func DecodeSubscriptionURLParams(params *json.RawMessage) (SubscriptionURLReques
 		return result, fmt.Errorf("invalid params: %w", err)
 	}
 	result.URL = p.URL
+	return result, nil
+}
+
+func DecodeCommitSubscriptionPreviewParams(params *json.RawMessage) (CommitSubscriptionPreviewRequest, error) {
+	var result CommitSubscriptionPreviewRequest
+	if params == nil {
+		return result, fmt.Errorf("params required: {\"previewId\": \"...\"}")
+	}
+	var p struct {
+		PreviewID string `json:"previewId"`
+	}
+	if err := json.Unmarshal(*params, &p); err != nil {
+		return result, fmt.Errorf("invalid params: %w", err)
+	}
+	p.PreviewID = strings.TrimSpace(p.PreviewID)
+	if p.PreviewID == "" {
+		return result, fmt.Errorf("previewId is required")
+	}
+	result.PreviewID = p.PreviewID
 	return result, nil
 }
 

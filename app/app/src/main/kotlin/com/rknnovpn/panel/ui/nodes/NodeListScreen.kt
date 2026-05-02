@@ -140,11 +140,11 @@ fun NodeListScreen(
                 }
             }
 
-            val bannerMessage = state.errorMessage ?: state.statusMessage
+            val bannerMessage = state.errorMessage ?: state.profileBannerMessage ?: state.statusMessage
             if (!bannerMessage.isNullOrBlank()) {
                 StatusBanner(
                     text = bannerMessage,
-                    isError = state.errorMessage != null,
+                    isError = state.errorMessage != null || state.profileBannerIsError,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }

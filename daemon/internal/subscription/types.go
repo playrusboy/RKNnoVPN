@@ -27,6 +27,7 @@ type RejectedNode struct {
 }
 
 type PreviewResult struct {
+	PreviewID     string                  `json:"previewId,omitempty"`
 	Source        SubscriptionSource      `json:"source"`
 	Subscription  profiledoc.Subscription `json:"subscription"`
 	Nodes         []profiledoc.Node       `json:"nodes"`

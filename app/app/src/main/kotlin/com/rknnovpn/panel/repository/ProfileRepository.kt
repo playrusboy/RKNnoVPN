@@ -26,6 +26,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 data class SubscriptionImportPreview(
+    val previewId: String,
     val url: String,
     val source: SubscriptionSource,
     val nodes: List<Node>,
@@ -39,6 +40,13 @@ data class SubscriptionImportPreview(
     val updatedCount: Int get() = updated
     val removedCount: Int get() = stale
     val rejectedCount: Int get() = rejectedNodes.size
+}
+
+enum class ProfileFreshness {
+    EMPTY,
+    FRESH,
+    STALE,
+    ERROR,
 }
 
 /**
@@ -70,6 +78,10 @@ class ProfileRepository @Inject constructor(
     /** Current cached profile, or null if not yet loaded. Kept on transient load failures. */
     val profile: StateFlow<ProfileConfig?> = _profile.asStateFlow()
 
+    private val _freshness = MutableStateFlow(ProfileFreshness.EMPTY)
+    /** Freshness of [profile], so UI can keep stale data visible during transient IPC failures. */
+    val freshness: StateFlow<ProfileFreshness> = _freshness.asStateFlow()
+
     private val _loading = MutableStateFlow(false)
     /** True while a network/IPC operation is in flight. */
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
@@ -100,26 +112,26 @@ class ProfileRepository @Inject constructor(
         try {
             when (val result = client.profileGet()) {
                 is DaemonClientResult.Ok -> {
-                    _profile.value = result.data
+                    publishFreshProfile(result.data)
                     result.data
                 }
                 is DaemonClientResult.DaemonUnavailable -> {
                     if (result.reason.isNoRuntimeProfileReason()) {
                         val emptyProfile = emptyFirstRunProfile()
-                        _profile.value = emptyProfile
+                        publishFreshProfile(emptyProfile)
                         _error.value = null
                         emptyProfile
                     } else {
                         val msg = describeFailure(result)
                         Log.w(TAG, "refresh failed: $msg")
-                        _error.value = msg
+                        markProfileLoadFailure(msg)
                         null
                     }
                 }
                 else -> {
                     val msg = describeFailure(result)
                     Log.w(TAG, "refresh failed: $msg")
-                    _error.value = msg
+                    markProfileLoadFailure(msg)
                     null
                 }
             }
@@ -192,8 +204,37 @@ class ProfileRepository @Inject constructor(
     }
 
     /** Let the daemon selector use automatic node selection. */
-    suspend fun clearActiveNode(): Boolean = mutateDelta("clearActiveNode") {
-        client.profileClearActiveNode()
+    suspend fun clearActiveNode(): Boolean = mutex.withLock {
+        _loading.value = true
+        _error.value = null
+        _notice.value = null
+        try {
+            val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
+                if (_error.value.isNullOrBlank()) {
+                    _error.value = messages.get(com.rknnovpn.panel.R.string.error_no_profile_loaded)
+                }
+                return@withLock false
+            }
+            if (current.activeNodeId.isNullOrBlank()) {
+                return@withLock true
+            }
+            when (val result = client.profileClearActiveNode()) {
+                is DaemonClientResult.Ok -> {
+                    applyMutationSuccess("clearActiveNode", result.data)
+                }
+                else -> {
+                    val msg = describeFailure(result)
+                    Log.w(TAG, "clearActiveNode profile update failed: $msg")
+                    if (result.configWasSaved()) {
+                        return@withLock refreshAfterSavedFailure("clearActiveNode", msg)
+                    }
+                    _error.value = msg
+                    false
+                }
+            }
+        } finally {
+            _loading.value = false
+        }
     }
 
     /** Import nodes from direct import content or refresh a subscription URL. */
@@ -393,18 +434,22 @@ class ProfileRepository @Inject constructor(
     private suspend fun refreshUnlocked() {
         when (val result = client.profileGet()) {
             is DaemonClientResult.Ok -> {
-                _profile.value = result.data
+                publishFreshProfile(result.data)
             }
             is DaemonClientResult.DaemonUnavailable -> {
                 if (result.reason.isNoRuntimeProfileReason()) {
-                    _profile.value = emptyFirstRunProfile()
+                    publishFreshProfile(emptyFirstRunProfile())
                     _error.value = null
                 } else {
-                    Log.w(TAG, "refreshUnlocked failed: ${describeFailure(result)}")
+                    val msg = describeFailure(result)
+                    Log.w(TAG, "refreshUnlocked failed: $msg")
+                    markProfileLoadFailure(msg)
                 }
             }
             else -> {
-                Log.w(TAG, "refreshUnlocked failed: ${describeFailure(result)}")
+                val msg = describeFailure(result)
+                Log.w(TAG, "refreshUnlocked failed: $msg")
+                markProfileLoadFailure(msg)
             }
         }
     }
@@ -412,24 +457,24 @@ class ProfileRepository @Inject constructor(
     private suspend fun refreshUnlockedWithStatus(tag: String): Boolean {
         return when (val result = client.profileGet()) {
             is DaemonClientResult.Ok -> {
-                _profile.value = result.data
+                publishFreshProfile(result.data)
                 true
             }
             is DaemonClientResult.DaemonUnavailable -> {
                 if (result.reason.isNoRuntimeProfileReason()) {
-                    _profile.value = emptyFirstRunProfile()
+                    publishFreshProfile(emptyFirstRunProfile())
                     _error.value = null
                     true
                 } else {
                     val msg = describeFailure(result)
-                    _error.value = msg
+                    markProfileLoadFailure(msg)
                     Log.w(TAG, "$tag post-write refresh failed: $msg")
                     false
                 }
             }
             else -> {
                 val msg = describeFailure(result)
-                _error.value = msg
+                markProfileLoadFailure(msg)
                 Log.w(TAG, "$tag post-write refresh failed: $msg")
                 false
             }
@@ -445,26 +490,26 @@ class ProfileRepository @Inject constructor(
     private suspend fun refreshUnlockedOrNull(allowModuleRepair: Boolean = false): ProfileConfig? {
         return when (val result = client.profileGet(allowModuleRepair = allowModuleRepair)) {
             is DaemonClientResult.Ok -> {
-                _profile.value = result.data
+                publishFreshProfile(result.data)
                 result.data
             }
             is DaemonClientResult.DaemonUnavailable -> {
                 if (result.reason.isNoRuntimeProfileReason()) {
                     val emptyProfile = emptyFirstRunProfile()
-                    _profile.value = emptyProfile
+                    publishFreshProfile(emptyProfile)
                     _error.value = null
                     emptyProfile
                 } else {
                     val msg = describeFailure(result)
                     Log.w(TAG, "refreshUnlockedOrNull failed: $msg")
-                    _error.value = msg
+                    markProfileLoadFailure(msg)
                     null
                 }
             }
             else -> {
                 val msg = describeFailure(result)
                 Log.w(TAG, "refreshUnlockedOrNull failed: $msg")
-                _error.value = msg
+                markProfileLoadFailure(msg)
                 null
             }
         }
@@ -540,6 +585,7 @@ class ProfileRepository @Inject constructor(
         }
 
         return SubscriptionImportPreview(
+            previewId = preview.previewId,
             url = preview.source.url.ifBlank { url },
             source = preview.source,
             nodes = preview.nodes,
@@ -554,7 +600,11 @@ class ProfileRepository @Inject constructor(
     private suspend fun applySubscriptionPreviewUnlocked(
         preview: SubscriptionImportPreview,
     ): List<Node> {
-        return when (val result = client.subscriptionRefresh(preview.url)) {
+        if (preview.previewId.isBlank()) {
+            _error.value = messages.get(com.rknnovpn.panel.R.string.subscription_no_supported_links)
+            return emptyList()
+        }
+        return when (val result = client.subscriptionCommitPreview(preview.previewId)) {
             is DaemonClientResult.Ok -> {
                 applyMutationSuccess("subscriptionRefresh", result.data)
                 _notice.value = messages.formatSubscriptionRefresh(
@@ -583,10 +633,28 @@ class ProfileRepository @Inject constructor(
     private suspend fun applyMutationSuccess(tag: String, info: ConfigMutationInfo): Boolean {
         publishRuntimeStatus(info)
         info.profile?.let { profile ->
-            _profile.value = profile
+            publishFreshProfile(profile)
             return true
         }
         return refreshUnlockedWithStatus(tag)
+    }
+
+    private fun publishFreshProfile(profile: ProfileConfig) {
+        _profile.value = profile
+        _freshness.value = if (profile.nodes.isEmpty()) {
+            ProfileFreshness.EMPTY
+        } else {
+            ProfileFreshness.FRESH
+        }
+    }
+
+    private fun markProfileLoadFailure(message: String) {
+        _error.value = message
+        _freshness.value = if (_profile.value == null) {
+            ProfileFreshness.ERROR
+        } else {
+            ProfileFreshness.STALE
+        }
     }
 
     private fun publishRuntimeStatus(info: ConfigMutationInfo) {

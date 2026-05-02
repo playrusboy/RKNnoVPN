@@ -312,6 +312,15 @@ func (m *CoreManager) SetConfig(cfg *config.Config) {
 	m.config = cfg
 }
 
+func (m *CoreManager) MarkSelectorActive(profile *config.NodeProfile) {
+	if profile == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.activeProfile = profile.Protocol + "://" + profile.Address
+}
+
 // State returns the current lifecycle state (safe for concurrent access).
 func (m *CoreManager) GetState() State {
 	m.mu.Lock()

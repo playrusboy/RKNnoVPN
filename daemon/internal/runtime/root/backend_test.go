@@ -108,7 +108,7 @@ func (p *fakePorts) ShouldSkipRootReconcile() (bool, string) {
 	return false, ""
 }
 
-func (p *fakePorts) TestNodeProbes(url string, timeoutMS int, nodeIDs []string) []runtimev2.NodeProbeResult {
+func (p *fakePorts) TestNodeProbes(url string, timeoutMS int, nodeIDs []string, mode string) []runtimev2.NodeProbeResult {
 	return nil
 }
 

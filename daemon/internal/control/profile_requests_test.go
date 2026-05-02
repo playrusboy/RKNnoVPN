@@ -115,6 +115,13 @@ func TestDecodeSubscriptionURLParams(t *testing.T) {
 	}
 }
 
+func TestDecodeCommitSubscriptionPreviewParamsRequiresPreviewID(t *testing.T) {
+	raw := json.RawMessage(`{"previewId":"   "}`)
+	if _, err := DecodeCommitSubscriptionPreviewParams(&raw); err == nil || !strings.Contains(err.Error(), "previewId is required") {
+		t.Fatalf("expected previewId error, got %v", err)
+	}
+}
+
 func mustJSON(t *testing.T, value interface{}) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(value)

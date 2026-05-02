@@ -309,6 +309,8 @@
     <string name="error_daemon_not_installed">Daemon not installed</string>
     <string name="error_daemon_not_found">Daemon not found</string>
     <string name="error_daemon_not_running">Module daemon is not running. Reboot the device or check module logs.</string>
+    <string name="profile_stale_banner">Showing cached nodes. Daemon data could not be refreshed: %1$s</string>
+    <string name="profile_error_banner">Daemon data is unavailable: %1$s</string>
     <string name="error_daemon_repair_running">Module daemon is starting. Wait a moment and refresh.</string>
     <string name="error_daemon_repair_failed">Module daemon repair failed. Check module logs or reboot the device.</string>
     <string name="error_module_reboot_required">The module is installed or updated and is waiting for a reboot. KernelSU/APatch will apply it after reboot; service.log and daemon.log will appear after that.</string>

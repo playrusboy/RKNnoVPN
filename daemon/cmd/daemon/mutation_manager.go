@@ -6,12 +6,19 @@ import (
 	applytx "github.com/youtubediscord/RKNnoVPN/daemon/internal/apply"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
+	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
 // persistConfigMutationForAction is the daemon-owned transaction gate
 // for every mutation that changes user intent and its runtime projection.
 func (d *daemon) persistConfigMutationForAction(nextCfg *config.Config, reload bool, action string) (applytx.ConfigTransactionResult, error) {
+	currentCfg := d.currentConfig()
+	reloadPlan := rootruntime.PlanReload(
+		rootruntime.BuildScriptEnv(currentCfg, d.dataDir),
+		rootruntime.BuildScriptEnv(nextCfg, d.dataDir),
+	)
+	selectorSwitchTag := activeNodeSelectorSwitchTarget(currentCfg, nextCfg, reloadPlan)
 	return applytx.ConfigTransaction{
 		Action:     action,
 		EnsureIdle: d.failIfRuntimeOperationActive,
@@ -22,6 +29,9 @@ func (d *daemon) persistConfigMutationForAction(nextCfg *config.Config, reload b
 			return nil
 		},
 		CheckRuntimeProjection: func(nextCfg *config.Config) error {
+			if selectorSwitchTag != "" {
+				return nil
+			}
 			profile := nextCfg.ResolveProfile()
 			if profile == nil || profile.Address == "" {
 				return nil
