@@ -13,10 +13,15 @@ import (
 )
 
 func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, operation runtimev2.OperationKind) error {
+	currentCfg := d.currentConfig()
 	reloadPlan := rootruntime.PlanReload(
-		rootruntime.BuildScriptEnv(d.currentConfig(), d.dataDir),
+		rootruntime.BuildScriptEnv(currentCfg, d.dataDir),
 		rootruntime.BuildScriptEnv(newCfg, d.dataDir),
 	)
+	selectorSwitchTag := ""
+	if operation == runtimev2.OperationProfileApply {
+		selectorSwitchTag = activeNodeSelectorSwitchTarget(currentCfg, newCfg, reloadPlan)
+	}
 	if reload && d.isRuntimeRunningOrDegraded() && len(reloadPlan.ChangedKeys) > 0 {
 		mode := "hot-swap"
 		switch {
@@ -47,6 +52,14 @@ func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, op
 				return err
 			},
 			ReloadRuntime: func(cfg *config.Config, generation int64, fullRestart bool, netstackReapplyAfter bool) error {
+				if selectorSwitchTag != "" && !fullRestart && !netstackReapplyAfter {
+					if err := switchSingboxSelector(cfg, singboxProxySelectorTag, selectorSwitchTag); err == nil {
+						log.Printf("runtime reload plan: mode=selector-switch selector=%s outbound=%s", singboxProxySelectorTag, selectorSwitchTag)
+						return nil
+					} else {
+						log.Printf("runtime selector switch failed; falling back to hot-swap: %v", err)
+					}
+				}
 				return d.reloadRuntimeAfterConfigChange(
 					cfg,
 					"apply config",

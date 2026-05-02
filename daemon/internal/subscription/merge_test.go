@@ -120,6 +120,73 @@ func TestMergeSubscriptionNodesUsesIncomingProviderOrder(t *testing.T) {
 	}
 }
 
+func TestMergeSubscriptionNodesAvoidsGlobalIDCollisions(t *testing.T) {
+	current := profiledoc.Document{
+		ID:            "main",
+		Name:          "Primary",
+		Subscriptions: []profiledoc.Subscription{{ProviderKey: "sub", URL: "https://sub.example/list"}},
+		Nodes: []profiledoc.Node{
+			{ID: "vless-example-com-443-12345", Name: "Manual", Protocol: "vless", Server: "manual.example", Port: 443, Outbound: json.RawMessage(`{}`), Source: profiledoc.NodeSource{Type: "MANUAL"}},
+		},
+	}
+	incoming := []profiledoc.Node{
+		{ID: "vless-example-com-443-12345", Name: "Subscription", Protocol: "vless", Server: "example.com", Port: 443, Outbound: json.RawMessage(`{"id":"subscription"}`), Source: profiledoc.NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub"}},
+	}
+
+	next, stats := MergeSubscriptionNodes(current, profiledoc.Subscription{
+		ProviderKey: "sub",
+		URL:         "https://sub.example/list",
+	}, incoming)
+
+	if stats["added"] != 1 {
+		t.Fatalf("unexpected merge stats: %#v", stats)
+	}
+	if len(next.Nodes) != 2 {
+		t.Fatalf("unexpected nodes: %#v", next.Nodes)
+	}
+	if next.Nodes[0].ID == next.Nodes[1].ID {
+		t.Fatalf("subscription import kept duplicate global ids: %#v", next.Nodes)
+	}
+	if _, _, err := profiledoc.Normalize(next); err != nil {
+		t.Fatalf("merged profile should validate: %v", err)
+	}
+}
+
+func TestMergeSubscriptionNodesMatchesSuffixedIDsByLink(t *testing.T) {
+	link := "vless://00000000-0000-0000-0000-000000000000@example.com:443?type=ws#one"
+	current := profiledoc.Document{
+		ID:            "main",
+		Name:          "Primary",
+		Subscriptions: []profiledoc.Subscription{{ProviderKey: "sub", URL: "https://sub.example/list"}},
+		Nodes: []profiledoc.Node{
+			{ID: "vless-example-com-443-12345", Name: "Manual", Protocol: "vless", Server: "manual.example", Port: 443, Outbound: json.RawMessage(`{}`), Source: profiledoc.NodeSource{Type: "MANUAL"}},
+			{ID: "vless-example-com-443-12345-67890", Name: "Old", Protocol: "vless", Server: "example.com", Port: 443, Link: link, Outbound: json.RawMessage(`{"id":"old"}`), Source: profiledoc.NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub"}},
+		},
+	}
+	incoming := []profiledoc.Node{
+		{ID: "vless-example-com-443-12345", Name: "New", Protocol: "vless", Server: "example.com", Port: 443, Link: link, Outbound: json.RawMessage(`{"id":"new"}`), Source: profiledoc.NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub"}},
+	}
+
+	next, stats := MergeSubscriptionNodes(current, profiledoc.Subscription{
+		ProviderKey: "sub",
+		URL:         "https://sub.example/list",
+	}, incoming)
+
+	if len(next.Nodes) != 2 {
+		t.Fatalf("refresh should update the existing suffixed node, got %#v", next.Nodes)
+	}
+	if stats["added"] != 0 || stats["updated"] != 1 {
+		t.Fatalf("unexpected merge stats: %#v", stats)
+	}
+	got := nodeByIDForTest(next.Nodes, "vless-example-com-443-12345-67890")
+	if got == nil || got.Name != "Old" || string(got.Outbound) != `{"id":"new"}` {
+		t.Fatalf("suffixed node was not updated in place: %#v", next.Nodes)
+	}
+	if _, _, err := profiledoc.Normalize(next); err != nil {
+		t.Fatalf("merged profile should validate: %v", err)
+	}
+}
+
 func nodeByIDForTest(nodes []profiledoc.Node, id string) *profiledoc.Node {
 	for i := range nodes {
 		if nodes[i].ID == id {

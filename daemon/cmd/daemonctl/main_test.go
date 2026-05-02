@@ -1,7 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/json"
+	"fmt"
+	"net"
+	"path/filepath"
 	"testing"
 )
 
@@ -123,5 +128,77 @@ func TestWriteResponsePrettyPrintsResultEnvelope(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("expected stderr to be empty, got %q", stderr.String())
+	}
+}
+
+func TestRunBridgeProxiesMultipleFrames(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "daemon.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 2; i++ {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer conn.Close()
+				line, err := bufio.NewReader(conn).ReadBytes('\n')
+				if err != nil {
+					t.Errorf("read request: %v", err)
+					return
+				}
+				var req struct {
+					ID int `json:"id"`
+				}
+				if err := json.Unmarshal(bytes.TrimSpace(line), &req); err != nil {
+					t.Errorf("decode request: %v", err)
+					return
+				}
+				_, _ = conn.Write([]byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{"ok":true,"result":{"id":%d}}}`+"\n", req.ID, req.ID)))
+			}()
+		}
+	}()
+
+	stdin := bytes.NewBufferString(
+		`{"jsonrpc":"2.0","id":1,"method":"version"}` + "\n" +
+			`{"jsonrpc":"2.0","id":2,"method":"backend.status"}` + "\n",
+	)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	if code := runBridge(stdin, &stdout, &stderr, socketPath); code != 0 {
+		t.Fatalf("bridge exit code %d stderr=%q", code, stderr.String())
+	}
+	<-done
+	lines := bytes.Split(bytes.TrimSpace(stdout.Bytes()), []byte{'\n'})
+	if len(lines) != 2 {
+		t.Fatalf("expected two response lines, got %d: %q", len(lines), stdout.String())
+	}
+	if !bytes.Contains(lines[0], []byte(`"id":1`)) || !bytes.Contains(lines[1], []byte(`"id":2`)) {
+		t.Fatalf("bridge responses did not preserve ids: %q", stdout.String())
+	}
+}
+
+func TestRunBridgeReturnsErrorWhenSocketUnavailable(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	stdin := bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"version"}` + "\n")
+	socketPath := filepath.Join(t.TempDir(), "missing.sock")
+
+	if code := runBridge(stdin, &stdout, &stderr, socketPath); code == 0 {
+		t.Fatal("expected bridge to fail when daemon socket is unavailable")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout on transport failure, got %q", stdout.String())
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("cannot connect to daemon")) {
+		t.Fatalf("expected socket failure on stderr, got %q", stderr.String())
 	}
 }

@@ -1,0 +1,254 @@
+== /data/adb/modules/rknnovpn/logs/daemon.log ==
+2026/05/02 14:09:34.453288 daemon_app.go:58: daemon v2.3.2 starting
+2026/05/02 14:09:34.456385 daemon_app.go:159: config loaded from /data/adb/modules/rknnovpn/config/config.json
+2026/05/02 14:09:34.521807 server.go:89: ipc: listening on /data/adb/modules/rknnovpn/run/daemon.sock
+2026/05/02 14:09:34.523911 daemon_app.go:244: daemon ready, waiting for signals
+2026/05/02 14:21:02.910697 operation_logger.go:40: runtime_operation operation=start generation=1 phase=STARTING result=accepted
+[core] 2026/05/02 14:21:02 starting sing-box for profile "vless"
+[core] 2026/05/02 14:21:02 rendering sing-box config to /data/adb/modules/rknnovpn/config/rendered/singbox.json
+[core] 2026/05/02 14:21:02 checking sing-box config /data/adb/modules/rknnovpn/config/rendered/singbox.json
+[core] 2026/05/02 14:21:03 sing-box config check passed
+[core] 2026/05/02 14:21:03 sing-box spawned, pid=26635
+[core] 2026/05/02 14:21:03 TPROXY port 10853 is listening
+[core] 2026/05/02 14:21:03 DNS port 10856 is listening
+[core] 2026/05/02 14:21:13 netstack applied
+[core] 2026/05/02 14:21:14 netstack verified
+[core] 2026/05/02 14:21:14 core is running (pid=26635)
+[rescue] 2026/05/02 14:21:14 attempt counter reset
+[health] 2026/05/02 14:21:14 started (interval=30s, threshold=3)
+[netwatch] 2026/05/02 14:21:14 watching /data/misc/net/ via inotifyd (pid=28074)
+[netwatch] 2026/05/02 14:21:15 network change detected: c	/data/misc/net/	rt_tables
+[netwatch] 2026/05/02 14:21:15 network change reconciliation failed: runtime operation already in progress
+2026/05/02 14:21:25.592362 operation_logger.go:40: runtime_operation operation=start generation=1 phase=OUTBOUND_CHECKED result=ok runtime_ms=22681 step=commit-state step_status=ok step_detail="vless://158.160.180.65"
+[rescue] 2026/05/02 14:21:44 attempt counter reset
+[rescue] 2026/05/02 14:22:14 attempt counter reset
+2026/05/02 14:22:25.110755 operation_logger.go:40: runtime_operation operation=stop generation=2 phase=STOPPING result=accepted
+[health] 2026/05/02 14:22:25 stopped
+[netwatch] 2026/05/02 14:22:25 stopped
+[core] 2026/05/02 14:22:25 stopping core
+[core] 2026/05/02 14:22:26 sending SIGTERM to pid 26635
+[core] 2026/05/02 14:22:26 pid 26635 exited after SIGTERM
+[core] 2026/05/02 14:22:26 core stopped
+2026/05/02 14:22:26.537597 operation_logger.go:40: runtime_operation operation=stop generation=2 phase=STOPPED result=ok runtime_ms=1426
+
+== /data/adb/modules/rknnovpn/logs/sing-box.log ==
++0300 2026-05-02 17:22:19 [36mINFO[0m [[38;5;102m4201046358[0m 263ms] dns: exchanged A pns-sdk-ams4-1.opera-api.com. 16 IN A 82.145.216.140
++0300 2026-05-02 17:22:19 [36mINFO[0m [[38;5;102m4201046358[0m 263ms] dns: exchanged A pns-sdk-ams4-1.opera-api.com. 16 IN A 82.145.216.138
++0300 2026-05-02 17:22:19 [36mINFO[0m [[38;5;213m1376042437[0m 213ms] dns: exchanged CNAME ofa-sub.osp.opera.software. 9 IN CNAME submit-target.osp.opera.software.
++0300 2026-05-02 17:22:19 [36mINFO[0m [[38;5;213m1376042437[0m 213ms] dns: exchanged CNAME submit-target.osp.opera.software. 9 IN CNAME submit.geo.opera.com.
++0300 2026-05-02 17:22:19 [36mINFO[0m [[38;5;213m1376042437[0m 213ms] dns: exchanged CNAME submit.geo.opera.com. 9 IN CNAME submit-am4.osp.opera.software.
++0300 2026-05-02 17:22:19 [36mINFO[0m [[38;5;213m1376042437[0m 213ms] dns: exchanged A submit-am4.osp.opera.software. 9 IN A 82.145.217.121
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;119m660189296[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:64920
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;119m660189296[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;119m660189296[0m 1ms] dns: cached SOA tvhost.ru. 285 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;220m1616375051[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:36906
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;220m1616375051[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;220m1616375051[0m 0ms] dns: cached SOA tvhost.ru. 260 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;145m2195216001[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:30626
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;145m2195216001[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;145m2195216001[0m 0ms] dns: cached CNAME mirror.cyberbits.eu. 112 IN CNAME hope.cyberbits.eu.
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;145m2195216001[0m 0ms] dns: cached A hope.cyberbits.eu. 112 IN A 51.159.104.35
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;34m112492050[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:15022
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;34m112492050[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;48m3698066935[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:49721
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;48m3698066935[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;48m3698066935[0m 0ms] dns: cached SOA tvhost.ru. 295 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;69m3663306805[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:45008
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;69m3663306805[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;69m3663306805[0m 0ms] dns: cached CNAME mobileapp.bitwarden.com. 55 IN CNAME n.sni.global.fastly.net.
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;69m3663306805[0m 0ms] dns: cached A n.sni.global.fastly.net. 55 IN A 151.101.1.91
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;69m3663306805[0m 0ms] dns: cached A n.sni.global.fastly.net. 55 IN A 151.101.65.91
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;69m3663306805[0m 0ms] dns: cached A n.sni.global.fastly.net. 55 IN A 151.101.129.91
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;69m3663306805[0m 0ms] dns: cached A n.sni.global.fastly.net. 55 IN A 151.101.193.91
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;47m3655387638[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:4060
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;47m3655387638[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;47m3655387638[0m 0ms] dns: cached SOA tvhost.ru. 254 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;34m112492050[0m 75ms] dns: exchanged A gitjournal.io. 300 IN A 185.199.108.153
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;34m112492050[0m 75ms] dns: exchanged A gitjournal.io. 300 IN A 185.199.110.153
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;34m112492050[0m 75ms] dns: exchanged A gitjournal.io. 300 IN A 185.199.111.153
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;230m1220569302[0m 0ms] inbound/tproxy[tproxy-in]: inbound connection from 127.0.0.1:56266
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;230m1220569302[0m 0ms] inbound/tproxy[tproxy-in]: inbound connection to 127.0.0.1:10853
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;225m535303901[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:18049
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;225m535303901[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;225m535303901[0m 0ms] dns: cached SOA tvhost.ru. 260 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;147m1835860611[0m 1ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:65497
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;147m1835860611[0m 1ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;203m1085316027[0m 0ms] inbound/direct[dns-in]: inbound connection from 127.0.0.1:53026
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;203m1085316027[0m 0ms] inbound/direct[dns-in]: inbound connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;201m160974777[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 127.0.0.1:54286
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;201m160974777[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;201m160974777[0m 0ms] dns: cached AAAA connectivitycheck.gstatic.com. 114 IN AAAA 2a00:1450:4001:c13::5e
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;201m160974777[0m 0ms] dns: cached OPT OPT PSEUDOSECTION: EDNS: version 0 flags: MBZ: 0x0072, udp: 1232
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;226m1816451804[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 127.0.0.1:55936
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;226m1816451804[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;226m1816451804[0m 0ms] dns: cached A connectivitycheck.gstatic.com. 238 IN A 142.251.14.94
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;38m2594427117[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:41493
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;38m2594427117[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;38m2594427117[0m 0ms] dns: cached A api.exteragram.app. 95 IN A 144.31.1.207
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;192m97540647[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:15435
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;192m97540647[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;192m97540647[0m 0ms] dns: cached A dns.google.com. 120 IN A 8.8.8.8
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;192m97540647[0m 0ms] dns: cached A dns.google.com. 120 IN A 8.8.4.4
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;224m3343151623[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 127.0.0.1:47328
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;224m3343151623[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;105m3672611929[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 127.0.0.1:33944
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;105m3672611929[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;105m3672611929[0m 0ms] dns: cached AAAA www.gstatic.com. 156 IN AAAA 2a00:1450:4001:c25::5e
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;105m3672611929[0m 0ms] dns: cached OPT OPT PSEUDOSECTION: EDNS: version 0 flags: MBZ: 0x009c, udp: 1232
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;224m3343151623[0m 0ms] dns: cached A www.gstatic.com. 152 IN A 142.250.154.94
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;224m3343151623[0m 0ms] dns: cached OPT OPT PSEUDOSECTION: EDNS: version 0 flags: MBZ: 0x0098, udp: 1232
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;111m910059871[0m 0ms] inbound/tproxy[tproxy-in]: inbound connection from [::1]:37298
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;111m910059871[0m 0ms] inbound/tproxy[tproxy-in]: inbound connection to [2a00:1450:4001:c25::5e]:443
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;111m910059871[0m 1ms] outbound/vless[node-vless-158-160-180-65-443-42150]: outbound connection to [2a00:1450:4001:c25::5e]:443
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;147m1835860611[0m 70ms] dns: exchanged A fdroid-repo.calyxinstitute.org. 300 IN A 162.247.72.58
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;36m1429738987[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:34398
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;36m1429738987[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;36m1429738987[0m 0ms] dns: cached SOA tvhost.ru. 280 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;104m3099282264[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:15294
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;104m3099282264[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;104m3099282264[0m 0ms] dns: cached SOA tvhost.ru. 280 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;224m1637659102[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:37323
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;224m1637659102[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;224m1637659102[0m 0ms] dns: cached CNAME sitecheck.opera.com. 25 IN CNAME sitecheck.geo.opera.com.
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;224m1637659102[0m 0ms] dns: cached CNAME sitecheck.geo.opera.com. 25 IN CNAME ams-sitecheck.opera.com.
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;224m1637659102[0m 0ms] dns: cached CNAME ams-sitecheck.opera.com. 25 IN CNAME ams.lb.opera.technology.
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;224m1637659102[0m 0ms] dns: cached A ams.lb.opera.technology. 25 IN A 185.26.182.106
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;224m1637659102[0m 0ms] dns: cached A ams.lb.opera.technology. 25 IN A 185.26.182.112
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;224m1637659102[0m 0ms] dns: cached A ams.lb.opera.technology. 25 IN A 185.26.182.118
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;224m1637659102[0m 0ms] dns: cached A ams.lb.opera.technology. 25 IN A 185.26.182.93
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;224m1637659102[0m 0ms] dns: cached A ams.lb.opera.technology. 25 IN A 185.26.182.111
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;224m1637659102[0m 0ms] dns: cached A ams.lb.opera.technology. 25 IN A 185.26.182.94
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;149m4082084229[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:36555
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;149m4082084229[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;149m4082084229[0m 0ms] dns: cached SOA tvhost.ru. 280 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;119m3254337639[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:15313
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;119m3254337639[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;119m3254337639[0m 0ms] dns: cached A ipintel.vercel.app. 260 IN A 64.29.17.67
++0300 2026-05-02 17:22:20 [36mINFO[0m [[38;5;119m3254337639[0m 0ms] dns: cached A ipintel.vercel.app. 260 IN A 216.198.79.67
++0300 2026-05-02 17:22:21 [36mINFO[0m [[38;5;210m286328258[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:36199
++0300 2026-05-02 17:22:21 [36mINFO[0m [[38;5;210m286328258[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:21 [36mINFO[0m [[38;5;210m286328258[0m 0ms] dns: cached CNAME mtalk.google.com. 74 IN CNAME mobile-gtalk.l.google.com.
++0300 2026-05-02 17:22:21 [36mINFO[0m [[38;5;210m286328258[0m 0ms] dns: cached A mobile-gtalk.l.google.com. 74 IN A 142.251.127.188
++0300 2026-05-02 17:22:21 [36mINFO[0m [[38;5;137m2536115321[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:46311
++0300 2026-05-02 17:22:21 [36mINFO[0m [[38;5;137m2536115321[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:21 [36mINFO[0m [[38;5;137m2536115321[0m 0ms] dns: cached A launches.appsflyersdk.com. 14 IN A 13.33.187.3
++0300 2026-05-02 17:22:21 [36mINFO[0m [[38;5;137m2536115321[0m 0ms] dns: cached A launches.appsflyersdk.com. 14 IN A 13.33.187.14
++0300 2026-05-02 17:22:21 [36mINFO[0m [[38;5;137m2536115321[0m 0ms] dns: cached A launches.appsflyersdk.com. 14 IN A 13.33.187.69
++0300 2026-05-02 17:22:21 [36mINFO[0m [[38;5;137m2536115321[0m 0ms] dns: cached A launches.appsflyersdk.com. 14 IN A 13.33.187.38
++0300 2026-05-02 17:22:22 [36mINFO[0m [[38;5;154m3999056778[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:54647
++0300 2026-05-02 17:22:22 [36mINFO[0m [[38;5;154m3999056778[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:22 [36mINFO[0m [[38;5;154m3999056778[0m 0ms] dns: cached SOA tvhost.ru. 275 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:22 [36mINFO[0m [[38;5;111m910059871[0m 1.83s] outbound/vless[node-vless-158-160-180-65-443-42150]: outbound connection to [2a00:1450:4001:c25::5e]:443
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;172m883070364[0m 0ms] inbound/tproxy[tproxy-in]: inbound connection from 192.168.0.96:40008
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;172m883070364[0m 0ms] inbound/tproxy[tproxy-in]: inbound connection to 149.154.167.222:443
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;189m3248902698[0m 0ms] inbound/tproxy[tproxy-in]: inbound connection from 192.168.0.96:40016
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;189m3248902698[0m 0ms] inbound/tproxy[tproxy-in]: inbound connection to 149.154.167.222:443
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;172m883070364[0m 1ms] outbound/vless[node-vless-158-160-180-65-443-42150]: outbound connection to 149.154.167.222:443
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;189m3248902698[0m 1ms] outbound/vless[node-vless-158-160-180-65-443-42150]: outbound connection to 149.154.167.222:443
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;154m3326688845[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:20585
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;154m3326688845[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;154m3326688845[0m 0ms] dns: cached SOA tvhost.ru. 275 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;50m637121273[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:30866
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;50m637121273[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;50m637121273[0m 0ms] dns: cached A opengraph.githubassets.com. 2478 IN A 185.199.109.154
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;50m637121273[0m 0ms] dns: cached A opengraph.githubassets.com. 2478 IN A 185.199.110.154
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;50m637121273[0m 0ms] dns: cached A opengraph.githubassets.com. 2478 IN A 185.199.108.154
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;50m637121273[0m 0ms] dns: cached A opengraph.githubassets.com. 2478 IN A 185.199.111.154
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;68m712571700[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:28801
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;68m712571700[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:23 [36mINFO[0m [[38;5;68m712571700[0m 0ms] dns: cached SOA tvhost.ru. 275 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;114m1139882082[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:53466
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;114m1139882082[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;114m1139882082[0m 1ms] dns: cached A github.com. 26 IN A 140.82.121.4
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;228m3786131162[0m 10.0s] dns: cached SOA tvhost.ru. 290 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;137m687650681[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:42071
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;137m687650681[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;137m687650681[0m 0ms] dns: cached CNAME sync.opera.com. 4 IN CNAME sync.geo.opera.com.
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;137m687650681[0m 0ms] dns: cached CNAME sync.geo.opera.com. 4 IN CNAME am4-sync.opera.com.
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;137m687650681[0m 1ms] dns: cached CNAME am4-sync.opera.com. 4 IN CNAME am4.lb.opera.technology.
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;137m687650681[0m 1ms] dns: cached A am4.lb.opera.technology. 4 IN A 82.145.216.58
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;137m687650681[0m 1ms] dns: cached A am4.lb.opera.technology. 4 IN A 82.145.216.59
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;100m1658117460[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:47838
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;137m687650681[0m 1ms] dns: cached A am4.lb.opera.technology. 4 IN A 82.145.216.15
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;100m1658117460[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;137m687650681[0m 1ms] dns: cached A am4.lb.opera.technology. 4 IN A 82.145.216.16
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;100m1658117460[0m 1ms] dns: cached CNAME sync.opera.com. 4 IN CNAME sync.geo.opera.com.
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;100m1658117460[0m 1ms] dns: cached CNAME sync.geo.opera.com. 4 IN CNAME am4-sync.opera.com.
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;100m1658117460[0m 1ms] dns: cached CNAME am4-sync.opera.com. 4 IN CNAME am4.lb.opera.technology.
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;100m1658117460[0m 1ms] dns: cached A am4.lb.opera.technology. 4 IN A 82.145.216.58
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;100m1658117460[0m 1ms] dns: cached A am4.lb.opera.technology. 4 IN A 82.145.216.59
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;100m1658117460[0m 1ms] dns: cached A am4.lb.opera.technology. 4 IN A 82.145.216.15
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;100m1658117460[0m 1ms] dns: cached A am4.lb.opera.technology. 4 IN A 82.145.216.16
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;72m4020562744[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:35444
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;72m4020562744[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;72m4020562744[0m 1ms] dns: cached A play-fe.googleapis.com. 222 IN A 142.251.13.102
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;72m4020562744[0m 1ms] dns: cached A play-fe.googleapis.com. 222 IN A 142.251.13.138
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;72m4020562744[0m 1ms] dns: cached A play-fe.googleapis.com. 222 IN A 142.251.13.113
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;72m4020562744[0m 1ms] dns: cached A play-fe.googleapis.com. 222 IN A 142.251.13.100
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;72m4020562744[0m 1ms] dns: cached A play-fe.googleapis.com. 222 IN A 142.251.13.139
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;72m4020562744[0m 1ms] dns: cached A play-fe.googleapis.com. 222 IN A 142.251.13.101
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;28m1009898508[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:10843
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;28m1009898508[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;28m1009898508[0m 0ms] dns: cached A play-fe.googleapis.com. 222 IN A 142.251.13.102
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;28m1009898508[0m 0ms] dns: cached A play-fe.googleapis.com. 222 IN A 142.251.13.138
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;28m1009898508[0m 0ms] dns: cached A play-fe.googleapis.com. 222 IN A 142.251.13.113
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;28m1009898508[0m 0ms] dns: cached A play-fe.googleapis.com. 222 IN A 142.251.13.100
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;28m1009898508[0m 0ms] dns: cached A play-fe.googleapis.com. 222 IN A 142.251.13.139
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;28m1009898508[0m 0ms] dns: cached A play-fe.googleapis.com. 222 IN A 142.251.13.101
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;105m3660242521[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:44823
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;105m3660242521[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;105m3660242521[0m 0ms] dns: cached SOA tvhost.ru. 251 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;98m1682346066[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:61127
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;98m1682346066[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;98m1682346066[0m 0ms] dns: cached CNAME pns-sdk.opera-api.com. 11 IN CNAME pns-sdk.geo.opera.com.
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;98m1682346066[0m 0ms] dns: cached CNAME pns-sdk.geo.opera.com. 11 IN CNAME pns-sdk-ams4-1.opera-api.com.
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;98m1682346066[0m 0ms] dns: cached A pns-sdk-ams4-1.opera-api.com. 11 IN A 82.145.216.139
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;98m1682346066[0m 0ms] dns: cached A pns-sdk-ams4-1.opera-api.com. 11 IN A 82.145.216.137
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;98m1682346066[0m 0ms] dns: cached A pns-sdk-ams4-1.opera-api.com. 11 IN A 82.145.216.140
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;98m1682346066[0m 1ms] dns: cached A pns-sdk-ams4-1.opera-api.com. 11 IN A 82.145.216.138
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;223m2570061279[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:32912
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;223m2570061279[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;223m2570061279[0m 0ms] dns: cached A launches.appsflyersdk.com. 11 IN A 13.33.187.3
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;223m2570061279[0m 0ms] dns: cached A launches.appsflyersdk.com. 11 IN A 13.33.187.14
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;223m2570061279[0m 0ms] dns: cached A launches.appsflyersdk.com. 11 IN A 13.33.187.69
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;223m2570061279[0m 0ms] dns: cached A launches.appsflyersdk.com. 11 IN A 13.33.187.38
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;202m1571429818[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:17168
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;202m1571429818[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;202m1571429818[0m 0ms] dns: cached CNAME ofa-sub.osp.opera.software. 4 IN CNAME submit-target.osp.opera.software.
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;202m1571429818[0m 0ms] dns: cached CNAME submit-target.osp.opera.software. 4 IN CNAME submit.geo.opera.com.
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;202m1571429818[0m 0ms] dns: cached CNAME submit.geo.opera.com. 4 IN CNAME submit-am4.osp.opera.software.
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;202m1571429818[0m 0ms] dns: cached A submit-am4.osp.opera.software. 4 IN A 82.145.217.121
++0300 2026-05-02 17:22:24 [36mINFO[0m [[38;5;147m894902915[0m 10.1s] dns: cached SOA tvhost.ru. 290 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;220m3545296588[0m 0ms] inbound/tproxy[tproxy-in]: inbound packet connection from 192.168.0.96:64629
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;220m3545296588[0m 0ms] inbound/tproxy[tproxy-in]: inbound packet connection to 178.159.48.26:53
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;220m3545296588[0m 0ms] dns: cached CNAME archive.newpipe.net. 570 IN CNAME newpipe.net.
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;220m3545296588[0m 0ms] dns: cached A newpipe.net. 570 IN A 159.69.138.33
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;168m4153832856[0m 0ms] inbound/tproxy[tproxy-in]: inbound connection from 192.168.0.96:36688
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;168m4153832856[0m 0ms] inbound/tproxy[tproxy-in]: inbound connection to 159.69.138.33:443
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;168m4153832856[0m 7ms] outbound/vless[node-vless-158-160-180-65-443-42150]: outbound connection to 159.69.138.33:443
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;200m1923907768[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:37705
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;200m1923907768[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;200m1923907768[0m 0ms] dns: cached SOA tvhost.ru. 280 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;221m1375123978[0m 0ms] inbound/tproxy[tproxy-in]: inbound packet connection from 192.168.0.96:42377
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;221m1375123978[0m 0ms] inbound/tproxy[tproxy-in]: inbound packet connection to 178.159.48.30:53
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;221m1375123978[0m 0ms] dns: cached SOA tvhost.ru. 255 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;49m167625761[0m 10.1s] dns: cached CNAME mirror.cyberbits.eu. 107 IN CNAME hope.cyberbits.eu.
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;49m167625761[0m 10.1s] dns: cached A hope.cyberbits.eu. 107 IN A 51.159.104.35
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;224m709287134[0m 10.0s] dns: cached SOA tvhost.ru. 290 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;166m948823702[0m 10.1s] dns: cached CNAME mobileapp.bitwarden.com. 50 IN CNAME n.sni.global.fastly.net.
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;166m948823702[0m 10.1s] dns: cached A n.sni.global.fastly.net. 50 IN A 151.101.1.91
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;166m948823702[0m 10.1s] dns: cached A n.sni.global.fastly.net. 50 IN A 151.101.65.91
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;166m948823702[0m 10.1s] dns: cached A n.sni.global.fastly.net. 50 IN A 151.101.129.91
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;166m948823702[0m 10.1s] dns: cached A n.sni.global.fastly.net. 50 IN A 151.101.193.91
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;123m4223608427[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:53379
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;123m4223608427[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;123m4223608427[0m 0ms] dns: cached SOA tvhost.ru. 249 IN SOA ns1.selectel.ru. s493599.gmail.com. 2023041538 10800 3600 604800 300
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;32m1662072295[0m 0ms] inbound/direct[dns-in]: inbound packet connection from 192.168.0.96:53944
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;32m1662072295[0m 0ms] inbound/direct[dns-in]: inbound packet connection to 1.1.1.1:53
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;32m1662072295[0m 1ms] dns: cached A api.exteragram.app. 90 IN A 144.31.1.207
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;167m3137867159[0m 10.0s] dns: cached A dns.google.com. 115 IN A 8.8.8.8
++0300 2026-05-02 17:22:25 [36mINFO[0m [[38;5;167m3137867159[0m 10.0s] dns: cached A dns.google.com. 115 IN A 8.8.4.4
++0300 2026-05-02 17:22:26 [36mINFO[0m [[38;5;194m344948146[0m 21.42s] outbound/vless[node-vless-158-160-180-65-443-42150]: outbound connection to 149.154.167.41:443
++0300 2026-05-02 17:22:26 [31mERROR[0m [[38;5;189m3248902698[0m 3.30s] connection: open connection to 149.154.167.222:443 using outbound/vless[node-vless-158-160-180-65-443-42150]: context canceled
++0300 2026-05-02 17:22:26 [31mERROR[0m [[38;5;168m4153832856[0m 1.18s] connection: open connection to 159.69.138.33:443 using outbound/vless[node-vless-158-160-180-65-443-42150]: context canceled
++0300 2026-05-02 17:22:26 [31mERROR[0m [[38;5;172m883070364[0m 3.31s] connection: open connection to 149.154.167.222:443 using outbound/vless[node-vless-158-160-180-65-443-42150]: context canceled

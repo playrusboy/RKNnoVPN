@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
+
+const maxNodeProbeWorkers = 6
 
 type URLProbeMetrics struct {
 	LatencyMS     int64
@@ -76,7 +79,7 @@ func RunNodeProbes(input NodeProbeInput) []runtimev2.NodeProbeResult {
 }
 
 func (r NodeProbeRunner) Run(profiles []*config.NodeProfile) []runtimev2.NodeProbeResult {
-	results := make([]runtimev2.NodeProbeResult, 0, len(profiles))
+	selected := make([]*config.NodeProfile, 0, len(profiles))
 	for _, profile := range profiles {
 		if r.Context.Err() != nil {
 			break
@@ -84,9 +87,40 @@ func (r NodeProbeRunner) Run(profiles []*config.NodeProfile) []runtimev2.NodePro
 		if len(r.Requested) > 0 && !r.Requested[profile.ID] {
 			continue
 		}
-		results = append(results, r.probeProfile(profile))
+		selected = append(selected, profile)
 	}
-	return results
+	if len(selected) <= 1 {
+		results := make([]runtimev2.NodeProbeResult, 0, len(selected))
+		for _, profile := range selected {
+			results = append(results, r.probeProfile(profile))
+		}
+		return results
+	}
+
+	results := make([]runtimev2.NodeProbeResult, len(selected))
+	workers := minInt(maxNodeProbeWorkers, len(selected))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for worker := 0; worker < workers; worker++ {
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				results[index] = r.probeProfile(selected[index])
+			}
+		}()
+	}
+	enqueued := 0
+	for index := range selected {
+		if r.Context.Err() != nil {
+			break
+		}
+		jobs <- index
+		enqueued++
+	}
+	close(jobs)
+	wg.Wait()
+	return results[:enqueued]
 }
 
 func (r NodeProbeRunner) probeProfile(profile *config.NodeProfile) runtimev2.NodeProbeResult {
@@ -264,4 +298,11 @@ func ResolveNodeProbeURL(url string, cfg *config.Config) string {
 		testURL = "https://www.gstatic.com/generate_204"
 	}
 	return testURL
+}
+
+func minInt(a int, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

@@ -44,6 +44,7 @@ func ParseSubscription(body string, headers map[string]string, source Subscripti
 		node.Source = source.NodeSource(nowMillis)
 		nodes = append(nodes, node)
 	}
+	uniquifyParsedNodeIDs(nodes)
 	info := subscriptionInfoFromHeaders(headers)
 	sub := profiledoc.Subscription{
 		ProviderKey:       source.ProviderKey,
@@ -57,6 +58,34 @@ func ParseSubscription(body string, headers map[string]string, source Subscripti
 		ParseFailures:     failures,
 	}
 	return nodes, sub, failures, rejected
+}
+
+func uniquifyParsedNodeIDs(nodes []profiledoc.Node) {
+	used := make(map[string]bool, len(nodes))
+	for i := range nodes {
+		base := strings.TrimSpace(nodes[i].ID)
+		if base == "" {
+			continue
+		}
+		if !used[base] {
+			used[base] = true
+			continue
+		}
+		suffix := shortStableSuffix(strings.Join([]string{
+			nodes[i].Link,
+			nodes[i].Name,
+			nodes[i].Protocol,
+			nodes[i].Server,
+			strconv.Itoa(nodes[i].Port),
+			string(nodes[i].Outbound),
+		}, "|"))
+		candidate := base + "-" + suffix
+		for n := 2; used[candidate]; n++ {
+			candidate = fmt.Sprintf("%s-%s-%d", base, suffix, n)
+		}
+		nodes[i].ID = candidate
+		used[candidate] = true
+	}
 }
 
 type subscriptionInfo struct {
@@ -589,4 +618,12 @@ func stableNodeID(protocol, host string, port int, secret string) string {
 		clean = fmt.Sprintf("%s-%05d", clean, sum)
 	}
 	return clean
+}
+
+func shortStableSuffix(value string) string {
+	sum := 0
+	for _, r := range value {
+		sum = (sum*31 + int(r)) % 100000
+	}
+	return fmt.Sprintf("%05d", sum)
 }

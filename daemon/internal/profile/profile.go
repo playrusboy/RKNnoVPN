@@ -378,7 +378,11 @@ func Normalize(doc Document) (Document, []Warning, error) {
 func MergeNodes(current Document, incoming []Node) (Document, map[string]int) {
 	next := current
 	byKey := map[string]int{}
+	usedIDs := make(map[string]bool, len(next.Nodes)+len(incoming))
 	for i, node := range next.Nodes {
+		if id := strings.TrimSpace(node.ID); id != "" {
+			usedIDs[id] = true
+		}
 		if key := NodeMatchKey(node); key != "" {
 			byKey[key] = i
 		}
@@ -409,6 +413,8 @@ func MergeNodes(current Document, incoming []Node) (Document, map[string]int) {
 			}
 		} else {
 			stats["added"]++
+			node.ID = uniqueImportedNodeID(node, usedIDs)
+			usedIDs[node.ID] = true
 			next.Nodes = append(next.Nodes, node)
 			if importedActiveNodeID == "" && !node.Stale {
 				importedActiveNodeID = node.ID
@@ -427,6 +433,40 @@ func MergeNodes(current Document, incoming []Node) (Document, map[string]int) {
 		}
 	}
 	return next, stats
+}
+
+func uniqueImportedNodeID(node Node, usedIDs map[string]bool) string {
+	base := strings.TrimSpace(node.ID)
+	if base == "" {
+		base = "node"
+	}
+	if !usedIDs[base] {
+		return base
+	}
+	suffix := nodeIDCollisionSuffix(node)
+	candidate := base + "-" + suffix
+	for n := 2; usedIDs[candidate]; n++ {
+		candidate = fmt.Sprintf("%s-%s-%d", base, suffix, n)
+	}
+	return candidate
+}
+
+func nodeIDCollisionSuffix(node Node) string {
+	seed := strings.Join([]string{
+		node.Link,
+		node.Name,
+		node.Protocol,
+		node.Server,
+		strconv.Itoa(node.Port),
+		node.Source.Type,
+		node.Source.ProviderKey,
+		string(node.Outbound),
+	}, "|")
+	sum := 0
+	for _, r := range seed {
+		sum = (sum*31 + int(r)) % 100000
+	}
+	return fmt.Sprintf("%05d", sum)
 }
 
 func normalizeSubscriptions(subscriptions []Subscription, nodes []Node) []Subscription {
@@ -680,6 +720,9 @@ func NodeMatchKey(node Node) string {
 	sourceScope := sourceType
 	if sourceType == "SUBSCRIPTION" {
 		sourceScope += ":" + strings.TrimSpace(node.Source.ProviderKey)
+		if link := strings.TrimSpace(node.Link); link != "" {
+			return sourceScope + "|link:" + link
+		}
 	}
 	id := strings.TrimSpace(node.ID)
 	if id != "" {

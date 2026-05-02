@@ -36,6 +36,10 @@ func main() {
 		os.Exit(0)
 	}
 
+	if cmd == "bridge" {
+		os.Exit(runBridge(os.Stdin, os.Stdout, os.Stderr, socketPathFromEnv()))
+	}
+
 	if isModuleHelperCommand(cmd) {
 		runModuleHelperCommand(cmd)
 		return
@@ -66,10 +70,7 @@ func main() {
 	}
 
 	// Determine socket path.
-	socketPath := os.Getenv("RKNNOVPN_SOCKET")
-	if socketPath == "" {
-		socketPath = modulecontract.NewPaths("").DaemonSocket()
-	}
+	socketPath := socketPathFromEnv()
 
 	// Connect to daemon.
 	conn, err := net.Dial("unix", socketPath)
@@ -105,6 +106,65 @@ func main() {
 		os.Exit(1)
 	}
 	os.Exit(writeResponse(line, opts.rawOutput, os.Stdout, os.Stderr))
+}
+
+func socketPathFromEnv() string {
+	socketPath := os.Getenv("RKNNOVPN_SOCKET")
+	if socketPath == "" {
+		socketPath = modulecontract.NewPaths("").DaemonSocket()
+	}
+	return socketPath
+}
+
+func runBridge(stdin io.Reader, stdout io.Writer, stderr io.Writer, socketPath string) int {
+	reader := bufio.NewReader(stdin)
+	writer := bufio.NewWriter(stdout)
+	defer writer.Flush()
+
+	for {
+		frame, err := readFrame(reader)
+		if err != nil {
+			if err == io.EOF && len(frame) == 0 {
+				return 0
+			}
+			fmt.Fprintf(stderr, "error: read bridge frame: %v\n", err)
+			return 1
+		}
+		if len(frame) == 0 {
+			continue
+		}
+		response, err := proxyFrame(socketPath, frame)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: bridge proxy failed: %v\n", err)
+			return 1
+		}
+		printRaw(writer, response)
+		if err := writer.Flush(); err != nil {
+			fmt.Fprintf(stderr, "error: write bridge response: %v\n", err)
+			return 1
+		}
+	}
+}
+
+func proxyFrame(socketPath string, frame []byte) ([]byte, error) {
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot connect to daemon at %s: %w", socketPath, err)
+	}
+	defer conn.Close()
+
+	request := append(append([]byte{}, frame...), '\n')
+	if _, err := conn.Write(request); err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	response, err := readFrame(bufio.NewReader(conn))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if len(response) == 0 {
+		return nil, fmt.Errorf("daemon closed connection without response")
+	}
+	return response, nil
 }
 
 func writeResponse(line []byte, rawOutput bool, stdout io.Writer, stderr io.Writer) int {
@@ -314,6 +374,7 @@ func moduleHelperCommandDescription(method string) string {
 
 func moduleHelperCommandDescriptions() map[string]string {
 	return map[string]string{
+		"bridge":              "persistent raw JSON-RPC bridge over stdin/stdout",
 		"module.repair":       "local root helper; start daemon repair when IPC is unavailable",
 		"module.repairStatus": "local root helper; report structured app repair status",
 		"module.state":        "local root helper; report module install/profile/daemon state",

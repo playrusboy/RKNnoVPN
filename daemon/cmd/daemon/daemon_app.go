@@ -157,6 +157,9 @@ func newDaemonApp(opts daemonOptions) (*daemonApp, error) {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 	cfg := loadedConfig.Config
+	if loadedConfig.ProfileReset {
+		log.Printf("unsupported profile reset: deleted old profile and initialized a fresh v2 profile: %s", loadedConfig.ResetReason)
+	}
 	log.Printf("config loaded from %s", opts.ConfigPath)
 
 	coreLogger := log.New(log.Writer(), "[core] ", log.LstdFlags)

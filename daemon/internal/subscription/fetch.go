@@ -128,18 +128,31 @@ func (c Client) ApplyRefreshContext(ctx context.Context, rawURL string, current 
 			FetchHeaders: parsed.Fetch.Headers,
 		}, err
 	}
-	if len(parsed.Nodes) == 0 && (parsed.ParseFailures > 0 || len(parsed.Rejected) > 0) {
+	return ApplyPreview(current, PreviewResult{
+		Source:        parsed.Source,
+		Subscription:  parsed.Subscription,
+		Nodes:         parsed.Nodes,
+		RejectedNodes: parsed.Rejected,
+		Rejected:      len(parsed.Rejected),
+		ParseFailures: parsed.ParseFailures,
+		FetchStatus:   parsed.Fetch.Status,
+		FetchHeaders:  parsed.Fetch.Headers,
+	})
+}
+
+func ApplyPreview(current profiledoc.Document, preview PreviewResult) (RefreshResult, error) {
+	if len(preview.Nodes) == 0 && (preview.ParseFailures > 0 || len(preview.RejectedNodes) > 0) {
 		return RefreshResult{
-			Source:        parsed.Source,
-			Subscription:  parsed.Subscription,
-			RejectedNodes: parsed.Rejected,
-			ParseFailures: parsed.ParseFailures,
-			FetchStatus:   parsed.Fetch.Status,
-			FetchHeaders:  parsed.Fetch.Headers,
+			Source:        preview.Source,
+			Subscription:  preview.Subscription,
+			RejectedNodes: preview.RejectedNodes,
+			ParseFailures: preview.ParseFailures,
+			FetchStatus:   preview.FetchStatus,
+			FetchHeaders:  preview.FetchHeaders,
 		}, ErrNoSupportedNodes
 	}
-	next, stats := MergeSubscriptionNodes(current, parsed.Subscription, parsed.Nodes)
-	subscription := parsed.Subscription
+	next, stats := MergeSubscriptionNodes(current, preview.Subscription, preview.Nodes)
+	subscription := preview.Subscription
 	replaced := false
 	for i, existing := range next.Subscriptions {
 		if existing.ProviderKey == subscription.ProviderKey {
@@ -153,15 +166,15 @@ func (c Client) ApplyRefreshContext(ctx context.Context, rawURL string, current 
 		next.Subscriptions = append(next.Subscriptions, subscription)
 	}
 	return RefreshResult{
-		Source:        parsed.Source,
+		Source:        preview.Source,
 		Profile:       next,
 		Subscription:  subscription,
-		Nodes:         parsed.Nodes,
-		RejectedNodes: parsed.Rejected,
+		Nodes:         append([]profiledoc.Node(nil), preview.Nodes...),
+		RejectedNodes: append([]RejectedNode(nil), preview.RejectedNodes...),
 		Merge:         stats,
-		ParseFailures: parsed.ParseFailures,
-		FetchStatus:   parsed.Fetch.Status,
-		FetchHeaders:  parsed.Fetch.Headers,
+		ParseFailures: preview.ParseFailures,
+		FetchStatus:   preview.FetchStatus,
+		FetchHeaders:  preview.FetchHeaders,
 	}, nil
 }
 

@@ -67,7 +67,7 @@ class ProfileRepository @Inject constructor(
     private val mutex = Mutex()
 
     private val _profile = MutableStateFlow<ProfileConfig?>(null)
-    /** Current cached profile, or null if not yet loaded / load failed. */
+    /** Current cached profile, or null if not yet loaded. Kept on transient load failures. */
     val profile: StateFlow<ProfileConfig?> = _profile.asStateFlow()
 
     private val _loading = MutableStateFlow(false)
@@ -112,7 +112,6 @@ class ProfileRepository @Inject constructor(
                     } else {
                         val msg = describeFailure(result)
                         Log.w(TAG, "refresh failed: $msg")
-                        _profile.value = null
                         _error.value = msg
                         null
                     }
@@ -120,7 +119,6 @@ class ProfileRepository @Inject constructor(
                 else -> {
                     val msg = describeFailure(result)
                     Log.w(TAG, "refresh failed: $msg")
-                    _profile.value = null
                     _error.value = msg
                     null
                 }
@@ -170,6 +168,9 @@ class ProfileRepository @Inject constructor(
             if (current.nodes.none { it.id == nodeId && !it.stale }) {
                 _error.value = messages.get(com.rknnovpn.panel.R.string.node_not_found)
                 return@withLock false
+            }
+            if (current.activeNodeId == nodeId) {
+                return@withLock true
             }
             when (val result = client.profileSetActiveNode(nodeId)) {
                 is DaemonClientResult.Ok -> {
@@ -399,12 +400,10 @@ class ProfileRepository @Inject constructor(
                     _profile.value = emptyFirstRunProfile()
                     _error.value = null
                 } else {
-                    _profile.value = null
                     Log.w(TAG, "refreshUnlocked failed: ${describeFailure(result)}")
                 }
             }
             else -> {
-                _profile.value = null
                 Log.w(TAG, "refreshUnlocked failed: ${describeFailure(result)}")
             }
         }
@@ -423,7 +422,6 @@ class ProfileRepository @Inject constructor(
                     true
                 } else {
                     val msg = describeFailure(result)
-                    _profile.value = null
                     _error.value = msg
                     Log.w(TAG, "$tag post-write refresh failed: $msg")
                     false
@@ -431,7 +429,6 @@ class ProfileRepository @Inject constructor(
             }
             else -> {
                 val msg = describeFailure(result)
-                _profile.value = null
                 _error.value = msg
                 Log.w(TAG, "$tag post-write refresh failed: $msg")
                 false
@@ -459,7 +456,6 @@ class ProfileRepository @Inject constructor(
                     emptyProfile
                 } else {
                     val msg = describeFailure(result)
-                    _profile.value = null
                     Log.w(TAG, "refreshUnlockedOrNull failed: $msg")
                     _error.value = msg
                     null
@@ -467,7 +463,6 @@ class ProfileRepository @Inject constructor(
             }
             else -> {
                 val msg = describeFailure(result)
-                _profile.value = null
                 Log.w(TAG, "refreshUnlockedOrNull failed: $msg")
                 _error.value = msg
                 null

@@ -12,6 +12,20 @@ import (
 
 const profileFileName = "profile.json"
 
+type InvalidProfileError struct {
+	Path string
+	Op   string
+	Err  error
+}
+
+func (e InvalidProfileError) Error() string {
+	return fmt.Sprintf("profile: %s %s: %v", e.Op, e.Path, e.Err)
+}
+
+func (e InvalidProfileError) Unwrap() error {
+	return e.Err
+}
+
 func Path(configPath string) string {
 	if override := os.Getenv("RKNNOVPN_PROFILE_PATH"); override != "" {
 		return override
@@ -39,11 +53,11 @@ func Load(path string) (Document, bool, error) {
 	}
 	doc, err := DecodeStrictDocument(data)
 	if err != nil {
-		return Document{}, false, fmt.Errorf("profile: parse %s: %w", path, err)
+		return Document{}, false, InvalidProfileError{Path: path, Op: "parse", Err: err}
 	}
 	normalized, _, err := Normalize(doc)
 	if err != nil {
-		return Document{}, false, fmt.Errorf("profile: validate %s: %w", path, err)
+		return Document{}, false, InvalidProfileError{Path: path, Op: "validate", Err: err}
 	}
 	return normalized, true, nil
 }

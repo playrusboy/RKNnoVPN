@@ -10,6 +10,7 @@ import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.navigation.NavHostController
 import com.rknnovpn.panel.R
 
 /**
@@ -45,4 +46,14 @@ enum class TopLevelRoute(
         selectedIcon = Icons.Filled.Settings,
         unselectedIcon = Icons.Outlined.Settings,
     ),
+}
+
+fun NavHostController.navigateToTopLevelRoute(route: TopLevelRoute) {
+    navigate(route.route) {
+        popUpTo(TopLevelRoute.Dashboard.route) {
+            saveState = true
+        }
+        launchSingleTop = true
+        restoreState = true
+    }
 }

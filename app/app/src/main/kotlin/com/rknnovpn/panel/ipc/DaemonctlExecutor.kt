@@ -5,6 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -20,16 +22,19 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.BufferedReader
+import java.io.BufferedWriter
 import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.io.InterruptedIOException
+import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.concurrent.thread
 import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Low-level executor that shells out to the `daemonctl` binary via `su`.
@@ -69,13 +74,23 @@ class DaemonctlExecutor @Inject constructor() {
     companion object {
         private const val TAG = "DaemonctlExecutor"
         private const val DEFAULT_TIMEOUT_MS = 5_000L
-        private const val INLINE_PARAMS_LIMIT = 16 * 1024
         private const val DAEMON_PATH = "/data/adb/modules/rknnovpn/bin/daemon"
         private const val DAEMON_PID_PATH = "/data/adb/modules/rknnovpn/run/daemon.pid"
         private const val REPAIR_COOLDOWN_MS = 15_000L
         private const val REPAIR_RETRY_DELAY_MS = 1_500L
         private const val REPAIR_RETRY_TIMEOUT_MS = 5_000L
         private const val REPAIR_TOTAL_WAIT_MS = 120_000L
+        private const val BRIDGE_RETRY_COOLDOWN_MS = 15_000L
+        // Keep the single bridge lane for short, frequent calls; long RPCs use
+        // one-shot daemonctl so they cannot block status/compat polling.
+        private val BRIDGE_METHODS = setOf(
+            "backend.status",
+            "compat.check",
+            "config-list",
+            "ipc.contract",
+            "profile.get",
+            "version",
+        )
 
         /** Exit code returned by `su` when the user denies the superuser prompt. */
         private const val SU_DENIED_EXIT_CODE = 13
@@ -83,6 +98,11 @@ class DaemonctlExecutor @Inject constructor() {
 
     @Volatile
     private var lastRepairAttemptAtMs: Long = 0L
+    @Volatile
+    private var bridgeDisabledUntilMs: Long = 0L
+    private val bridgeMutex = Mutex()
+    private var bridgeSession: BridgeSession? = null
+    private var nextBridgeRequestId: Int = 1
 
     /**
      * Execute a single daemonctl JSON-RPC method.
@@ -162,8 +182,8 @@ class DaemonctlExecutor @Inject constructor() {
                 },
             )
         }
-        val useStdin = params.isNotEmpty() &&
-            paramsJson.toByteArray(StandardCharsets.UTF_8).size > INLINE_PARAMS_LIMIT
+        val useStdin = params.isNotEmpty()
+        executeViaBridge(method, params)?.let { return it }
         val commandString = buildDaemonctlCommand(method, paramsJson, useStdin, params.isEmpty())
         Log.d(
             TAG,
@@ -175,6 +195,106 @@ class DaemonctlExecutor @Inject constructor() {
             stdinParams = if (useStdin) paramsJson else null,
             method = method,
         )
+    }
+
+    private suspend fun executeViaBridge(
+        method: String,
+        params: JsonObject,
+    ): DaemonctlResult? {
+        if (!canUseBridge(method)) return null
+        return bridgeMutex.withLock {
+            val now = System.currentTimeMillis()
+            if (now < bridgeDisabledUntilMs) return@withLock null
+            val session = activeBridgeSession()
+                ?: startBridgeSessionOrNull()
+                ?: return@withLock null
+            val requestId = nextBridgeRequestId++
+            val frame = buildJsonObject {
+                put("jsonrpc", "2.0")
+                put("id", requestId)
+                put("method", method)
+                if (params.isNotEmpty()) {
+                    put("params", params)
+                }
+            }.toString()
+            try {
+                Log.d(
+                    TAG,
+                    ">>> daemonctl bridge method=$method params=${if (params.isEmpty()) "none" else "redacted"}"
+                )
+                val stdout = transactBridge(session, frame)
+                if (!stdout.trimStart().startsWith("{")) {
+                    throw IOException("daemonctl bridge returned non-JSON output")
+                }
+                Log.d(TAG, "<<< daemonctl bridge method=$method")
+                parseResponse(exitCode = 0, stdout = stdout, stderr = "", method = method)
+            } catch (e: Exception) {
+                Log.d(TAG, "daemonctl bridge unavailable for $method: ${e.message}")
+                closeBridgeSession("bridge unavailable")
+                bridgeDisabledUntilMs = System.currentTimeMillis() + BRIDGE_RETRY_COOLDOWN_MS
+                null
+            }
+        }
+    }
+
+    private fun canUseBridge(method: String): Boolean =
+        method in BRIDGE_METHODS
+
+    private fun activeBridgeSession(): BridgeSession? =
+        bridgeSession?.takeIf { it.process.isAlive }
+
+    private fun startBridgeSessionOrNull(): BridgeSession? {
+        val commandString = buildDaemonctlBridgeCommand()
+        return try {
+            val process = startRootProcess(commandString)
+            val session = BridgeSession(
+                process = process,
+                stdin = BufferedWriter(OutputStreamWriter(process.outputStream, StandardCharsets.UTF_8)),
+                stdout = BufferedReader(InputStreamReader(process.inputStream, StandardCharsets.UTF_8)),
+            )
+            session.stderrReader = thread(start = true, name = "daemonctl-bridge-stderr") {
+                session.stderr = readStreamSafely(process.errorStream, "bridge-stderr")
+            }
+            bridgeSession = session
+            session
+        } catch (e: Exception) {
+            Log.d(TAG, "daemonctl bridge launch failed: ${e.message}")
+            bridgeDisabledUntilMs = System.currentTimeMillis() + BRIDGE_RETRY_COOLDOWN_MS
+            null
+        }
+    }
+
+    private fun buildDaemonctlBridgeCommand(): String {
+        val prelude = namespaceAwareDaemonctlPrelude()
+        val ctl = daemonctlShellRef()
+        return "$prelude RKNNOVPN_DAEMONCTL_RAW=1 $ctl --raw bridge"
+    }
+
+    private suspend fun transactBridge(session: BridgeSession, frame: String): String =
+        suspendCancellableCoroutine { cont ->
+            cont.invokeOnCancellation {
+                closeBridgeSession("bridge cancelled")
+            }
+            try {
+                session.stdin.write(frame)
+                session.stdin.newLine()
+                session.stdin.flush()
+                val line = session.stdout.readLine()
+                    ?: throw IOException(session.stderr.ifBlank { "daemonctl bridge closed stdout" })
+                if (cont.isActive) {
+                    cont.resume(line)
+                }
+            } catch (e: Exception) {
+                if (cont.isActive) {
+                    cont.resumeWithException(e)
+                }
+            }
+        }
+
+    private fun closeBridgeSession(reason: String) {
+        val session = bridgeSession ?: return
+        bridgeSession = null
+        terminateProcess(session.process, reason)
     }
 
     private fun buildDaemonctlCommand(
@@ -496,7 +616,33 @@ class DaemonctlExecutor @Inject constructor() {
         stderr: String,
         method: String
     ): DaemonctlResult {
-        // su denied
+        // Old daemonctl binary that doesn't know the requested command.
+        // It prints "error: unknown command ..." to stderr and exits 1.
+        // Detect this before trying to parse stdout (which may contain
+        // the usage text and fail JSON parsing).
+        if (exitCode != 0 &&
+            stderr.contains("unknown command", ignoreCase = true)
+        ) {
+            return DaemonctlResult.Error(
+                code = DaemonClientErrorCodes.METHOD_NOT_FOUND,
+                message = "method not found: $method",
+                details = methodNotFoundDetails(method),
+            )
+        }
+
+        var stdoutParseError: Exception? = null
+        if (stdout.isNotBlank()) {
+            try {
+                val jsonElement = json.parseToJsonElement(stdout)
+                return parseJsonResponse(jsonElement, exitCode, stderr, method)
+            } catch (e: Exception) {
+                stdoutParseError = e
+                Log.w(TAG, "Failed to parse stdout as JSON: ${stdout.take(100)}", e)
+            }
+        }
+
+        // su denied. Valid daemon stdout is handled above, so stderr from an
+        // inner daemon/runtime error cannot mask the typed response as RootDenied.
         if (exitCode == SU_DENIED_EXIT_CODE ||
             stderr.contains("permission denied", ignoreCase = true) ||
             stderr.contains("not found", ignoreCase = true) && stderr.contains("su")
@@ -517,42 +663,29 @@ class DaemonctlExecutor @Inject constructor() {
             )
         }
 
-        // Old daemonctl binary that doesn't know the requested command.
-        // It prints "error: unknown command ..." to stderr and exits 1.
-        // Detect this before trying to parse stdout (which may contain
-        // the usage text and fail JSON parsing).
-        if (exitCode != 0 &&
-            stderr.contains("unknown command", ignoreCase = true)
-        ) {
+        if (stdoutParseError != null) {
             return DaemonctlResult.Error(
-                code = DaemonClientErrorCodes.METHOD_NOT_FOUND,
-                message = "method not found: $method",
-                details = methodNotFoundDetails(method),
+                code = -32700,
+                message = "Invalid JSON from daemon: ${stdoutParseError.message}"
             )
         }
 
         // No output at all. New daemons always return a typed IPC envelope;
         // a silent success would make mutating operations look safer than they are.
-        if (stdout.isBlank()) {
-            return DaemonctlResult.Error(
-                code = if (exitCode == 0) -32600 else exitCode,
-                message = stderr.ifBlank {
-                    "Daemon response for $method is missing the typed IPC envelope"
-                },
-            )
-        }
+        return DaemonctlResult.Error(
+            code = if (exitCode == 0) -32600 else exitCode,
+            message = stderr.ifBlank {
+                "Daemon response for $method is missing the typed IPC envelope"
+            },
+        )
+    }
 
-        // Try parsing JSON-RPC response
-        val jsonElement: JsonElement = try {
-            json.parseToJsonElement(stdout)
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse stdout as JSON: ${stdout.take(100)}", e)
-            return DaemonctlResult.Error(
-                code = -32700,
-                message = "Invalid JSON from daemon: ${e.message}"
-            )
-        }
-
+    private fun parseJsonResponse(
+        jsonElement: JsonElement,
+        exitCode: Int,
+        stderr: String,
+        method: String,
+    ): DaemonctlResult {
         val obj = try {
             jsonElement.jsonObject
         } catch (e: Exception) {
@@ -701,6 +834,16 @@ private class RootCommandUnavailableException(
     val summary: String,
     cause: Throwable?,
 ) : IOException("No root command candidate could be launched: $summary", cause)
+
+private class BridgeSession(
+    val process: Process,
+    val stdin: BufferedWriter,
+    val stdout: BufferedReader,
+) {
+    @Volatile
+    var stderr: String = ""
+    lateinit var stderrReader: Thread
+}
 
 /** Convenience alias for an empty JsonObject. */
 fun emptyJsonObject(): JsonObject = JsonObject(emptyMap())

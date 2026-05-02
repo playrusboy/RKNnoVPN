@@ -13,7 +13,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.rknnovpn.panel.ui.navigation.BottomNavBar
 import com.rknnovpn.panel.ui.navigation.NavGraph
-import com.rknnovpn.panel.ui.navigation.TopLevelRoute
+import com.rknnovpn.panel.ui.navigation.navigateToTopLevelRoute
 import com.rknnovpn.panel.ui.theme.RKNnoVPNTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -35,13 +35,7 @@ class MainActivity : ComponentActivity() {
                         BottomNavBar(
                             currentRoute = currentRoute,
                             onNavigate = { route ->
-                                navController.navigate(route.route) {
-                                    popUpTo(TopLevelRoute.Dashboard.route) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
+                                navController.navigateToTopLevelRoute(route)
                             }
                         )
                     }

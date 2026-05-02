@@ -45,7 +45,7 @@ class DaemonClient @Inject constructor(
         const val MIN_CONTROL_PROTOCOL_VERSION = 5
         const val MIN_SCHEMA_VERSION = 5
         val REQUIRED_METHODS: Set<String> = GeneratedDaemonContract.APK_REQUIRED_METHODS
-        private const val COMPATIBILITY_CACHE_TTL_MS = 5_000L
+        private const val COMPATIBILITY_CACHE_TTL_MS = 60_000L
     }
 
     private val json = Json {

@@ -3,6 +3,7 @@ package root
 import (
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +17,36 @@ type fakeProbeIO struct {
 	dnsBootstrap     *bool
 	transparentCalls *int
 	clashCalls       *int
+}
+
+type countingProbeIO struct {
+	active int32
+	max    int32
+}
+
+func (f *countingProbeIO) TCPConnect(host string, port int, timeout time.Duration) (int64, error) {
+	active := atomic.AddInt32(&f.active, 1)
+	for {
+		maxActive := atomic.LoadInt32(&f.max)
+		if active <= maxActive || atomic.CompareAndSwapInt32(&f.max, maxActive, active) {
+			break
+		}
+	}
+	time.Sleep(20 * time.Millisecond)
+	atomic.AddInt32(&f.active, -1)
+	return 12, nil
+}
+
+func (f *countingProbeIO) BootstrapDNS(cfg *config.Config, host string, timeout time.Duration) bool {
+	return true
+}
+
+func (f *countingProbeIO) ClashDelay(apiPort int, outboundTag string, testURL string, timeoutMS int) (int64, int, error) {
+	return 0, 0, nil
+}
+
+func (f *countingProbeIO) TransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int) (URLProbeMetrics, error) {
+	return URLProbeMetrics{}, nil
 }
 
 func (f fakeProbeIO) TCPConnect(host string, port int, timeout time.Duration) (int64, error) {
@@ -144,6 +175,31 @@ func TestRunNodeProbesUsesTransparentURLProbeForActiveNodeWithoutClashAPI(t *tes
 	}
 	if clashCalls != 0 {
 		t.Fatalf("clash probe calls = %d, want 0", clashCalls)
+	}
+}
+
+func TestRunNodeProbesUsesBoundedConcurrency(t *testing.T) {
+	cfg := config.DefaultConfig()
+	for i := 0; i < maxNodeProbeWorkers+3; i++ {
+		cfg.Profile.Nodes = append(cfg.Profile.Nodes, mustRawNode(t, "node-"+string(rune('a'+i))))
+	}
+	io := &countingProbeIO{}
+
+	results := RunNodeProbes(NodeProbeInput{
+		Config:    cfg,
+		State:     core.StateStopped,
+		TimeoutMS: 1000,
+		IO:        io,
+	})
+	if len(results) != maxNodeProbeWorkers+3 {
+		t.Fatalf("results length = %d, want %d", len(results), maxNodeProbeWorkers+3)
+	}
+	maxActive := atomic.LoadInt32(&io.max)
+	if maxActive <= 1 {
+		t.Fatalf("expected probes to run concurrently, max active = %d", maxActive)
+	}
+	if maxActive > maxNodeProbeWorkers {
+		t.Fatalf("max active probes = %d, want <= %d", maxActive, maxNodeProbeWorkers)
 	}
 }
 

@@ -108,6 +108,29 @@ func TestParseVLESSSubscriptionPreservesTransportSettings(t *testing.T) {
 	}
 }
 
+func TestParseSubscriptionMakesDuplicateEndpointIDsUnique(t *testing.T) {
+	body := strings.Join([]string{
+		"vless://00000000-0000-0000-0000-000000000000@example.com:443?type=ws&security=tls&path=%2Fone#one",
+		"vless://00000000-0000-0000-0000-000000000000@example.com:443?type=grpc&security=tls&serviceName=two#two",
+	}, "\n")
+	source := SubscriptionSource{ProviderKey: "https://sub.example/list", URL: "https://sub.example/list"}
+
+	nodes, _, failures, rejected := ParseSubscription(body, nil, source, 123)
+
+	if failures != 0 || len(rejected) != 0 {
+		t.Fatalf("unexpected parse failures=%d rejected=%#v", failures, rejected)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("expected two nodes, got %#v", nodes)
+	}
+	if nodes[0].ID == nodes[1].ID {
+		t.Fatalf("duplicate endpoint ids were not made unique: %#v", nodes)
+	}
+	if !strings.HasPrefix(nodes[1].ID, nodes[0].ID+"-") {
+		t.Fatalf("duplicate id should keep a recognizable stable prefix: %#v", nodes)
+	}
+}
+
 func TestParseShadowsocksSubscriptionCredentials(t *testing.T) {
 	encodedUserInfo := base64.RawURLEncoding.EncodeToString([]byte("chacha20-ietf-poly1305:encoded-secret"))
 	legacyBody := base64.RawStdEncoding.EncodeToString([]byte("aes-192-gcm:legacy-secret@example.com:8388"))

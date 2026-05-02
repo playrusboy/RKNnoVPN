@@ -20,10 +20,12 @@ type ProfileHandlers struct {
 	RuntimeStatus         RuntimeStatusFunc
 	SubscriptionClient    subscription.Client
 	ImportBatches         *ImportBatchStore
+	SubscriptionPreviews  *SubscriptionPreviewCache
 	Now                   func() time.Time
 }
 
 var defaultImportBatchStore = NewImportBatchStore()
+var defaultSubscriptionPreviewCache = NewSubscriptionPreviewCache()
 
 func (h ProfileHandlers) ProfileGet(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	current, rpcErr := h.currentProfile()
@@ -121,6 +123,12 @@ func (h ProfileHandlers) ProfileSetActiveNode(params *json.RawMessage) (interfac
 	current, rpcErr := h.currentProfile()
 	if rpcErr != nil {
 		return nil, rpcErr
+	}
+	if current.ActiveNodeID == request.NodeID {
+		if _, err := profiledoc.SetActiveNode(current, request.NodeID); err != nil {
+			return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
+		}
+		return h.profileNoop(current, "profile.setActiveNode", 0)
 	}
 	next, err := profiledoc.SetActiveNode(current, request.NodeID)
 	if err != nil {
@@ -248,6 +256,7 @@ func (h ProfileHandlers) SubscriptionPreviewContext(ctx context.Context, params 
 	if err != nil {
 		return nil, subscriptionRPCError(request.URL, preview.FetchStatus, preview.FetchHeaders, nil, err)
 	}
+	h.subscriptionPreviewCache().Put(request.URL, preview, h.now())
 	return preview, nil
 }
 
@@ -264,7 +273,13 @@ func (h ProfileHandlers) SubscriptionRefreshContext(ctx context.Context, params 
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
-	refresh, err := h.subscriptionClient().ApplyRefreshContext(ctx, request.URL, current)
+	refresh, err := h.refreshSubscriptionFromPreviewCache(request.URL, current)
+	if err != nil {
+		return nil, subscriptionRPCError(request.URL, refresh.FetchStatus, refresh.FetchHeaders, &refresh, err)
+	}
+	if refresh.Source.URL == "" {
+		refresh, err = h.subscriptionClient().ApplyRefreshContext(ctx, request.URL, current)
+	}
 	if err != nil {
 		return nil, subscriptionRPCError(request.URL, refresh.FetchStatus, refresh.FetchHeaders, &refresh, err)
 	}
@@ -323,6 +338,31 @@ func (h ProfileHandlers) applyProfile(doc profiledoc.Document, reload bool, acti
 	return result, nil
 }
 
+func (h ProfileHandlers) profileNoop(doc profiledoc.Document, action string, updated int) (interface{}, *ipc.RPCError) {
+	status, ok := h.runtimeStatus()
+	if !ok {
+		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "runtime status provider is not configured"}
+	}
+	result := ProfileOperation(
+		action,
+		"noop",
+		false,
+		false,
+		"not_requested",
+		status.AppliedState.Generation,
+		status.AppliedState.Generation,
+		"",
+		"",
+		nil,
+		nil,
+		updated,
+	)
+	result["ok"] = true
+	result["runtimeStatus"] = status
+	result["profile"] = doc
+	return result, nil
+}
+
 func (h ProfileHandlers) currentConfig() (*config.Config, *ipc.RPCError) {
 	if h.CurrentConfig == nil {
 		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "config state provider is not configured"}
@@ -367,6 +407,21 @@ func (h ProfileHandlers) importBatchStore() *ImportBatchStore {
 		return h.ImportBatches
 	}
 	return defaultImportBatchStore
+}
+
+func (h ProfileHandlers) refreshSubscriptionFromPreviewCache(rawURL string, current profiledoc.Document) (subscription.RefreshResult, error) {
+	preview, ok := h.subscriptionPreviewCache().Take(rawURL, h.now())
+	if !ok {
+		return subscription.RefreshResult{}, nil
+	}
+	return subscription.ApplyPreview(current, preview)
+}
+
+func (h ProfileHandlers) subscriptionPreviewCache() *SubscriptionPreviewCache {
+	if h.SubscriptionPreviews != nil {
+		return h.SubscriptionPreviews
+	}
+	return defaultSubscriptionPreviewCache
 }
 
 func (h ProfileHandlers) now() time.Time {
