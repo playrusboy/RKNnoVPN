@@ -86,7 +86,6 @@ class DaemonctlExecutor @Inject constructor() {
         private val BRIDGE_METHODS = setOf(
             "app.resolveUid",
             "backend.status",
-            "compat.check",
             "config-list",
             "ipc.contract",
             "profile.get",

@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.3.5
+
+- Fixed APK startup compatibility checks by keeping `compat.check` on the stable one-shot daemonctl path instead of the experimental bridge path.
+- Explicitly removed transitive `INTERNET`, `ACCESS_NETWORK_STATE`, and `OTHER_SENSORS` permissions from the merged APK manifest.
+- Updated the APK privacy guard to allow only manifest entries that remove forbidden transitive permissions.
+- Synchronized release metadata to `v2.3.5`.
+
 ## v2.3.4
 
 - Enabled fast active-node switching by auto-provisioning the local Clash API for multi-node profiles.

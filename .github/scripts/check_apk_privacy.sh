@@ -15,7 +15,7 @@ check_absent_file() {
   local pattern="$2"
   local file="$3"
 
-  if grep -En -- "${pattern}" "${file}"; then
+  if grep -En -- "${pattern}" "${file}" | grep -Ev 'tools:node="remove"'; then
     echo "::error file=${file},title=${label}::Forbidden APK privacy surface detected"
     fail=1
   fi
@@ -45,6 +45,7 @@ check_present_file() {
 
 check_absent_file "No INTERNET permission" 'android[.]permission[.]INTERNET' "${manifest}"
 check_absent_file "No ACCESS_NETWORK_STATE permission" 'android[.]permission[.]ACCESS_NETWORK_STATE' "${manifest}"
+check_absent_file "No OTHER_SENSORS permission" 'android[.]permission[.]OTHER_SENSORS' "${manifest}"
 check_absent_file "No VPN service permission" 'android[.]permission[.]BIND_VPN_SERVICE' "${manifest}"
 check_absent_file "No VpnService declaration" 'android[.]net[.]VpnService|foregroundServiceType="[^"]*(vpn|dataSync)' "${manifest}"
 
