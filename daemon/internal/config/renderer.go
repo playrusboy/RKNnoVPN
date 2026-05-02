@@ -30,6 +30,20 @@ type storedProfileNode struct {
 	Stale        bool            `json:"stale"`
 }
 
+type ProfileNodeSkip struct {
+	Index  int    `json:"index"`
+	ID     string `json:"id,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Reason string `json:"reason"`
+}
+
+type RuntimeProfileNodeReport struct {
+	Total      int               `json:"total"`
+	Usable     int               `json:"usable"`
+	Renderable int               `json:"renderable"`
+	Skipped    []ProfileNodeSkip `json:"skipped,omitempty"`
+}
+
 // RenderSingboxConfig generates a complete sing-box configuration JSON
 // from the canonical Config and a resolved NodeProfile.
 func RenderSingboxConfig(cfg *Config, profile *NodeProfile) ([]byte, error) {
@@ -724,18 +738,66 @@ func isSupportedShadowsocksMethod(method string) bool {
 }
 
 func ProfilesFromConfigNodes(cfg *Config) []*NodeProfile {
+	profiles, _ := usableProfileNodes(cfg)
+	return profiles
+}
+
+func RuntimeProfileNodeDiagnostics(cfg *Config) RuntimeProfileNodeReport {
+	report := RuntimeProfileNodeReport{}
+	if cfg == nil {
+		return report
+	}
+	profiles, skipped := usableProfileNodes(cfg)
+	report.Total = len(cfg.Profile.Nodes)
+	report.Usable = len(profiles)
+	report.Skipped = append(report.Skipped, skipped...)
+	if len(profiles) == 0 {
+		return report
+	}
+	renderable, renderSkipped, _ := renderableProfileNodesWithSkips(cfg, profiles)
+	report.Renderable = len(renderable)
+	report.Skipped = append(report.Skipped, renderSkipped...)
+	return report
+}
+
+func usableProfileNodes(cfg *Config) ([]*NodeProfile, []ProfileNodeSkip) {
+	if cfg == nil {
+		return nil, nil
+	}
 	profiles := make([]*NodeProfile, 0, len(cfg.Profile.Nodes))
+	skipped := make([]ProfileNodeSkip, 0)
 	for index, raw := range cfg.Profile.Nodes {
 		profile, err := profileFromStoredNode(raw, index)
 		if err != nil {
+			skipped = append(skipped, profileNodeSkip(index, nil, "cannot decode stored node: "+err.Error()))
 			continue
 		}
-		if profile.Stale || profile.Address == "" || profile.Port == 0 || profile.Protocol == "" {
-			continue
+		switch {
+		case profile.Stale:
+			skipped = append(skipped, profileNodeSkip(index, profile, "node is stale"))
+		case profile.Address == "":
+			skipped = append(skipped, profileNodeSkip(index, profile, "server is empty"))
+		case profile.Port == 0:
+			skipped = append(skipped, profileNodeSkip(index, profile, "port is zero"))
+		case profile.Protocol == "":
+			skipped = append(skipped, profileNodeSkip(index, profile, "protocol is empty"))
+		default:
+			profiles = append(profiles, profile)
 		}
-		profiles = append(profiles, profile)
 	}
-	return profiles
+	return profiles, skipped
+}
+
+func profileNodeSkip(index int, profile *NodeProfile, reason string) ProfileNodeSkip {
+	skip := ProfileNodeSkip{
+		Index:  index,
+		Reason: reason,
+	}
+	if profile != nil {
+		skip.ID = profile.ID
+		skip.Name = profile.Name
+	}
+	return skip
 }
 
 // ResolveActiveProfile returns the selected profile node profile, or the
@@ -888,6 +950,17 @@ func profileFromStoredNode(raw json.RawMessage, index int) (*NodeProfile, error)
 }
 
 func renderableProfileNodes(cfg *Config, profiles []*NodeProfile) ([]*NodeProfile, error) {
+	renderable, skippedNodes, err := renderableProfileNodesWithSkips(cfg, profiles)
+	if err != nil {
+		return nil, err
+	}
+	if len(renderable) == 0 && len(profiles) > 0 {
+		return nil, fmt.Errorf("renderer: no usable profile nodes; skipped %d invalid node(s)", len(skippedNodes))
+	}
+	return renderable, nil
+}
+
+func renderableProfileNodesWithSkips(cfg *Config, profiles []*NodeProfile) ([]*NodeProfile, []ProfileNodeSkip, error) {
 	activeID := strings.TrimSpace(cfg.Profile.ActiveNodeID)
 	activeProfile := ResolveActiveProfile(cfg)
 	activeXHTTPID := ""
@@ -895,25 +968,24 @@ func renderableProfileNodes(cfg *Config, profiles []*NodeProfile) ([]*NodeProfil
 		activeXHTTPID = activeProfile.ID
 	}
 	renderable := make([]*NodeProfile, 0, len(profiles))
-	skipped := 0
-	for _, profile := range profiles {
+	skipped := make([]ProfileNodeSkip, 0)
+	for index, profile := range profiles {
 		if RequiresXraySidecar(profile) && profile.ID != activeXHTTPID {
-			skipped++
+			skipped = append(skipped, profileNodeSkip(index, profile, "xhttp sidecar nodes render only when active"))
 			continue
 		}
 		if _, err := buildProxyOutbound(profile); err != nil {
 			if activeID != "" && profile.ID == activeID {
-				return nil, fmt.Errorf("renderer: active node %q is invalid: %w", firstNonEmpty(profile.Name, profile.ID, profile.Address, profile.Tag), err)
+				return nil,
+					[]ProfileNodeSkip{profileNodeSkip(index, profile, fmt.Sprintf("active node is invalid: %v", err))},
+					fmt.Errorf("renderer: active node %q is invalid: %w", firstNonEmpty(profile.Name, profile.ID, profile.Address, profile.Tag), err)
 			}
-			skipped++
+			skipped = append(skipped, profileNodeSkip(index, profile, "invalid sing-box outbound: "+err.Error()))
 			continue
 		}
 		renderable = append(renderable, profile)
 	}
-	if len(renderable) == 0 && len(profiles) > 0 {
-		return nil, fmt.Errorf("renderer: no usable profile nodes; skipped %d invalid node(s)", skipped)
-	}
-	return renderable, nil
+	return renderable, skipped, nil
 }
 
 func normalizeVLESSProfileFlow(profile *NodeProfile) {

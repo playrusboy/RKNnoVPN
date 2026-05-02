@@ -27,6 +27,10 @@ import (
 const (
 	releasesURL = "https://api.github.com/repos/youtubediscord/RKNnoVPN/releases/latest"
 	httpTimeout = 30 * time.Second
+
+	maxModuleDownloadBytes   = 200 * 1024 * 1024
+	maxAPKDownloadBytes      = 100 * 1024 * 1024
+	maxChecksumDownloadBytes = 1 * 1024 * 1024
 )
 
 var ErrNoUpdateAvailable = errors.New("no update available")
@@ -171,6 +175,12 @@ func DownloadUpdate(info *UpdateInfo, destDir string, progress func(downloaded, 
 	if info.ChecksumURL == "" {
 		return nil, fmt.Errorf("updater: release is missing sha256sums.txt")
 	}
+	if err := validateReleaseAssetSize("module.zip", info.ModuleSize, maxModuleDownloadBytes); err != nil {
+		return nil, err
+	}
+	if err := validateReleaseAssetSize("panel.apk", info.ApkSize, maxAPKDownloadBytes); err != nil {
+		return nil, err
+	}
 	if err := cleanupDownloadedArtifacts(destDir); err != nil {
 		return nil, err
 	}
@@ -190,7 +200,7 @@ func DownloadUpdate(info *UpdateInfo, destDir string, progress func(downloaded, 
 	// Download module zip.
 	if info.ModuleURL != "" {
 		p := filepath.Join(destDir, "module.zip")
-		if err := downloadFile(info.ModuleURL, p, report); err != nil {
+		if err := downloadFile(info.ModuleURL, p, info.ModuleSize, maxModuleDownloadBytes, report); err != nil {
 			return nil, fmt.Errorf("updater: download module: %w", err)
 		}
 		result.ModulePath = p
@@ -199,14 +209,14 @@ func DownloadUpdate(info *UpdateInfo, destDir string, progress func(downloaded, 
 	// Download APK.
 	if info.ApkURL != "" {
 		p := filepath.Join(destDir, "panel.apk")
-		if err := downloadFile(info.ApkURL, p, report); err != nil {
+		if err := downloadFile(info.ApkURL, p, info.ApkSize, maxAPKDownloadBytes, report); err != nil {
 			return nil, fmt.Errorf("updater: download apk: %w", err)
 		}
 		result.ApkPath = p
 	}
 
 	checksumPath := filepath.Join(destDir, "SHA256SUMS.txt")
-	if err := downloadFile(info.ChecksumURL, checksumPath, nil); err != nil {
+	if err := downloadFile(info.ChecksumURL, checksumPath, 0, maxChecksumDownloadBytes, nil); err != nil {
 		return nil, fmt.Errorf("updater: download checksums: %w", err)
 	}
 
@@ -343,7 +353,7 @@ func requireRegularArtifact(path string, label string) error {
 
 // downloadFile fetches a URL to a local path, calling onProgress with each
 // chunk's byte count.
-func downloadFile(url, dest string, onProgress func(int64)) error {
+func downloadFile(url, dest string, expectedSize int64, maxSize int64, onProgress func(int64)) error {
 	client := newHTTPClient(10 * time.Minute)
 
 	resp, err := client.Get(url)
@@ -354,6 +364,15 @@ func downloadFile(url, dest string, onProgress func(int64)) error {
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
+	}
+	if maxSize <= 0 {
+		return fmt.Errorf("invalid download size limit for %s", dest)
+	}
+	if resp.ContentLength > maxSize {
+		return fmt.Errorf("content length %d exceeds %d bytes", resp.ContentLength, maxSize)
+	}
+	if expectedSize > 0 && resp.ContentLength > 0 && resp.ContentLength != expectedSize {
+		return fmt.Errorf("content length %d does not match release metadata size %d", resp.ContentLength, expectedSize)
 	}
 
 	tmp := dest + ".tmp"
@@ -373,9 +392,14 @@ func downloadFile(url, dest string, onProgress func(int64)) error {
 	}()
 
 	buf := make([]byte, 64*1024)
+	var written int64
 	for {
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
+			written += int64(n)
+			if written > maxSize {
+				return fmt.Errorf("download exceeded %d bytes", maxSize)
+			}
 			if _, writeErr := f.Write(buf[:n]); writeErr != nil {
 				return writeErr
 			}
@@ -390,6 +414,9 @@ func downloadFile(url, dest string, onProgress func(int64)) error {
 			return readErr
 		}
 	}
+	if expectedSize > 0 && written != expectedSize {
+		return fmt.Errorf("downloaded %d bytes; release metadata expected %d", written, expectedSize)
+	}
 	if err := f.Sync(); err != nil {
 		return err
 	}
@@ -400,6 +427,16 @@ func downloadFile(url, dest string, onProgress func(int64)) error {
 		return err
 	}
 	cleanup = false
+	return nil
+}
+
+func validateReleaseAssetSize(label string, size int64, maxSize int64) error {
+	if size <= 0 {
+		return fmt.Errorf("updater: release metadata has invalid %s size %d", label, size)
+	}
+	if size > maxSize {
+		return fmt.Errorf("updater: %s size %d exceeds %d bytes", label, size, maxSize)
+	}
 	return nil
 }
 

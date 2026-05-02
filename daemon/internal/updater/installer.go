@@ -28,6 +28,10 @@ const SelfExitDelay = 3 * time.Second
 const (
 	DefaultDataDir   = modulecontract.DefaultModuleDir
 	DefaultModuleDir = modulecontract.DefaultModuleDir
+
+	maxExtractedZipBytes = 300 * 1024 * 1024
+	maxExtractedZipFiles = 1024
+	maxExtractedPathDepth = 32
 )
 
 type ModulePreflight struct {
@@ -933,17 +937,36 @@ func extractZip(zipPath, destDir string) error {
 	}
 	defer r.Close()
 
+	cleanDest := filepath.Clean(destDir)
+	var extractedBytes uint64
+	extractedFiles := 0
 	for _, f := range r.File {
+		cleanName := filepath.Clean(f.Name)
+		slashName := filepath.ToSlash(cleanName)
+		if cleanName == "." || filepath.IsAbs(cleanName) || strings.HasPrefix(slashName, "../") || strings.Contains(slashName, "/../") {
+			return fmt.Errorf("zip contains unsafe path %q", f.Name)
+		}
+		if depth := len(strings.Split(strings.Trim(slashName, "/"), "/")); depth > maxExtractedPathDepth {
+			return fmt.Errorf("zip path %q exceeds maximum depth %d", f.Name, maxExtractedPathDepth)
+		}
 		target := filepath.Join(destDir, f.Name)
 
 		// Guard against zip-slip.
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)+string(os.PathSeparator)) {
-			continue
+		if !strings.HasPrefix(filepath.Clean(target), cleanDest+string(os.PathSeparator)) {
+			return fmt.Errorf("zip contains unsafe path %q", f.Name)
 		}
 
 		if f.FileInfo().IsDir() {
 			os.MkdirAll(target, 0755)
 			continue
+		}
+		extractedFiles++
+		if extractedFiles > maxExtractedZipFiles {
+			return fmt.Errorf("zip file count exceeds %d", maxExtractedZipFiles)
+		}
+		extractedBytes += f.UncompressedSize64
+		if extractedBytes > maxExtractedZipBytes {
+			return fmt.Errorf("zip uncompressed size exceeds %d bytes", maxExtractedZipBytes)
 		}
 
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
@@ -961,11 +984,15 @@ func extractZip(zipPath, destDir string) error {
 			return err
 		}
 
-		_, err = io.Copy(outFile, rc)
+		remaining := int64(maxExtractedZipBytes - (extractedBytes - f.UncompressedSize64))
+		written, err := io.Copy(outFile, io.LimitReader(rc, remaining+1))
 		rc.Close()
 		outFile.Close()
 		if err != nil {
 			return err
+		}
+		if written > remaining {
+			return fmt.Errorf("zip uncompressed size exceeds %d bytes", maxExtractedZipBytes)
 		}
 	}
 	return nil

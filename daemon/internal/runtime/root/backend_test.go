@@ -17,6 +17,8 @@ type fakePorts struct {
 	hasProfileNodes bool
 	health          runtimev2.HealthSnapshot
 	reapplyErr      error
+	startErr        error
+	stopErr         error
 
 	startCalls      int
 	stopCalls       int
@@ -33,12 +35,18 @@ func (p *fakePorts) GetState() core.State {
 
 func (p *fakePorts) Start(profile *config.NodeProfile) error {
 	p.startCalls++
+	if p.startErr != nil {
+		return p.startErr
+	}
 	p.state = core.StateRunning
 	return nil
 }
 
 func (p *fakePorts) Stop() error {
 	p.stopCalls++
+	if p.stopErr != nil {
+		return p.stopErr
+	}
 	p.state = core.StateStopped
 	return nil
 }
@@ -132,6 +140,22 @@ func TestBackendStartFailsWithoutRuntimeProfile(t *testing.T) {
 	}
 	if !ports.startFailed {
 		t.Fatalf("missing profile should mark start operation failed")
+	}
+}
+
+func TestBackendRestartFailureMarksStartOperationFailed(t *testing.T) {
+	ports := &fakePorts{
+		state:  core.StateStopped,
+		health: runtimev2.HealthSnapshot{CoreReady: true, RoutingReady: true},
+	}
+	backend := newFakeBackend(ports)
+
+	_, err := backend.Restart(runtimev2.DesiredState{BackendKind: runtimev2.BackendRootTProxy}, 8)
+	if err == nil || !strings.Contains(err.Error(), "no node configured") {
+		t.Fatalf("expected missing node error, got %v", err)
+	}
+	if !ports.startFailed {
+		t.Fatalf("failed restart should mark start operation failed")
 	}
 }
 

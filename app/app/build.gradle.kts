@@ -11,6 +11,25 @@ val releaseStoreFilePath = providers.environmentVariable("RKNNOVPN_RELEASE_STORE
 val releaseStorePassword = providers.environmentVariable("RKNNOVPN_RELEASE_STORE_PASSWORD").orNull
 val releaseKeyAlias = providers.environmentVariable("RKNNOVPN_RELEASE_KEY_ALIAS").orNull
 val releaseKeyPassword = providers.environmentVariable("RKNNOVPN_RELEASE_KEY_PASSWORD").orNull
+val rknnoVpnVersionName = (findProperty("rknnovpn.version") as String?)
+    ?: System.getenv("RKNNOVPN_VERSION")
+    ?: rootProject.file("../VERSION").readText().trim()
+val rknnoVpnVersionCodeOverride = System.getenv("RKNNOVPN_VERSION_CODE")?.toIntOrNull()
+
+fun rknnoVpnVersionCode(versionName: String): Int {
+    val match = Regex("""^v?(\d+)\.(\d+)\.(\d+)(?:-(\d+)-g[0-9a-fA-F]+)?$""").matchEntire(versionName)
+        ?: error("Invalid RKNnoVPN version: $versionName")
+    val major = match.groupValues[1].toInt()
+    val minor = match.groupValues[2].toInt()
+    val patch = match.groupValues[3].toInt()
+    val commits = match.groupValues.getOrNull(4)?.takeIf { it.isNotEmpty() }?.toInt() ?: 0
+    require(minor < 100 && patch < 100 && commits < 100) {
+        "RKNnoVPN version components reserve two digits each: $versionName"
+    }
+    return major * 1_000_000 + minor * 10_000 + patch * 100 + commits
+}
+
+val rknnoVpnVersionCode = rknnoVpnVersionCodeOverride ?: rknnoVpnVersionCode(rknnoVpnVersionName)
 
 android {
     namespace = "com.rknnovpn.panel"
@@ -20,8 +39,8 @@ android {
         applicationId = "com.rknnovpn.panel"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2211
-        versionName = "v2.2.11"
+        versionCode = rknnoVpnVersionCode
+        versionName = rknnoVpnVersionName
 
         vectorDrawables {
             useSupportLibrary = true

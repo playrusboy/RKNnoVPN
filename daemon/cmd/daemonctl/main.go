@@ -14,9 +14,9 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 )
 
-const maxFrameBytes = 16 * 1024 * 1024
+const maxFrameBytes = 2 * 1024 * 1024
 
-var Version = "v2.2.11"
+var Version = "dev"
 
 func main() {
 	if len(os.Args) < 2 {

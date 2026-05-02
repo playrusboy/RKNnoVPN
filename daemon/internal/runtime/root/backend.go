@@ -127,8 +127,11 @@ func (b *Backend) Restart(desired runtimev2.DesiredState, generation int64) (*ru
 	if err != nil {
 		return recoveryReport, err
 	}
-	b.deps.Lifecycle.BeginRuntimeStartOperation()
+	epoch := b.deps.Lifecycle.BeginRuntimeStartOperation()
 	err = b.restart(generation)
+	if err != nil {
+		b.deps.Lifecycle.MarkRuntimeStartFailed(epoch)
+	}
 	if recoveryReport != nil {
 		return recoveryReport, err
 	}

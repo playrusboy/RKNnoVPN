@@ -10,9 +10,15 @@ import (
 	"sort"
 	"sync"
 	"syscall"
+	"time"
 )
 
-const maxFrameBytes = 16 * 1024 * 1024
+const (
+	maxFrameBytes       = 2 * 1024 * 1024
+	maxActiveConnections = 16
+	readTimeout         = 10 * time.Second
+	writeTimeout        = 10 * time.Second
+)
 
 // Handler is a function that processes a JSON-RPC method call.
 // It receives raw params and returns a result or an error.
@@ -27,6 +33,7 @@ type Server struct {
 	done       chan struct{}
 	stopOnce   sync.Once
 	wg         sync.WaitGroup
+	activeConn chan struct{}
 }
 
 // NewServer creates a new IPC server bound to the given socket path.
@@ -35,6 +42,7 @@ func NewServer(socketPath string) *Server {
 		socketPath: socketPath,
 		handlers:   make(map[string]Handler),
 		done:       make(chan struct{}),
+		activeConn: make(chan struct{}, maxActiveConnections),
 	}
 }
 
@@ -108,6 +116,13 @@ func (s *Server) acceptLoop() {
 				continue
 			}
 		}
+		select {
+		case s.activeConn <- struct{}{}:
+		default:
+			log.Printf("ipc: rejecting connection: active connection limit reached")
+			conn.Close()
+			continue
+		}
 		s.wg.Add(1)
 		go s.handleConn(conn)
 	}
@@ -115,6 +130,7 @@ func (s *Server) acceptLoop() {
 
 func (s *Server) handleConn(conn net.Conn) {
 	defer s.wg.Done()
+	defer func() { <-s.activeConn }()
 	defer conn.Close()
 
 	if err := authorizePeer(conn); err != nil {
@@ -124,34 +140,32 @@ func (s *Server) handleConn(conn net.Conn) {
 
 	reader := bufio.NewReader(conn)
 
-	for {
-		line, err := readFrame(reader)
-		if err != nil && err != io.EOF {
-			log.Printf("ipc: read error: %v", err)
-			return
-		}
-		if len(line) == 0 {
-			if err == io.EOF {
-				return
-			}
-			continue
-		}
+	if err := conn.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
+		log.Printf("ipc: set read deadline: %v", err)
+		return
+	}
+	line, err := readFrame(reader)
+	if err != nil && err != io.EOF {
+		log.Printf("ipc: read error: %v", err)
+		return
+	}
+	if len(line) == 0 {
+		return
+	}
 
-		resp := s.processRequest(line)
-		respBytes, err := json.Marshal(resp)
-		if err != nil {
-			log.Printf("ipc: marshal response error: %v", err)
-			continue
-		}
-		respBytes = append(respBytes, '\n')
-		if _, err := conn.Write(respBytes); err != nil {
-			log.Printf("ipc: write error: %v", err)
-			return
-		}
-
-		if err == io.EOF {
-			return
-		}
+	resp := s.processRequest(line)
+	respBytes, err := json.Marshal(resp)
+	if err != nil {
+		log.Printf("ipc: marshal response error: %v", err)
+		return
+	}
+	respBytes = append(respBytes, '\n')
+	if err := conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+		log.Printf("ipc: set write deadline: %v", err)
+		return
+	}
+	if _, err := conn.Write(respBytes); err != nil {
+		log.Printf("ipc: write error: %v", err)
 	}
 }
 

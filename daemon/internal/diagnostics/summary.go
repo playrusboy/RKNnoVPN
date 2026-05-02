@@ -75,18 +75,21 @@ type RuntimeSummary struct {
 }
 
 type ProfileSummary struct {
-	SchemaVersion          int    `json:"schemaVersion"`
-	DesiredGeneration      int64  `json:"desiredGeneration"`
-	AppliedGeneration      int64  `json:"appliedGeneration"`
-	ActiveNodeMode         string `json:"activeNodeMode"`
-	ActiveNodeID           string `json:"activeNodeId,omitempty"`
-	NodeCount              int    `json:"nodeCount"`
-	LiveNodeCount          int    `json:"liveNodeCount"`
-	StaleNodeCount         int    `json:"staleNodeCount"`
-	SubscriptionCount      int    `json:"subscriptionCount"`
-	StaleSubscriptionNodes int    `json:"staleSubscriptionNodes"`
-	LastOperation          string `json:"lastOperation,omitempty"`
-	LastOperationStatus    string `json:"lastOperationStatus,omitempty"`
+	SchemaVersion          int      `json:"schemaVersion"`
+	DesiredGeneration      int64    `json:"desiredGeneration"`
+	AppliedGeneration      int64    `json:"appliedGeneration"`
+	ActiveNodeMode         string   `json:"activeNodeMode"`
+	ActiveNodeID           string   `json:"activeNodeId,omitempty"`
+	NodeCount              int      `json:"nodeCount"`
+	LiveNodeCount          int      `json:"liveNodeCount"`
+	StaleNodeCount         int      `json:"staleNodeCount"`
+	RenderableNodeCount    int      `json:"renderableNodeCount"`
+	SkippedRuntimeNodes    int      `json:"skippedRuntimeNodes,omitempty"`
+	RuntimeWarnings        []string `json:"runtimeWarnings,omitempty"`
+	SubscriptionCount      int      `json:"subscriptionCount"`
+	StaleSubscriptionNodes int      `json:"staleSubscriptionNodes"`
+	LastOperation          string   `json:"lastOperation,omitempty"`
+	LastOperationStatus    string   `json:"lastOperationStatus,omitempty"`
 }
 
 type NodeTestSummary struct {
@@ -249,6 +252,9 @@ func BuildSummaryWithCanonical(
 	}
 	for _, warning := range packageResolution.Warnings {
 		addIssue(warning)
+	}
+	for _, warning := range profileSummary.RuntimeWarnings {
+		addIssue("profile: " + warning)
 	}
 	if summary.NodeTests.TCPOnly > 0 {
 		addIssue("one or more nodes have TCP reachability but failed URL/data-plane checks")
@@ -469,6 +475,13 @@ func ProfileSummaryFromConfig(cfg *config.Config, status runtimev2.Status) Profi
 		} else {
 			summary.LiveNodeCount++
 		}
+	}
+	nodeReport := config.RuntimeProfileNodeDiagnostics(cfg)
+	summary.RenderableNodeCount = nodeReport.Renderable
+	summary.SkippedRuntimeNodes = len(nodeReport.Skipped)
+	for _, skipped := range nodeReport.Skipped {
+		label := firstNonEmptyString(skipped.Name, skipped.ID, fmt.Sprintf("profile.nodes[%d]", skipped.Index))
+		summary.RuntimeWarnings = append(summary.RuntimeWarnings, fmt.Sprintf("%s skipped from runtime config: %s", label, skipped.Reason))
 	}
 	if status.LastOperation != nil {
 		summary.LastOperation = string(status.LastOperation.Kind)

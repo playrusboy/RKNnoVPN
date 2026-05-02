@@ -29,11 +29,12 @@
 set -eu
 
 TAG="rknnovpn:dns"
-SCRIPT_VERSION="v2.2.11"
 SCRIPT_DIR="${0%/*}"
 if [ -f "${SCRIPT_DIR}/lib/rknnovpn_env.sh" ]; then
     . "${SCRIPT_DIR}/lib/rknnovpn_env.sh"
 fi
+SCRIPT_VERSION="$(rknnovpn_module_version 2>/dev/null || true)"
+[ -n "$SCRIPT_VERSION" ] || SCRIPT_VERSION="unknown"
 
 # Sane defaults if the caller omitted something.
 DNS_PORT="${DNS_PORT:-10856}"

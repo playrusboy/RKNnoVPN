@@ -3,9 +3,8 @@
 
 SINGBOX_VERSION ?= stable
 SINGBOX_RESOLVED_VERSION := $(shell if [ "$(SINGBOX_VERSION)" = "stable" ]; then gh release view --repo SagerNet/sing-box --json tagName --jq .tagName 2>/dev/null | sed 's/^v//'; elif [ "$(SINGBOX_VERSION)" = "latest" ] || [ "$(SINGBOX_VERSION)" = "alpha" ] || [ "$(SINGBOX_VERSION)" = "prerelease" ]; then gh release list --repo SagerNet/sing-box --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null | sed 's/^v//'; else echo "$(SINGBOX_VERSION)" | sed 's/^v//'; fi)
-VERSION := $(shell git describe --tags --always 2>/dev/null || echo "dev")
-VERSION_SEMVER := $(shell printf '%s\n' "$(VERSION)" | sed -nE 's/^v([0-9]+)\.([0-9]+)\.([0-9]+)(-([0-9]+)-g[0-9a-fA-F]+)?$$/\1 \2 \3 \5/p')
-VERSION_CODE := $(shell set -- $(VERSION_SEMVER); if [ "$$#" -ge 3 ]; then commits=$${4:-0}; echo $$(( $$1 * 1000 + $$2 * 100 + $$3 + $$commits )); else echo 0; fi)
+VERSION ?= $(shell tools/version.sh current)
+VERSION_CODE := $(shell tools/version.sh code "$(VERSION)" 2>/dev/null || echo 0)
 OUT_DIR := out
 MODULE_DIR := module
 LAB_APK ?= $(OUT_DIR)/rknnovpn-$(VERSION)-panel.apk
@@ -26,15 +25,7 @@ all: daemon singbox module apk
 	@echo "Build complete. Artifacts in $(OUT_DIR)/"
 
 check-version:
-	@if [ -z "$(VERSION_SEMVER)" ]; then \
-		echo "VERSION=$(VERSION) is not a strict vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-N-gHASH value"; \
-		exit 1; \
-	fi
-	@set -- $(VERSION_SEMVER); commits=$${4:-0}; \
-	if [ "$$commits" -gt 99 ]; then \
-		echo "VERSION=$(VERSION) has $$commits commits after the tag; versionCode reserves two digits for post-tag builds"; \
-		exit 1; \
-	fi
+	@tools/version.sh code "$(VERSION)" >/dev/null
 
 # === Go Daemon (Android ABIs) ===
 daemon: daemon-arm64 daemon-armv7
@@ -132,8 +123,8 @@ apk:
 # === Test daemon (host arch, for development) ===
 daemon-host:
 	@echo "=== Building daemon (host arch, for testing) ==="
-	cd daemon && go build -o ../$(OUT_DIR)/daemon-host ./cmd/daemon
-	cd daemon && go build -o ../$(OUT_DIR)/daemonctl-host ./cmd/daemonctl
+	cd daemon && go build -ldflags="-s -w -X main.Version=$(VERSION)" -o ../$(OUT_DIR)/daemon-host ./cmd/daemon
+	cd daemon && go build -ldflags="-s -w -X main.Version=$(VERSION)" -o ../$(OUT_DIR)/daemonctl-host ./cmd/daemonctl
 
 # === Go tests ===
 test:

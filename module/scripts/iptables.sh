@@ -11,12 +11,13 @@ set -eu
 set -f
 
 TAG="RKNnoVPN:iptables"
-SCRIPT_VERSION="v2.2.11"
 SCRIPT_DIR="${0%/*}"
 
 if [ -f "${SCRIPT_DIR}/lib/rknnovpn_env.sh" ]; then
     . "${SCRIPT_DIR}/lib/rknnovpn_env.sh"
 fi
+SCRIPT_VERSION="$(rknnovpn_module_version 2>/dev/null || true)"
+[ -n "$SCRIPT_VERSION" ] || SCRIPT_VERSION="unknown"
 if [ -f "${SCRIPT_DIR}/lib/rknnovpn_netstack.sh" ]; then
     . "${SCRIPT_DIR}/lib/rknnovpn_netstack.sh"
 fi

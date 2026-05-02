@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.3.0
+
+- Added a root `VERSION` file as the single manual release version source for local builds, Android Gradle metadata, and GitHub Actions release stamping.
+- Replaced the colliding APK/module `versionCode` formula with `major * 1000000 + minor * 10000 + patch * 100 + commits` and two-digit validation for minor, patch, and post-tag commit counts.
+- Removed hardcoded daemon, daemonctl, and bundled script release versions from source defaults; release builds stamp daemon binaries and scripts read module metadata at runtime.
+- Synchronized module and update feed metadata to `v2.3.0`.
+
 ## v2.2.11
 
 - Fixed classic DNS interception so redirected `dns-in` traffic is always handled by sing-box DNS instead of falling through to the selected proxy node.

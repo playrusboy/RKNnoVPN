@@ -452,18 +452,9 @@ jobs:
 
       - name: Stamp version in module.prop
         run: |
-          version_code() {
-            local raw="${1#v}"
-            local major minor patch
-            IFS=. read -r major minor patch _ <<< "$raw"
-            major="${major:-0}"
-            minor="${minor:-0}"
-            patch="${patch:-0}"
-            echo $((major * 1000 + minor * 100 + patch))
-          }
           if [[ "${GITHUB_REF_NAME}" == v* ]]; then
             VERSION="${GITHUB_REF_NAME}"
-            CODE="$(version_code "$VERSION")"
+            CODE="$(tools/version.sh code "$VERSION")"
           else
             VERSION="dev-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
             CODE="${GITHUB_RUN_NUMBER}"
@@ -515,26 +506,16 @@ jobs:
 
       - name: Stamp version
         run: |
-          version_code() {
-            local raw="${1#v}"
-            local major minor patch
-            IFS=. read -r major minor patch _ <<< "$raw"
-            major="${major:-0}"
-            minor="${minor:-0}"
-            patch="${patch:-0}"
-            echo $((major * 1000 + minor * 100 + patch))
-          }
           if [[ "${GITHUB_REF_NAME}" == v* ]]; then
             VERSION="${GITHUB_REF_NAME}"
             VER_NAME="$VERSION"
-            VER_CODE="$(version_code "$VERSION")"
+            VER_CODE="$(tools/version.sh code "$VERSION")"
           else
             VER_NAME="dev-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
             VER_CODE="${GITHUB_RUN_NUMBER}"
           fi
-          # Inject version into build.gradle.kts
-          sed -i "s/versionName = \".*\"/versionName = \"${VER_NAME}\"/" app/app/build.gradle.kts
-          sed -i "s/versionCode = [0-9]*/versionCode = ${VER_CODE}/" app/app/build.gradle.kts
+          echo "RKNNOVPN_VERSION=${VER_NAME}" >> "$GITHUB_ENV"
+          echo "RKNNOVPN_VERSION_CODE=${VER_CODE}" >> "$GITHUB_ENV"
 
       - name: Build and sign APK
         working-directory: app
@@ -636,17 +617,8 @@ jobs:
       - name: Update update.json for Magisk manager
         if: steps.version.outputs.stable == 'true'
         run: |
-          version_code() {
-            local raw="${1#v}"
-            local major minor patch
-            IFS=. read -r major minor patch _ <<< "$raw"
-            major="${major:-0}"
-            minor="${minor:-0}"
-            patch="${patch:-0}"
-            echo $((major * 1000 + minor * 100 + patch))
-          }
           VERSION="${{ steps.version.outputs.version }}"
-          VERSION_CODE="$(version_code "$VERSION")"
+          VERSION_CODE="$(tools/version.sh code "$VERSION")"
           cat > update.json <<ENDJSON
           {
             "version": "${VERSION}",

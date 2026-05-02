@@ -487,6 +487,34 @@ append_daemon_log_tail() {
     fi
 }
 
+start_daemon_process() {
+    if command -v nohup >/dev/null 2>&1 && command -v setsid >/dev/null 2>&1; then
+        RKNNOVPN_PROFILE_PATH="$PROFILE_FILE" nohup setsid "${DAEMON_BIN}" \
+            --config "${CONFIG_FILE}" \
+            --data-dir "${RKNNOVPN_DIR}" \
+            >> "${RKNNOVPN_DIR}/logs/daemon.log" 2>&1 &
+        DAEMON_PID=$!
+        return 0
+    fi
+
+    if [ -n "$BUSYBOX" ] && "$BUSYBOX" nohup true >/dev/null 2>&1 && "$BUSYBOX" setsid true >/dev/null 2>&1; then
+        RKNNOVPN_PROFILE_PATH="$PROFILE_FILE" "$BUSYBOX" nohup "$BUSYBOX" setsid "${DAEMON_BIN}" \
+            --config "${CONFIG_FILE}" \
+            --data-dir "${RKNNOVPN_DIR}" \
+            >> "${RKNNOVPN_DIR}/logs/daemon.log" 2>&1 &
+        DAEMON_PID=$!
+        return 0
+    fi
+
+    log_warn "nohup/setsid unavailable; launching daemon as background child"
+    RKNNOVPN_PROFILE_PATH="$PROFILE_FILE" "${DAEMON_BIN}" \
+        --config "${CONFIG_FILE}" \
+        --data-dir "${RKNNOVPN_DIR}" \
+        >> "${RKNNOVPN_DIR}/logs/daemon.log" 2>&1 &
+    DAEMON_PID=$!
+    return 0
+}
+
 # ============================================================================
 # 5. Set resource limits
 # ============================================================================
@@ -542,17 +570,8 @@ launch_daemon() {
 
     rm -f "$DAEMON_SOCKET" "$DAEMON_PID_FILE" 2>/dev/null
 
-    # Launch daemon with nohup + setsid to fully detach from init
-    # - nohup: ignore SIGHUP when terminal closes
-    # - setsid: create new session (no controlling terminal)
-    # stdout/stderr go to daemon log file
     log_info "Starting RKNnoVPN daemon process..."
-    RKNNOVPN_PROFILE_PATH="$PROFILE_FILE" nohup setsid "${DAEMON_BIN}" \
-        --config "${CONFIG_FILE}" \
-        --data-dir "${RKNNOVPN_DIR}" \
-        >> "${RKNNOVPN_DIR}/logs/daemon.log" 2>&1 &
-
-    DAEMON_PID=$!
+    start_daemon_process
     log_info "Daemon process forked with launcher PID ${DAEMON_PID}; waiting for IPC socket"
 
     # Brief wait to check if it crashed immediately

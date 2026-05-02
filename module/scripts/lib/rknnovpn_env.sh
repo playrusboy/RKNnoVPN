@@ -37,6 +37,17 @@ ROUTE_RULE_PREF="${ROUTE_RULE_PREF:-10000}"
 ROUTE_RULE_PREF_V6="${ROUTE_RULE_PREF_V6:-10001}"
 IPT_WAIT="${IPT_WAIT:--w 10}"
 
+rknnovpn_module_version_from_env() {
+    _module_path="${1:-${RKNNOVPN_DIR:-}}"
+    if [ -n "$_module_path" ] && [ -f "${_module_path}/module.prop" ]; then
+        awk -F= '$1=="version"{print $2; exit}' "${_module_path}/module.prop" 2>/dev/null
+    fi
+}
+
+rknnovpn_module_version() {
+    rknnovpn_module_version_from_env "$@"
+}
+
 rknnovpn_log() {
     _level="$1"
     shift
