@@ -25,7 +25,7 @@ func TestCurrentRuntimeTrafficStatsReturnsCachedSnapshot(t *testing.T) {
 	d.traffic = trafficSnapshot{stats: want, checkedAt: time.Now()}
 
 	got := d.currentRuntimeTrafficStats(runtimev2.Status{
-		AppliedState: runtimev2.AppliedState{Phase: runtimev2.PhaseRunning},
+		AppliedState: runtimev2.AppliedState{Phase: runtimev2.PhaseHealthy},
 	})
 	if got != want {
 		t.Fatalf("traffic stats = %#v, want %#v", got, want)
