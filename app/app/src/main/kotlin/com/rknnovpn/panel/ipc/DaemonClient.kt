@@ -45,6 +45,15 @@ class DaemonClient @Inject constructor(
         const val MIN_CONTROL_PROTOCOL_VERSION = 5
         const val MIN_SCHEMA_VERSION = 5
         val REQUIRED_METHODS: Set<String> = GeneratedDaemonContract.APK_REQUIRED_METHODS
+        private val BRIDGE_PARSE_RETRY_METHODS = setOf(
+            "app.resolveUid",
+            "backend.status",
+            "compat.check",
+            "config-list",
+            "ipc.contract",
+            "profile.get",
+            "version",
+        )
     }
 
     private val json = Json {
@@ -521,7 +530,12 @@ class DaemonClient @Inject constructor(
                 requiredMethods.distinct().forEach { add(it) }
             }
         }
-        return call("compat.check", params = params, allowModuleRepair = allowModuleRepair) { element ->
+        return call(
+            "compat.check",
+            params = params,
+            allowModuleRepair = allowModuleRepair,
+            allowBridge = compatibilityCache != null,
+        ) { element ->
             json.parseCompatibilityCheckInfo(element)
         }
     }
@@ -554,11 +568,30 @@ class DaemonClient @Inject constructor(
         params: JsonObject = emptyJsonObject(),
         timeoutMs: Long = 5_000L,
         allowModuleRepair: Boolean = false,
+        allowBridge: Boolean = true,
         transform: (JsonElement) -> T
     ): DaemonClientResult<T> {
-        val result = executor.execute(method, params, timeoutMs, allowModuleRepair)
+        val result = executor.execute(method, params, timeoutMs, allowModuleRepair, allowBridge)
         invalidateCompatibilityCacheOnTransportChange(result)
-        return result.toDaemonClientResult(transform)
+        val converted = result.toDaemonClientResult(transform)
+        if (
+            converted is DaemonClientResult.ParseError &&
+            result is DaemonctlResult.Success &&
+            result.transport == DaemonctlTransport.BRIDGE &&
+            method in BRIDGE_PARSE_RETRY_METHODS
+        ) {
+            executor.disableBridge("parse failure for $method")
+            val retry = executor.execute(
+                method = method,
+                params = params,
+                timeoutMs = timeoutMs,
+                allowModuleRepair = allowModuleRepair,
+                allowBridge = false,
+            )
+            invalidateCompatibilityCacheOnTransportChange(retry)
+            return retry.toDaemonClientResult(transform)
+        }
+        return converted
     }
 
     private fun nodeProbeCallTimeoutMs(selectedNodeCount: Int, perProbeTimeoutMs: Int, mode: String): Long {
@@ -782,10 +815,7 @@ class DaemonClient @Inject constructor(
             is DaemonClientResult.Timeout -> result
             is DaemonClientResult.DaemonNotFound -> result
             is DaemonClientResult.DaemonUnavailable -> result
-            is DaemonClientResult.ParseError -> DaemonClientResult.DaemonError(
-                DaemonClientErrorCodes.COMPATIBILITY,
-                "APK и модуль несовместимы: некорректный ответ compat.check",
-            )
+            is DaemonClientResult.ParseError -> result
             is DaemonClientResult.Failure -> result
         }
     }

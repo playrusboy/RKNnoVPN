@@ -86,6 +86,7 @@ class DaemonctlExecutor @Inject constructor() {
         private val BRIDGE_METHODS = setOf(
             "app.resolveUid",
             "backend.status",
+            "compat.check",
             "config-list",
             "ipc.contract",
             "profile.get",
@@ -662,6 +663,7 @@ class DaemonctlExecutor @Inject constructor() {
                 code = DaemonClientErrorCodes.METHOD_NOT_FOUND,
                 message = "method not found: $method",
                 details = methodNotFoundDetails(method),
+                transport = transport,
             )
         }
 
@@ -701,7 +703,8 @@ class DaemonctlExecutor @Inject constructor() {
         if (stdoutParseError != null) {
             return DaemonctlResult.Error(
                 code = -32700,
-                message = "Invalid JSON from daemon: ${stdoutParseError.message}"
+                message = "Invalid JSON from daemon: ${stdoutParseError.message}",
+                transport = transport,
             )
         }
 
@@ -712,6 +715,7 @@ class DaemonctlExecutor @Inject constructor() {
             message = stderr.ifBlank {
                 "Daemon response for $method is missing the typed IPC envelope"
             },
+            transport = transport,
         )
     }
 
@@ -728,7 +732,8 @@ class DaemonctlExecutor @Inject constructor() {
         } catch (e: Exception) {
             return DaemonctlResult.Error(
                 code = -32700,
-                message = "Expected JSON object, got: ${jsonElement::class.simpleName}"
+                message = "Expected JSON object, got: ${jsonElement::class.simpleName}",
+                transport = transport,
             )
         }
 
@@ -760,6 +765,7 @@ class DaemonctlExecutor @Inject constructor() {
                         code = errJson["code"]?.jsonPrimitive?.int ?: -32600,
                         message = "Daemon error for $method is missing the typed IPC envelope",
                         details = errJson["data"],
+                        transport = transport,
                     )
                 val envelopeError = envelope?.get("error")?.jsonObject
                 DaemonctlResult.Error(

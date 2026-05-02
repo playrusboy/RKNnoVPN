@@ -501,6 +501,9 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
@@ -559,6 +562,7 @@ jobs:
           fi
           echo "APK found: $APK"
           cp "$APK" ../rknnovpn-panel.apk
+          bash ../.github/scripts/check_release_apk_privacy.sh ../rknnovpn-panel.apk
           sha256sum ../rknnovpn-panel.apk
 
       - name: Upload APK
