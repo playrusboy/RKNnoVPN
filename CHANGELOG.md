@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.3.2
+
+- Cached APK compatibility checks by daemon compatibility fingerprint so most RPCs avoid re-fetching the full IPC contract.
+- Exposed `contract_hash`, daemon PID, socket inode, and `compatibility_fingerprint` through daemon version/runtime compatibility metadata.
+- Synchronized release metadata to `v2.3.2`.
+
 ## v2.3.1
 
 - Made `VERSION` the only manual release version source; module metadata is a stamped template and `update.json` remains workflow-generated release feed metadata.
