@@ -601,7 +601,7 @@ class ProfileRepository @Inject constructor(
         preview: SubscriptionImportPreview,
     ): List<Node> {
         if (preview.previewId.isBlank()) {
-            _error.value = messages.get(com.rknnovpn.panel.R.string.subscription_no_supported_links)
+            _error.value = messages.get(com.rknnovpn.panel.R.string.subscription_fetch_failed)
             return emptyList()
         }
         return when (val result = client.subscriptionCommitPreview(preview.previewId)) {
