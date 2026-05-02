@@ -52,7 +52,7 @@ class PollingStatusSource @Inject constructor(
 
     init {
         scope.launch {
-            for (_ in pollRequests) {
+            for (ignoredRequest in pollRequests) {
                 pollOnceSerialized()
             }
         }

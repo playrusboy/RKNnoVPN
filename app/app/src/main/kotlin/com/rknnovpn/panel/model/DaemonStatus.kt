@@ -30,6 +30,7 @@ data class DaemonStatus(
     val activeOperation: RuntimeOperationStatus? = null,
     val lastOperation: RuntimeOperationResult? = null,
     val updateInstall: UpdateInstallState? = null,
+    val updateCheck: CachedUpdateCheckState? = null,
 )
 
 /**

@@ -91,6 +91,7 @@ internal fun BackendStatusV2.toDaemonStatus(
         activeOperation = activeOperation,
         lastOperation = lastOperation,
         updateInstall = updateInstall,
+        updateCheck = updateCheck,
     )
 }
 
